@@ -90,6 +90,16 @@ export const App: React.FC = () => {
       localStorage.setItem('recon_active_tab', currentTab);
     } catch {}
   }, [currentTab]);
+  // Jump-to-live requests from the TopBar LIVE pill.
+  const [liveNonce, setLiveNonce] = useState(0);
+  useEffect(() => {
+    const onGotoLive = () => {
+      setCurrentTab('overview');
+      setLiveNonce((n) => n + 1);
+    };
+    window.addEventListener('recon:goto-live', onGotoLive);
+    return () => window.removeEventListener('recon:goto-live', onGotoLive);
+  }, []);
   const [displayInfo, setDisplayInfo] = useState<DisplayInfo | null>(null);
   const [shortcut, setShortcut] = useState<ShortcutBinding | null>(null);
   const [gpuInfo, setGpuInfo] = useState<GpuInfo | null>(null);
@@ -350,7 +360,10 @@ export const App: React.FC = () => {
                 className="h-full min-h-0"
               >
                 {(currentTab === 'overview' || currentTab === 'matches') && (
-                  <TrackerView initialSubTab={currentTab === 'matches' ? 'matches' : 'overview'} />
+                  <TrackerView
+                    initialSubTab={currentTab === 'matches' ? 'matches' : 'overview'}
+                    liveRequest={liveNonce}
+                  />
                 )}
 
                 {currentTab === 'store' && <StoreView />}

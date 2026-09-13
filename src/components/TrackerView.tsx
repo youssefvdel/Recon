@@ -21,7 +21,10 @@ const TABS: SubTabItem[] = [
   { id: 'live', label: 'Live Match' },
 ];
 
-export const TrackerView: React.FC<{ initialSubTab?: TrackerSubTab }> = ({ initialSubTab = 'overview' }) => {
+export const TrackerView: React.FC<{ initialSubTab?: TrackerSubTab; liveRequest?: number }> = ({
+  initialSubTab = 'overview',
+  liveRequest = 0,
+}) => {
   const [subTab, setSubTab] = useState<TrackerSubTab>(() => {
     try {
       const saved = localStorage.getItem('recon_active_subtab') as TrackerSubTab;
@@ -37,6 +40,11 @@ export const TrackerView: React.FC<{ initialSubTab?: TrackerSubTab }> = ({ initi
       setSubTab(initialSubTab);
     }
   }, [initialSubTab]);
+
+  // Jump requests from the TopBar LIVE pill: land straight on Live Match.
+  useEffect(() => {
+    if (liveRequest > 0) setSubTab('live');
+  }, [liveRequest]);
 
   useEffect(() => {
     try {

@@ -230,6 +230,10 @@ export const LiveMatchView: React.FC = () => {
   }, [matchState, lastActive]);
 
   const isLive = Boolean(effectiveState && (effectiveState.blueTeam.length > 0 || effectiveState.redTeam.length > 0));
+  // Pre-picker status banner: lobby-only. In agent select the picker already
+  // hovered; in-game there is nothing to pick — showing it there would blur
+  // whether the feature is armed. Only the pre-match waiting screen shows it.
+  const isLobbyWaiting = !isLive && !(effectiveState as LiveMatchState | null)?.isPreviousMatch;
 
   // Your team / enemy team, with Deathmatch flattened into one FFA board.
   const teams = useMemo(
@@ -269,17 +273,18 @@ export const LiveMatchView: React.FC = () => {
             <Shield className="w-3.5 h-3.5 text-m3-mint" />
             <span>100% Vanguard Safe • Zero DLL / Game Memory Injections</span>
           </div>
-          {(() => {
-            const prepick = getPrepickConfig();
-            const targetAgent = prepick.defaultAgentName;
-            if (!prepick.enabled || !targetAgent) return null;
-            return (
-              <div className="mt-3 flex items-center gap-2 text-[11px] font-mono font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/25 px-3 py-1.5 rounded-xl">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span>Auto-Hover Ready: {targetAgent}</span>
-              </div>
-            );
-          })()}
+          {isLobbyWaiting &&
+            (() => {
+              const prepick = getPrepickConfig();
+              const targetAgent = prepick.defaultAgentName;
+              if (!prepick.enabled || !targetAgent) return null;
+              return (
+                <div className="mt-3 flex items-center gap-2 text-[11px] font-mono font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/25 px-3 py-1.5 rounded-xl">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>Auto-Hover Ready: {targetAgent}</span>
+                </div>
+              );
+            })()}
         </div>
       ) : teams.isFfa ? (
         <PlayerTable
@@ -383,12 +388,17 @@ const MatchStatusStrip: React.FC<{
         </span>
       </div>
 
-      {/* Safe Pre-pick status badge */}
+      {/* Safe Pre-pick status badge — lobby only.
+          Hidden during Agent Select and in-game: the hover already happened,
+          and the badge is meant as an "is it armed?" reminder while queuing. */}
       {(() => {
         const prepick = getPrepickConfig();
         const mapKey = state.mapName ? state.mapName.toLowerCase() : '';
         const targetAgent = (mapKey && prepick.mapAgents[mapKey]?.agentName) || prepick.defaultAgentName;
         if (!prepick.enabled || !targetAgent) return null;
+        const inAgentSelectOrGame =
+          !state.isPreviousMatch && (state.phase === 'pregame' || state.phase === 'coregame');
+        if (inAgentSelectOrGame) return null;
         return (
           <span
             className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-[9.5px] font-mono font-bold text-emerald-300 shrink-0"

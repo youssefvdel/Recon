@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState, useRef } from 'react';
-import { Lock as LockIcon, Check, Users, Shield, RotateCcw, Move, X, Trophy, EyeOff, Swords, Clock, AlertTriangle, Layers } from 'lucide-react';
+import { Lock as LockIcon, Check, Users, Shield, RotateCcw, Move, X, Trophy, EyeOff, Swords, Clock, AlertTriangle, Layers, Crosshair } from 'lucide-react';
 import type { LiveMatchState, LiveMatchPlayer } from '../types';
 import { fetchLiveMatchState, gameData, matchEndHarvest, harvestMatchNames, isMatchStateEqual } from '../utils/tracker';
 import { useTrackerData } from '../hooks/useTrackerData';
@@ -18,6 +18,7 @@ import { computeMapAgentStats, getRankTierLabel, type AgentStatSummary } from '.
 import { fetchBlitzAgentStats, peekBlitzAgentStats, type BlitzAgentStat } from '../utils/blitzMeta';
 import { getOverlayEditMode, setOverlayEditMode, isTabDown, isTauri } from '../utils/ipc';
 import { listen } from '@tauri-apps/api/event';
+import { getPrepickConfig, PREPICK_MAX_DELAY } from '../utils/prepick';
 
 export interface WidgetPos {
   x: number;
@@ -29,15 +30,19 @@ export interface OverlayConfig {
   showPregame: boolean;
   showTopAgents: boolean;
   showStartingSide?: boolean;
+  /** Lobby-only pre-pick reminder badge. Self-hides unless the Pre-Picker is armed. */
+  showPrepick?: boolean;
   positions: {
     lobby: WidgetPos;
     pregame: WidgetPos;
     topAgents: WidgetPos;
+    prepick?: WidgetPos;
   };
   scales: {
     lobby: number;
     pregame: number;
     topAgents: number;
+    prepick?: number;
   };
 }
 
@@ -54,6 +59,7 @@ export function getDefaultOverlayPositions(): OverlayConfig['positions'] {
       lobby: { x: 22, y: 654 },
       pregame: { x: 767, y: 447 },
       topAgents: { x: 1691, y: 836 },
+      prepick: { x: 10, y: 10 },
     };
   }
 
@@ -70,6 +76,10 @@ export function getDefaultOverlayPositions(): OverlayConfig['positions'] {
       x: Math.max(20, Math.round(w * (1691 / 2088))),
       y: Math.max(40, Math.round(h * (836 / 1440))),
     },
+    prepick: {
+      x: 10,
+      y: 10,
+    },
   };
 }
 
@@ -79,11 +89,13 @@ export function getDefaultOverlayConfig(): OverlayConfig {
     showPregame: true,
     showTopAgents: true,
     showStartingSide: true,
+    showPrepick: true,
     positions: getDefaultOverlayPositions(),
     scales: {
       lobby: 1.0,
       pregame: 1.0,
       topAgents: 1.0,
+      prepick: 1.0,
     },
   };
 }
@@ -372,7 +384,7 @@ export const OverlayView: React.FC = () => {
 
   // Widget config + positions (persisted)
   const [config, setConfig] = useState<OverlayConfig>(() => {
-    const MIGRATION_KEY = 'recon_overlay_cfg_v7_defaults';
+    const MIGRATION_KEY = 'recon_overlay_cfg_v8_defaults';
     const mergeSaved = (saved: string | null) => {
       if (!saved) return null;
       const parsed = JSON.parse(saved);
@@ -390,6 +402,14 @@ export const OverlayView: React.FC = () => {
       if (!localStorage.getItem(MIGRATION_KEY)) {
         localStorage.setItem(MIGRATION_KEY, '1');
         const merged = mergeSaved(saved);
+        // Pre-pick badge moved to the top-left edge after it shipped once, and
+        // its old spot (mid-left) reads as a stray panel. Nudge only that key.
+        if (merged) {
+          merged.positions = {
+            ...merged.positions,
+            prepick: getDefaultOverlayPositions().prepick,
+          };
+        }
         localStorage.setItem('recon_overlay_cfg_v7', JSON.stringify(merged ?? DEFAULT_OVERLAY_CONFIG));
         return merged ?? DEFAULT_OVERLAY_CONFIG;
       }
@@ -519,11 +539,13 @@ export const OverlayView: React.FC = () => {
   const lobbyRef = useRef<HTMLDivElement>(null);
   const pregameRef = useRef<HTMLDivElement>(null);
   const topAgentsRef = useRef<HTMLDivElement>(null);
+  const prepickRef = useRef<HTMLDivElement>(null);
 
   const widgetRefs = {
     lobby: lobbyRef,
     pregame: pregameRef,
     topAgents: topAgentsRef,
+    prepick: prepickRef,
   };
 
   // Native DWM message handling strips non-client borders natively.
@@ -840,10 +862,28 @@ export const OverlayView: React.FC = () => {
   const scoreVisible = config.showLobby && showScorePanel;
   const pregameVisible = config.showPregame && showPregamePanel;
   const topAgentsVisible = config.showTopAgents && (isPregame || isEditMode);
+
+  // Safe Pre-Picker reminder: visible while simply queued (no lobby yet), and
+  // hidden the moment Agent Select or the game starts — the hover is spent by
+  // then, and the badge is a "is it armed?" reminder for the queue wait.
+  // Also hides itself when the Pre-Picker is off, so it never claims "armed".
+  const prepickCfg = getPrepickConfig();
+  const prepickAgent =
+    (matchState?.mapName
+      ? prepickCfg.mapAgents[matchState.mapName.toLowerCase()]?.agentName
+      : '') || prepickCfg.defaultAgentName;
+  const prepickArmed = !!prepickCfg.enabled && !!prepickAgent;
+  const prepickIcon = Object.values(agentMap).find(
+    (a) => a.name.toLowerCase() === prepickAgent.toLowerCase()
+  )?.icon || '';
+  const prepickVisible =
+    !!config.showPrepick &&
+    prepickArmed &&
+    (isEditMode || (!isPregame && !isCoregame && !matchState?.isPreviousMatch));
   useEffect(() => {
     const t = setTimeout(forceRepaint, 80);
     return () => clearTimeout(t);
-  }, [scoreVisible, pregameVisible, topAgentsVisible, forceRepaint]);
+  }, [scoreVisible, pregameVisible, topAgentsVisible, prepickVisible, forceRepaint]);
 
   return (
     <div
@@ -862,11 +902,11 @@ export const OverlayView: React.FC = () => {
             }}
           />
           {/* Screen Boundary Frame so users clearly see their display perimeter */}
-          <div className="fixed inset-3 pointer-events-none border-2 border-dashed border-purple-500/50 rounded-3xl z-40 flex items-start justify-between p-3 select-none">
-            <span className="px-3 py-1 rounded-xl bg-[#0c0816]/95 border border-purple-500/40 text-[10px] font-mono font-bold text-purple-300 shadow-md">
+          <div className="fixed inset-3 pointer-events-none border-2 border-dashed border-m3-primary/40 rounded-3xl z-40 flex items-start justify-between p-3 select-none">
+            <span className="px-3 py-1 rounded-xl bg-m3-surface-container/[0.55] border border-m3-primary/40 text-[10px] font-mono font-bold text-m3-primary shadow-md">
               SCREEN BOUNDS • {typeof window !== 'undefined' ? `${window.innerWidth}×${window.innerHeight}` : 'DISPLAY'}
             </span>
-            <span className="px-3 py-1 rounded-xl bg-[#0c0816]/95 border border-purple-500/40 text-[10px] font-mono font-bold text-zinc-400 shadow-md">
+            <span className="px-3 py-1 rounded-xl bg-m3-surface-container/[0.55] border border-m3-primary/40 text-[10px] font-mono font-bold text-m3-on-surface-variant shadow-md">
               DRAG WIDGETS BY TOP BAR • PRESS ESC TO LOCK
             </span>
           </div>
@@ -877,10 +917,10 @@ export const OverlayView: React.FC = () => {
       {/* EDIT MODE TOP CONTROLS (Center Top)                          */}
       {/* ============================================================ */}
       {isEditMode && (
-        <div className="fixed top-4 inset-x-0 mx-auto w-fit z-50 pointer-events-auto flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-[#0c0816]/95 border border-purple-500/50 shadow-2xl backdrop-blur-xl">
-          <div className="flex items-center gap-2 pr-2 border-r border-white/10">
+        <div className="fixed top-4 inset-x-0 mx-auto w-fit z-50 pointer-events-auto flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-m3-surface-container/[0.55] border border-m3-primary/40 shadow-2xl backdrop-blur-xl">
+          <div className="flex items-center gap-2 pr-2 border-r border-m3-outline-subtle/45">
             <span className="w-2.5 h-2.5 rounded-full bg-m3-mint animate-pulse shadow-[0_0_8px_rgba(58,227,116,0.8)]" />
-            <span className="font-display font-black text-xs text-white tracking-wider uppercase">
+            <span className="font-display font-black text-xs text-m3-on-surface tracking-wider uppercase">
               HUD Edit Mode
             </span>
           </div>
@@ -898,20 +938,20 @@ export const OverlayView: React.FC = () => {
                 },
               });
             }}
-            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors"
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-m3-surface-container-high/60 hover:bg-m3-surface-container-highest border border-m3-outline-subtle/45 text-m3-on-surface-variant hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors"
             title="Center Agent Select in middle of screen"
           >
-            <Move className="w-3.5 h-3.5 text-purple-400" />
+            <Move className="w-3.5 h-3.5 text-m3-primary" />
             <span>Center Agent Select</span>
           </button>
 
           <button
             type="button"
             onClick={() => saveConfig(getDefaultOverlayConfig())}
-            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors"
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-m3-surface-container-high/60 hover:bg-m3-surface-container-highest border border-m3-outline-subtle/45 text-m3-on-surface-variant hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors"
             title="Reset all widget positions to defaults"
           >
-            <RotateCcw className="w-3.5 h-3.5 text-zinc-400" />
+            <RotateCcw className="w-3.5 h-3.5 text-m3-on-surface-variant" />
             <span>Reset All</span>
           </button>
 
@@ -920,7 +960,7 @@ export const OverlayView: React.FC = () => {
             onClick={async () => {
               await setOverlayEditMode(false);
             }}
-            className="px-4 py-1.5 rounded-xl bg-m3-mint text-zinc-950 text-xs font-extrabold shadow-md border border-white/20 hover:brightness-110 flex items-center gap-1.5 cursor-pointer transition-all ml-1"
+            className="px-4 py-1.5 rounded-xl bg-m3-mint text-m3-on-primary text-xs font-extrabold shadow-md border border-white/20 hover:brightness-110 flex items-center gap-1.5 cursor-pointer transition-all ml-1"
           >
             <Check className="w-4 h-4 stroke-[2.5]" />
             <span>Lock HUD (Esc)</span>
@@ -932,39 +972,39 @@ export const OverlayView: React.FC = () => {
       {/* EDIT MODE WIDGETS DRAWER (Top Right Panel)                   */}
       {/* ============================================================ */}
       {isEditMode && (
-        <div className="fixed top-4 right-4 z-50 pointer-events-auto w-72 flex flex-col gap-2 p-3 rounded-3xl bg-[#0c0816]/95 border border-purple-500/50 shadow-2xl backdrop-blur-xl">
-          <div className="flex items-center justify-between px-1 pb-1.5 border-b border-white/10">
-            <span className="font-display font-black text-xs text-white uppercase tracking-wider flex items-center gap-1.5">
+        <div className="fixed top-4 right-4 z-50 pointer-events-auto w-72 flex flex-col gap-2 p-3 rounded-3xl bg-m3-surface-container/[0.55] border border-m3-primary/40 shadow-2xl backdrop-blur-xl">
+          <div className="flex items-center justify-between px-1 pb-1.5 border-b border-m3-outline-subtle/45">
+            <span className="font-display font-black text-xs text-m3-on-surface uppercase tracking-wider flex items-center gap-1.5">
               <Layers className="w-3.5 h-3.5 text-m3-primary" />
               <span>Widgets List</span>
             </span>
-            <span className="text-[10px] font-mono text-purple-300 font-bold">
-              {[config.showPregame, config.showLobby, config.showTopAgents, config.showStartingSide].filter(Boolean).length} / 4 ON
+            <span className="text-[10px] font-mono text-m3-primary font-bold">
+              {[config.showPregame, config.showLobby, config.showTopAgents, config.showPrepick, config.showStartingSide].filter(Boolean).length} / 5 ON
             </span>
           </div>
 
           {/* 1. AGENT SELECT */}
           <div className={`p-2.5 rounded-2xl border transition-all flex flex-col gap-1.5 ${
-            config.showPregame ? 'bg-purple-950/40 border-purple-500/60 shadow-md ring-1 ring-purple-500/40' : 'bg-zinc-900/50 border-white/10 opacity-60'
+            config.showPregame ? 'bg-m3-primary/10 border-m3-primary/45 shadow-md ring-1 ring-m3-primary/40' : 'bg-m3-surface-container-low/70 border-m3-outline-subtle/45 opacity-60'
           }`}>
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-white flex items-center gap-1.5">
+              <span className="text-xs font-bold text-m3-on-surface flex items-center gap-1.5 min-w-0">
                 <Shield className="w-3.5 h-3.5 text-m3-primary" />
                 <span>Agent Select</span>
               </span>
               <button
                 type="button"
                 onClick={() => saveConfig({ ...config, showPregame: !config.showPregame })}
-                className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer ${
+                className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
                   config.showPregame
                     ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
-                    : 'bg-white/5 text-zinc-400 border-white/10'
+                    : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/45'
                 }`}
               >
                 {config.showPregame ? 'ON' : 'OFF'}
               </button>
             </div>
-            <div className="flex items-center justify-between text-[10px] text-zinc-400 font-mono">
+            <div className="flex items-center justify-between text-[10px] text-m3-on-surface-variant font-mono">
               <span>X: {Math.round(config.positions.pregame.x)} Y: {Math.round(config.positions.pregame.y)}</span>
               <button
                 type="button"
@@ -973,7 +1013,7 @@ export const OverlayView: React.FC = () => {
                   showPregame: true,
                   positions: { ...config.positions, pregame: getDefaultOverlayPositions().pregame },
                 })}
-                className="text-purple-300 hover:text-white underline cursor-pointer text-[9px]"
+                className="text-m3-primary hover:text-white underline cursor-pointer text-[9px]"
               >
                 Reset pos
               </button>
@@ -982,26 +1022,26 @@ export const OverlayView: React.FC = () => {
 
           {/* 2. MATCH STATUS (SCOREBOARD) */}
           <div className={`p-2.5 rounded-2xl border transition-all flex flex-col gap-1.5 ${
-            config.showLobby ? 'bg-purple-950/40 border-purple-500/60 shadow-md ring-1 ring-purple-500/40' : 'bg-zinc-900/50 border-white/10 opacity-60'
+            config.showLobby ? 'bg-m3-primary/10 border-m3-primary/45 shadow-md ring-1 ring-m3-primary/40' : 'bg-m3-surface-container-low/70 border-m3-outline-subtle/45 opacity-60'
           }`}>
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-white flex items-center gap-1.5">
+              <span className="text-xs font-bold text-m3-on-surface flex items-center gap-1.5 min-w-0">
                 <Users className="w-3.5 h-3.5 text-m3-gold" />
                 <span>Match Status</span>
               </span>
               <button
                 type="button"
                 onClick={() => saveConfig({ ...config, showLobby: !config.showLobby })}
-                className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer ${
+                className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
                   config.showLobby
                     ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
-                    : 'bg-white/5 text-zinc-400 border-white/10'
+                    : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/45'
                 }`}
               >
                 {config.showLobby ? 'ON' : 'OFF'}
               </button>
             </div>
-            <div className="flex items-center justify-between text-[10px] text-zinc-400 font-mono">
+            <div className="flex items-center justify-between text-[10px] text-m3-on-surface-variant font-mono">
               <span>X: {Math.round(config.positions.lobby.x)} Y: {Math.round(config.positions.lobby.y)}</span>
               <button
                 type="button"
@@ -1010,7 +1050,7 @@ export const OverlayView: React.FC = () => {
                   showLobby: true,
                   positions: { ...config.positions, lobby: getDefaultOverlayPositions().lobby },
                 })}
-                className="text-purple-300 hover:text-white underline cursor-pointer text-[9px]"
+                className="text-m3-primary hover:text-white underline cursor-pointer text-[9px]"
               >
                 Reset pos
               </button>
@@ -1019,26 +1059,26 @@ export const OverlayView: React.FC = () => {
 
           {/* 3. TOP AGENTS */}
           <div className={`p-2.5 rounded-2xl border transition-all flex flex-col gap-1.5 ${
-            config.showTopAgents ? 'bg-purple-950/40 border-purple-500/60 shadow-md ring-1 ring-purple-500/40' : 'bg-zinc-900/50 border-white/10 opacity-60'
+            config.showTopAgents ? 'bg-m3-primary/10 border-m3-primary/45 shadow-md ring-1 ring-m3-primary/40' : 'bg-m3-surface-container-low/70 border-m3-outline-subtle/45 opacity-60'
           }`}>
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-white flex items-center gap-1.5">
+              <span className="text-xs font-bold text-m3-on-surface flex items-center gap-1.5 min-w-0">
                 <Trophy className="w-3.5 h-3.5 text-m3-gold" />
                 <span>Top Agents</span>
               </span>
               <button
                 type="button"
                 onClick={() => saveConfig({ ...config, showTopAgents: !config.showTopAgents })}
-                className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer ${
+                className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
                   config.showTopAgents
                     ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
-                    : 'bg-white/5 text-zinc-400 border-white/10'
+                    : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/45'
                 }`}
               >
                 {config.showTopAgents ? 'ON' : 'OFF'}
               </button>
             </div>
-            <div className="flex items-center justify-between text-[10px] text-zinc-400 font-mono">
+            <div className="flex items-center justify-between text-[10px] text-m3-on-surface-variant font-mono">
               <span>X: {Math.round(config.positions.topAgents.x)} Y: {Math.round(config.positions.topAgents.y)}</span>
               <button
                 type="button"
@@ -1047,31 +1087,55 @@ export const OverlayView: React.FC = () => {
                   showTopAgents: true,
                   positions: { ...config.positions, topAgents: getDefaultOverlayPositions().topAgents },
                 })}
-                className="text-purple-300 hover:text-white underline cursor-pointer text-[9px]"
+                className="text-m3-primary hover:text-white underline cursor-pointer text-[9px]"
               >
                 Reset pos
               </button>
             </div>
           </div>
 
-          {/* 4. STARTING SIDE (ATTACK / DEFENSE) */}
+          {/* 4. SAFE PRE-PICK (LOBBY ONLY, SELF-HIDES WHEN UNARMED) */}
           <div className={`p-2.5 rounded-2xl border transition-all flex items-center justify-between ${
-            config.showStartingSide ? 'bg-purple-950/40 border-purple-500/60 shadow-md ring-1 ring-purple-500/40' : 'bg-zinc-900/50 border-white/10 opacity-60'
+            config.showPrepick ? 'bg-m3-primary/10 border-m3-primary/45 shadow-md ring-1 ring-m3-primary/40' : 'bg-m3-surface-container-low/70 border-m3-outline-subtle/45 opacity-60'
           }`}>
             <div className="flex flex-col">
-              <span className="text-xs font-bold text-white flex items-center gap-1.5">
+              <span className="text-xs font-bold text-m3-on-surface flex items-center gap-1.5 min-w-0">
+                <Crosshair className="w-3.5 h-3.5 text-m3-primary" />
+                <span>Pre-Pick Reminder</span>
+              </span>
+              <span className="text-[10px] text-m3-on-surface-variant">Lobby only • hides in Agent Select & game</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => saveConfig({ ...config, showPrepick: !config.showPrepick })}
+              className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
+                config.showPrepick
+                  ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
+                  : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/45'
+              }`}
+            >
+              {config.showPrepick ? 'ON' : 'OFF'}
+            </button>
+          </div>
+
+          {/* 5. STARTING SIDE (ATTACK / DEFENSE) */}
+          <div className={`p-2.5 rounded-2xl border transition-all flex items-center justify-between ${
+            config.showStartingSide ? 'bg-m3-primary/10 border-m3-primary/45 shadow-md ring-1 ring-m3-primary/40' : 'bg-m3-surface-container-low/70 border-m3-outline-subtle/45 opacity-60'
+          }`}>
+            <div className="flex flex-col">
+              <span className="text-xs font-bold text-m3-on-surface flex items-center gap-1.5 min-w-0">
                 <Shield className="w-3.5 h-3.5 text-m3-mint" />
                 <span>Starting Side (Atk/Def)</span>
               </span>
-              <span className="text-[10px] text-zinc-400">Show in Agent Select & HUD</span>
+              <span className="text-[10px] text-m3-on-surface-variant">Show in Agent Select & HUD</span>
             </div>
             <button
               type="button"
               onClick={() => saveConfig({ ...config, showStartingSide: !config.showStartingSide })}
-              className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer ${
+              className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
                 config.showStartingSide
                   ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
-                  : 'bg-white/5 text-zinc-400 border-white/10'
+                  : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/45'
               }`}
             >
               {config.showStartingSide ? 'ON' : 'OFF'}
@@ -1095,30 +1159,30 @@ export const OverlayView: React.FC = () => {
           }}
           className={`fixed top-0 left-0 ${
             isEditMode ? 'pointer-events-auto' : 'pointer-events-none'
-          } select-none w-[320px] will-change-transform z-10 ${
+          } select-none w-[304px] will-change-transform z-10 ${
             isEditMode
-              ? 'cursor-grab active:cursor-grabbing border-2 border-dashed border-purple-400 bg-purple-950/25 rounded-3xl p-1.5 shadow-[0_0_30px_rgba(168,85,247,0.45)] ring-2 ring-white/30'
+              ? 'cursor-grab active:cursor-grabbing border-2 border-dashed border-m3-primary bg-m3-primary/10 rounded-3xl p-1.5 shadow-[0_0_30px_rgba(168,85,247,0.45)] ring-2 ring-m3-primary/30'
               : ''
           }`}
         >
           {isEditMode && (
             <>
               {/* Corner crosshairs so the bounding box is 100% obvious */}
-              <div className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 border-t-2 border-l-2 border-purple-300 pointer-events-none" />
-              <div className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 border-t-2 border-r-2 border-purple-300 pointer-events-none" />
-              <div className="absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 border-b-2 border-l-2 border-purple-300 pointer-events-none" />
-              <div className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 border-b-2 border-r-2 border-purple-300 pointer-events-none" />
+              <div className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 border-t-2 border-l-2 border-m3-primary pointer-events-none" />
+              <div className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 border-t-2 border-r-2 border-m3-primary pointer-events-none" />
+              <div className="absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 border-b-2 border-l-2 border-m3-primary pointer-events-none" />
+              <div className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 border-b-2 border-r-2 border-m3-primary pointer-events-none" />
 
               <div
                 onPointerDown={(e) => startDrag('lobby', e)}
-                className="mb-1.5 px-3 py-1.5 rounded-2xl bg-purple-600/30 border border-purple-400/60 flex items-center justify-between cursor-grab active:cursor-grabbing text-[11px] font-mono font-bold text-white select-none shadow-md backdrop-blur-md"
+                className="mb-1.5 px-3 py-1.5 rounded-2xl bg-m3-primary-container/50 border border-m3-primary/45 flex items-center justify-between cursor-grab active:cursor-grabbing text-[11px] font-mono font-bold text-m3-on-surface select-none shadow-md backdrop-blur-md"
               >
                 <div className="flex items-center gap-1.5">
-                  <Move className="w-3.5 h-3.5 text-purple-300" />
+                  <Move className="w-3.5 h-3.5 text-m3-primary" />
                   <span>Match Status • ({Math.round(config.positions.lobby.x)}, {Math.round(config.positions.lobby.y)})</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[9px] text-zinc-300 font-normal">Hold to drag</span>
+                  <span className="text-[9px] text-m3-on-surface-variant font-normal">Hold to drag</span>
                   <button
                     type="button"
                     onPointerDown={(e) => e.stopPropagation()}
@@ -1135,7 +1199,7 @@ export const OverlayView: React.FC = () => {
               </div>
               <div
                 onPointerDown={(e) => startResize('lobby', e)}
-                className="absolute -bottom-1 -right-1 w-5 h-5 rounded-br-2xl bg-m3-primary/90 hover:bg-m3-primary cursor-nwse-resize flex items-center justify-center text-[11px] text-zinc-950 font-black select-none shadow-md z-10"
+                className="absolute -bottom-1 -right-1 w-5 h-5 rounded-br-2xl bg-m3-primary/90 hover:bg-m3-primary cursor-nwse-resize flex items-center justify-center text-[11px] text-m3-on-primary font-black select-none shadow-md z-10"
                 title="Drag to resize HUD widget"
               >
                 ↘
@@ -1145,18 +1209,18 @@ export const OverlayView: React.FC = () => {
           <div
             className={`rounded-2xl border p-2.5 shadow-2xl flex flex-col gap-2 transition-all ${
               isEditMode
-                ? 'bg-[#0c0816]/95 border-white/25 shadow-[0_12px_40px_rgba(0,0,0,0.85)] ring-1 ring-white/15 backdrop-blur-xl'
-                : 'bg-[#0c0816]/95 border-white/15 backdrop-blur-xl shadow-2xl'
+                ? 'bg-m3-surface-container/[0.55] border-m3-outline-variant/40 shadow-[0_12px_40px_rgba(0,0,0,0.85)] ring-1 ring-m3-outline-variant/30 backdrop-blur-xl'
+                : 'bg-m3-surface-container/[0.55] border-m3-outline-variant/40 backdrop-blur-xl shadow-2xl'
             }`}
           >
             {/* Header: Map • Mode • Phase + live game status */}
             <div className="flex items-center justify-between px-1 gap-1.5">
               <div className="flex items-center gap-1.5 min-w-0">
-                <span className="text-xs font-display font-black text-white truncate">
+                <span className="text-xs font-display font-black text-m3-on-surface truncate min-w-0">
                   {matchState?.mapName || 'Live Match Status'}
                 </span>
                 {matchState?.mode && (
-                  <span className="text-[10px] font-mono text-zinc-400 truncate">
+                  <span className="text-[10px] font-mono text-m3-on-surface-variant truncate">
                     • {matchState.mode}
                   </span>
                 )}
@@ -1180,14 +1244,14 @@ export const OverlayView: React.FC = () => {
                     {matchState.startingSide === 'Defense' ? 'DEF' : 'ATK'}
                   </span>
                 )}
-                <span className="px-1.5 py-0.5 rounded bg-m3-primary/20 text-m3-primary text-[9px] font-mono font-extrabold uppercase shrink-0">
+                <span className="px-1.5 py-0.5 rounded bg-m3-primary/25 text-m3-primary text-[9px] font-mono font-extrabold uppercase shrink-0">
                   {matchState?.phase === 'coregame' ? 'LIVE' : matchState?.phase === 'pregame' ? 'SELECT' : 'PREVIEW'}
                 </span>
               </div>
             </div>
 
             {/* Column Titles */}
-            <div className="grid grid-cols-[18px_24px_28px_26px_36px_32px_36px_34px] items-center gap-x-1.5 px-2 text-[8.5px] font-mono text-zinc-400 uppercase tracking-wider border-b border-white/10 pb-1 shrink-0">
+            <div className="grid grid-cols-[18px_22px_26px_24px_minmax(32px,1fr)_minmax(30px,1fr)_minmax(32px,1fr)_minmax(32px,1fr)] items-center gap-x-1.5 px-2 text-[8.5px] font-mono text-m3-on-surface-variant uppercase tracking-wider border-b border-m3-outline-subtle/45 pb-1 shrink-0 whitespace-nowrap">
               <span className="text-center" title="Tracker Score tier">TS</span>
               <span className="text-center" title="Agent">Agent</span>
               <span className="text-center">Rank</span>
@@ -1225,10 +1289,10 @@ export const OverlayView: React.FC = () => {
                       tierIcons={tierIcons}
                     />
                   ) : matchState?.phase === 'coregame' ? (
-                    <div className="rounded-xl bg-black/20 border border-white/5 p-2 flex items-center justify-center gap-2 text-center">
-                      <LockIcon className="w-3.5 h-3.5 text-zinc-400" />
-                      <span className="text-[10px] font-semibold text-zinc-300">Enemy Team Hidden</span>
-                      <span className="text-[9px] text-zinc-500">• Visible on match start</span>
+                    <div className="rounded-xl bg-m3-surface-container/[0.45] border border-m3-outline-subtle/45 p-2 flex items-center justify-center gap-2 text-center">
+                      <LockIcon className="w-3.5 h-3.5 text-m3-on-surface-variant" />
+                      <span className="text-[10px] font-semibold text-m3-on-surface-variant">Enemy Team Hidden</span>
+                      <span className="text-[9px] text-m3-outline">• Visible on match start</span>
                     </div>
                   ) : null}
                 </>
@@ -1251,30 +1315,30 @@ export const OverlayView: React.FC = () => {
           }}
           className={`fixed top-0 left-0 ${
             isEditMode ? 'pointer-events-auto' : 'pointer-events-none'
-          } select-none w-[510px] max-w-[96vw] will-change-transform z-10 ${
+          } select-none w-[560px] max-w-[96vw] will-change-transform z-10 ${
             isEditMode
-              ? 'cursor-grab active:cursor-grabbing border-2 border-dashed border-purple-400 bg-purple-950/25 rounded-3xl p-1.5 shadow-[0_0_35px_rgba(168,85,247,0.5)] ring-2 ring-white/30'
+              ? 'cursor-grab active:cursor-grabbing border-2 border-dashed border-m3-primary bg-m3-primary/10 rounded-3xl p-1.5 shadow-[0_0_35px_rgba(168,85,247,0.5)] ring-2 ring-m3-primary/30'
               : ''
           }`}
         >
           {isEditMode && (
             <>
               {/* Corner crosshairs so bounding box is 100% visible */}
-              <div className="absolute -top-1.5 -left-1.5 w-4 h-4 border-t-2 border-l-2 border-purple-300 pointer-events-none" />
-              <div className="absolute -top-1.5 -right-1.5 w-4 h-4 border-t-2 border-r-2 border-purple-300 pointer-events-none" />
-              <div className="absolute -bottom-1.5 -left-1.5 w-4 h-4 border-b-2 border-l-2 border-purple-300 pointer-events-none" />
-              <div className="absolute -bottom-1.5 -right-1.5 w-4 h-4 border-b-2 border-r-2 border-purple-300 pointer-events-none" />
+              <div className="absolute -top-1.5 -left-1.5 w-4 h-4 border-t-2 border-l-2 border-m3-primary pointer-events-none" />
+              <div className="absolute -top-1.5 -right-1.5 w-4 h-4 border-t-2 border-r-2 border-m3-primary pointer-events-none" />
+              <div className="absolute -bottom-1.5 -left-1.5 w-4 h-4 border-b-2 border-l-2 border-m3-primary pointer-events-none" />
+              <div className="absolute -bottom-1.5 -right-1.5 w-4 h-4 border-b-2 border-r-2 border-m3-primary pointer-events-none" />
 
               <div
                 onPointerDown={(e) => startDrag('pregame', e)}
-                className="mb-2 px-3.5 py-1.5 rounded-2xl bg-purple-600/30 border border-purple-400/60 flex items-center justify-between cursor-grab active:cursor-grabbing text-xs font-mono font-bold text-white select-none shadow-md backdrop-blur-md"
+                className="mb-2 px-3.5 py-1.5 rounded-2xl bg-m3-primary-container/50 border border-m3-primary/45 flex items-center justify-between cursor-grab active:cursor-grabbing text-xs font-mono font-bold text-m3-on-surface select-none shadow-md backdrop-blur-md"
               >
                 <div className="flex items-center gap-1.5">
-                  <Move className="w-3.5 h-3.5 text-purple-300" />
+                  <Move className="w-3.5 h-3.5 text-m3-primary" />
                   <span>Agent Select • ({Math.round(config.positions.pregame.x)}, {Math.round(config.positions.pregame.y)})</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-zinc-300 font-normal">Hold to drag</span>
+                  <span className="text-[10px] text-m3-on-surface-variant font-normal">Hold to drag</span>
                   <button
                     type="button"
                     onPointerDown={(e) => e.stopPropagation()}
@@ -1291,7 +1355,7 @@ export const OverlayView: React.FC = () => {
               </div>
               <div
                 onPointerDown={(e) => startResize('pregame', e)}
-                className="absolute -bottom-1 -right-1 w-5 h-5 rounded-br-2xl bg-m3-primary/90 hover:bg-m3-primary cursor-nwse-resize flex items-center justify-center text-[11px] text-zinc-950 font-black select-none shadow-md z-10"
+                className="absolute -bottom-1 -right-1 w-5 h-5 rounded-br-2xl bg-m3-primary/90 hover:bg-m3-primary cursor-nwse-resize flex items-center justify-center text-[11px] text-m3-on-primary font-black select-none shadow-md z-10"
                 title="Drag to resize HUD widget"
               >
                 ↘
@@ -1301,22 +1365,22 @@ export const OverlayView: React.FC = () => {
           <div
             className={`rounded-2xl border p-3 shadow-2xl flex flex-col gap-2 transition-all ${
               isEditMode
-                ? 'bg-[#0c0816]/95 border-white/25 shadow-[0_16px_50px_rgba(0,0,0,0.9)] ring-1 ring-white/15 backdrop-blur-xl'
-                : 'bg-[#0c0816]/95 border-white/15 backdrop-blur-xl shadow-2xl'
+                ? 'bg-m3-surface-container/[0.55] border-m3-outline-variant/40 shadow-[0_16px_50px_rgba(0,0,0,0.9)] ring-1 ring-m3-outline-variant/30 backdrop-blur-xl'
+                : 'bg-m3-surface-container/[0.55] border-m3-outline-variant/40 backdrop-blur-xl shadow-2xl'
             }`}
           >
             {/* Header: Map • Starting Side Badge */}
             <div className="flex items-center justify-between px-1">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="w-2 h-2 rounded-full bg-m3-mint animate-pulse shadow-[0_0_8px_rgba(58,227,116,0.8)]" />
-                <span className="font-display font-black text-white text-xs tracking-wider uppercase">
+                <span className="font-display font-black text-m3-on-surface text-xs tracking-wider uppercase">
                   {matchState?.mapName || 'Ascent'} • Team Scout
                 </span>
                 {/* Precise queue when Riot tells us (Competitive vs Unrated share
                     a ModeID, so `mode` alone can't distinguish them). */}
                 {(queueLabel(matchState?.queueId) || matchState?.mode) && (
                   <span
-                    className="text-[10px] font-mono text-zinc-400 truncate"
+                    className="text-[10px] font-mono text-m3-on-surface-variant truncate"
                     title={matchState?.queueId ? `Queue: ${matchState.queueId}` : undefined}
                   >
                     • {queueLabel(matchState?.queueId) || matchState?.mode}
@@ -1345,7 +1409,7 @@ export const OverlayView: React.FC = () => {
                     )}
                   </span>
                 )}
-                <span className="px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-zinc-300 text-[9px] font-mono font-bold uppercase shrink-0">
+                <span className="px-2 py-0.5 rounded-full bg-m3-surface-container-high/60 border border-m3-outline-subtle/45 text-m3-on-surface-variant text-[9px] font-mono font-bold uppercase shrink-0">
                   {isPregame ? 'Agent Select' : 'Preview'}
                 </span>
               </div>
@@ -1377,30 +1441,30 @@ export const OverlayView: React.FC = () => {
           }}
           className={`fixed top-0 left-0 ${
             isEditMode ? 'pointer-events-auto' : 'pointer-events-none'
-          } select-none w-[370px] will-change-transform z-10 ${
+          } select-none w-[400px] will-change-transform z-10 ${
             isEditMode
-              ? 'cursor-grab active:cursor-grabbing border-2 border-dashed border-purple-400 bg-purple-950/25 rounded-3xl p-1.5 shadow-[0_0_30px_rgba(168,85,247,0.45)] ring-2 ring-white/30'
+              ? 'cursor-grab active:cursor-grabbing border-2 border-dashed border-m3-primary bg-m3-primary/10 rounded-3xl p-1.5 shadow-[0_0_30px_rgba(168,85,247,0.45)] ring-2 ring-m3-primary/30'
               : ''
           }`}
         >
           {isEditMode && (
             <>
               {/* Corner crosshairs so bounding box is 100% visible */}
-              <div className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 border-t-2 border-l-2 border-purple-300 pointer-events-none" />
-              <div className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 border-t-2 border-r-2 border-purple-300 pointer-events-none" />
-              <div className="absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 border-b-2 border-l-2 border-purple-300 pointer-events-none" />
-              <div className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 border-b-2 border-r-2 border-purple-300 pointer-events-none" />
+              <div className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 border-t-2 border-l-2 border-m3-primary pointer-events-none" />
+              <div className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 border-t-2 border-r-2 border-m3-primary pointer-events-none" />
+              <div className="absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 border-b-2 border-l-2 border-m3-primary pointer-events-none" />
+              <div className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 border-b-2 border-r-2 border-m3-primary pointer-events-none" />
 
               <div
                 onPointerDown={(e) => startDrag('topAgents', e)}
-                className="mb-2 px-3.5 py-1.5 rounded-2xl bg-purple-600/30 border border-purple-400/60 flex items-center justify-between cursor-grab active:cursor-grabbing text-xs font-mono font-bold text-white select-none shadow-md backdrop-blur-md"
+                className="mb-2 px-3.5 py-1.5 rounded-2xl bg-m3-primary-container/50 border border-m3-primary/45 flex items-center justify-between cursor-grab active:cursor-grabbing text-xs font-mono font-bold text-m3-on-surface select-none shadow-md backdrop-blur-md"
               >
                 <div className="flex items-center gap-1.5">
-                  <Move className="w-3.5 h-3.5 text-purple-300" />
+                  <Move className="w-3.5 h-3.5 text-m3-primary" />
                   <span>Top Agents • ({Math.round(config.positions.topAgents.x)}, {Math.round(config.positions.topAgents.y)})</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-zinc-300 font-normal">Hold to drag</span>
+                  <span className="text-[10px] text-m3-on-surface-variant font-normal">Hold to drag</span>
                   <button
                     type="button"
                     onPointerDown={(e) => e.stopPropagation()}
@@ -1417,7 +1481,7 @@ export const OverlayView: React.FC = () => {
               </div>
               <div
                 onPointerDown={(e) => startResize('topAgents', e)}
-                className="absolute -bottom-1 -right-1 w-5 h-5 rounded-br-2xl bg-m3-primary/90 hover:bg-m3-primary cursor-nwse-resize flex items-center justify-center text-[11px] text-zinc-950 font-black select-none shadow-md z-10"
+                className="absolute -bottom-1 -right-1 w-5 h-5 rounded-br-2xl bg-m3-primary/90 hover:bg-m3-primary cursor-nwse-resize flex items-center justify-center text-[11px] text-m3-on-primary font-black select-none shadow-md z-10"
                 title="Drag to resize HUD widget"
               >
                 ↘
@@ -1428,15 +1492,15 @@ export const OverlayView: React.FC = () => {
           <div
             className={`rounded-3xl border p-3 shadow-2xl flex flex-col gap-2 transition-all ${
               isEditMode
-                ? 'bg-[#0c0816]/95 border-white/25 shadow-[0_16px_50px_rgba(0,0,0,0.9)] ring-1 ring-white/15 backdrop-blur-xl'
-                : 'bg-[#0c0816]/95 border-white/15 backdrop-blur-xl shadow-2xl'
+                ? 'bg-m3-surface-container/[0.55] border-m3-outline-variant/40 shadow-[0_16px_50px_rgba(0,0,0,0.9)] ring-1 ring-m3-outline-variant/30 backdrop-blur-xl'
+                : 'bg-m3-surface-container/[0.55] border-m3-outline-variant/40 backdrop-blur-xl shadow-2xl'
             }`}
           >
             {/* Header with Map name & Mode toggle */}
             <div className="flex items-center justify-between px-1">
               <div className="flex items-center gap-1.5 min-w-0">
                 <Trophy className="w-3.5 h-3.5 text-m3-gold shrink-0" />
-                <span className="font-display font-black text-white text-xs tracking-wider uppercase truncate">
+                <span className="font-display font-black text-m3-on-surface text-xs tracking-wider uppercase truncate">
                   {showMetaPicks
                     ? `${activeMapName} • Recommended`
                     : personalScope === 'map'
@@ -1451,7 +1515,7 @@ export const OverlayView: React.FC = () => {
                   type="button"
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => setViewMode(showMetaPicks ? 'personal' : 'blitz')}
-                  className="px-2 py-0.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-300 hover:text-white text-[9px] font-mono font-bold uppercase shrink-0 transition-colors flex items-center gap-1 cursor-pointer"
+                  className="px-2 py-0.5 rounded-full bg-m3-surface-container-high/60 hover:bg-m3-surface-container-highest border border-m3-outline-subtle/45 text-m3-on-surface-variant hover:text-white text-[9px] font-mono font-bold uppercase shrink-0 transition-colors flex items-center gap-1 cursor-pointer"
                   title="Toggle between your own agent stats and rank recommended picks"
                 >
                   {showMetaPicks ? (
@@ -1465,8 +1529,8 @@ export const OverlayView: React.FC = () => {
 
             {/* Not enough games on this map to judge — say so instead of guessing */}
             {!showMetaPicks && personalScope === 'all' && (
-              <div className="px-2.5 py-1 rounded-xl bg-white/[0.04] border border-white/10 flex items-center gap-1.5 text-[10px] font-mono text-zinc-300">
-                <AlertTriangle className="w-3 h-3 text-zinc-400 shrink-0" />
+              <div className="px-2.5 py-1 rounded-xl bg-m3-surface-container-high/60 border border-m3-outline-subtle/45 flex items-center gap-1.5 text-[10px] font-mono text-m3-on-surface-variant">
+                <AlertTriangle className="w-3 h-3 text-m3-on-surface-variant shrink-0" />
                 <span>
                   {thinMapSample
                     ? `Only ${mapGames} ${activeMapName} game${mapGames === 1 ? '' : 's'} — showing your full agent pool`
@@ -1478,8 +1542,8 @@ export const OverlayView: React.FC = () => {
             {/* This map has no hand-tuned meta — say so instead of borrowing
                 another map's picks and passing them off as this map's. */}
             {!hasMetaForMap && (
-              <div className="px-2.5 py-1 rounded-xl bg-white/[0.04] border border-white/10 flex items-center gap-1.5 text-[10px] font-mono text-zinc-300">
-                <AlertTriangle className="w-3 h-3 text-zinc-400 shrink-0" />
+              <div className="px-2.5 py-1 rounded-xl bg-m3-surface-container-high/60 border border-m3-outline-subtle/45 flex items-center gap-1.5 text-[10px] font-mono text-m3-on-surface-variant">
+                <AlertTriangle className="w-3 h-3 text-m3-on-surface-variant shrink-0" />
                 <span>No {activeMapName} meta yet — showing your real numbers</span>
               </div>
             )}
@@ -1506,7 +1570,7 @@ export const OverlayView: React.FC = () => {
             {showMetaPicks ? (
               /* RECOMMENDED PICKS FOR THIS MAP AND RANK (NO TIPS) */
               <div className="flex flex-col gap-1.5">
-                <div className="px-1 text-[9px] font-mono text-zinc-400 flex items-center justify-between border-b border-white/5 pb-1">
+                <div className="px-1 text-[9px] font-mono text-m3-on-surface-variant flex items-center justify-between border-b border-m3-outline-subtle/45 pb-1">
                   <span>Blitz Live Meta ({rankTierLabel})</span>
                   <span className="text-m3-mint font-bold">Top 3 · Win% · Pick%</span>
                 </div>
@@ -1522,7 +1586,7 @@ export const OverlayView: React.FC = () => {
                   return (
                     <div
                       key={b.agent}
-                      className="grid grid-cols-[1fr_56px_50px_46px] items-center px-2.5 py-1.5 rounded-xl border border-white/5 bg-white/[0.03] hover:bg-white/[0.06] text-xs transition-colors"
+                      className="grid grid-cols-[1fr_56px_50px_46px] items-center px-2.5 py-1.5 rounded-xl border border-m3-outline-subtle/45 bg-transparent hover:bg-m3-surface-container-high/50 text-xs transition-colors whitespace-nowrap min-w-0"
                     >
                       <div className="flex items-center gap-2 min-w-0 pr-1">
                         {icon ? (
@@ -1533,30 +1597,30 @@ export const OverlayView: React.FC = () => {
                             onError={(e) => {
                               (e.currentTarget as HTMLElement).style.display = 'none';
                             }}
-                            className="w-7 h-7 rounded-lg object-cover shrink-0 border border-white/10 pointer-events-none select-none"
+                            className="w-7 h-7 rounded-lg object-cover shrink-0 border border-m3-outline-subtle/45 pointer-events-none select-none"
                           />
                         ) : (
-                          <div className="w-7 h-7 rounded-lg bg-zinc-800 shrink-0 border border-white/10 flex items-center justify-center text-[10px] font-black text-zinc-400">
+                          <div className="w-7 h-7 rounded-lg bg-m3-surface-container-high shrink-0 border border-m3-outline-subtle/45 flex items-center justify-center text-[10px] font-black text-m3-on-surface-variant">
                             {b.agent.slice(0, 2).toUpperCase()}
                           </div>
                         )}
                         <div className="flex flex-col min-w-0 leading-tight">
-                          <span className="font-bold text-[11px] text-white truncate">{b.agent}</span>
-                          <span className="text-[8px] font-mono text-zinc-400 truncate">{b.role}</span>
+                          <span className="font-bold text-[11px] text-m3-on-surface truncate">{b.agent}</span>
+                          <span className="text-[8px] font-mono text-m3-on-surface-variant truncate">{b.role}</span>
                         </div>
                       </div>
 
                       <div className="text-center" title="Games sampled from Blitz">
-                        <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-400/30 text-[8px] font-mono font-bold uppercase">
+                        <span className="px-1.5 py-0.5 rounded bg-m3-primary/25 text-m3-primary border border-m3-primary/30 text-[8px] font-mono font-bold uppercase">
                           {b.matches >= 1000 ? `${(b.matches / 1000).toFixed(1)}k` : b.matches} G
                         </span>
                       </div>
 
-                      <div className="text-right font-mono text-[10px] font-bold text-m3-mint" title="Lobby Win Rate">
+                      <div className="text-right font-mono text-[10px] font-bold text-m3-mint tabular-nums whitespace-nowrap" title="Lobby Win Rate">
                         {b.winRate}%
                       </div>
 
-                      <div className="text-right font-mono text-[9px] text-zinc-400 font-medium" title="Pick Rate">
+                      <div className="text-right font-mono text-[9px] text-m3-on-surface-variant font-medium tabular-nums whitespace-nowrap" title="Pick Rate">
                         {b.pickRate}%
                       </div>
                     </div>
@@ -1566,7 +1630,7 @@ export const OverlayView: React.FC = () => {
             ) : (
               /* PLAYER'S OWN AGENT STATS */
               <div className="flex flex-col gap-1">
-                <div className="px-1 text-[9px] font-mono text-zinc-400 flex items-center justify-between border-b border-white/5 pb-1 mb-0.5">
+                <div className="px-1 text-[9px] font-mono text-m3-on-surface-variant flex items-center justify-between border-b border-m3-outline-subtle/45 pb-1 mb-0.5">
                   <span>
                     {personalScope === 'map'
                       ? `Your record on ${activeMapName} (${mapGames} games)`
@@ -1579,7 +1643,7 @@ export const OverlayView: React.FC = () => {
                   </span>
                 </div>
                 {/* Column Headers */}
-                <div className="grid grid-cols-[1fr_58px_50px_46px_40px] items-center px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider text-zinc-400 border-b border-white/5">
+                <div className="grid grid-cols-[1fr_58px_50px_46px_40px] items-center px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider text-m3-on-surface-variant border-b border-m3-outline-subtle/45 whitespace-nowrap">
                   <span>Agent</span>
                   <span className="text-right">Matches</span>
                   <span className="text-right">Win%</span>
@@ -1608,7 +1672,7 @@ export const OverlayView: React.FC = () => {
                   return (
                     <div
                       key={stat.agent}
-                      className="grid grid-cols-[1fr_58px_50px_46px_40px] items-center px-2 py-1.5 rounded-xl border border-white/5 bg-white/[0.03] hover:bg-white/[0.06] text-xs transition-colors"
+                      className="grid grid-cols-[1fr_58px_50px_46px_40px] items-center px-2 py-1.5 rounded-xl border border-m3-outline-subtle/45 bg-transparent hover:bg-m3-surface-container-high/50 text-xs transition-colors whitespace-nowrap min-w-0"
                     >
                       {/* Agent Icon & Name */}
                       <div className="flex items-center gap-2 min-w-0 pr-1">
@@ -1620,16 +1684,16 @@ export const OverlayView: React.FC = () => {
                             onError={(e) => {
                               (e.currentTarget as HTMLElement).style.display = 'none';
                             }}
-                            className="w-7 h-7 rounded-lg object-cover shrink-0 border border-white/10 pointer-events-none select-none"
+                            className="w-7 h-7 rounded-lg object-cover shrink-0 border border-m3-outline-subtle/45 pointer-events-none select-none"
                           />
                         ) : (
-                          <div className="w-7 h-7 rounded-lg bg-zinc-800 shrink-0 border border-white/10 flex items-center justify-center text-[10px] font-black text-zinc-400">
+                          <div className="w-7 h-7 rounded-lg bg-m3-surface-container-high shrink-0 border border-m3-outline-subtle/45 flex items-center justify-center text-[10px] font-black text-m3-on-surface-variant">
                             {stat.agent.slice(0, 2).toUpperCase()}
                           </div>
                         )}
                         <div className="flex flex-col min-w-0 flex-1 leading-tight">
-                          <span className="font-bold text-[11px] text-white truncate">{stat.agent}</span>
-                          <span className="text-[8px] font-mono text-zinc-400 truncate">{role}</span>
+                          <span className="font-bold text-[11px] text-m3-on-surface truncate">{stat.agent}</span>
+                          <span className="text-[8px] font-mono text-m3-on-surface-variant truncate">{role}</span>
                         </div>
                       </div>
 
@@ -1638,29 +1702,29 @@ export const OverlayView: React.FC = () => {
                         className="flex flex-col items-end leading-none font-mono"
                         title={`${stat.wins} Wins - ${stat.losses} Losses on ${activeMapName}`}
                       >
-                        <span className="text-[10px] font-bold text-white">{stat.matches}G</span>
-                        <span className="text-[8px] text-zinc-400 mt-0.5">{stat.wins}W-{stat.losses}L</span>
+                        <span className="text-[10px] font-bold text-m3-on-surface">{stat.matches}G</span>
+                        <span className="text-[8px] text-m3-on-surface-variant mt-0.5">{stat.wins}W-{stat.losses}L</span>
                       </div>
 
                       {/* Win % */}
-                      <div className="text-right font-mono text-[10px] font-bold" title="Win Rate">
-                        <span className={stat.winPct >= 50 ? 'text-m3-mint' : 'text-zinc-400'}>
+                      <div className="text-right font-mono text-[10px] font-bold tabular-nums whitespace-nowrap" title="Win Rate">
+                        <span className={stat.winPct >= 50 ? 'text-m3-mint' : 'text-m3-on-surface-variant'}>
                           {stat.winPct.toFixed(1)}%
                         </span>
                       </div>
 
                       {/* K/D — TRN's map segment has no K/D, so only local games can fill it */}
-                      <div className="text-right font-mono text-[10px] font-bold" title="K/D Ratio (last-20 local games)">
+                      <div className="text-right font-mono text-[10px] font-bold tabular-nums whitespace-nowrap" title="K/D Ratio (last-20 local games)">
                         {stat.kd > 0 ? (
                           <span className={kdColor}>{kd}</span>
                         ) : (
-                          <span className="text-zinc-600">—</span>
+                          <span className="text-m3-outline/70">—</span>
                         )}
                       </div>
 
                       {/* HS% */}
-                      <div className="text-right font-mono text-[10px] text-amber-200/90 font-medium" title="Headshot %">
-                        {stat.hsPct > 0 ? `${stat.hsPct.toFixed(0)}%` : <span className="text-zinc-600">—</span>}
+                      <div className="text-right font-mono text-[10px] text-amber-200/90 font-medium tabular-nums whitespace-nowrap" title="Headshot %">
+                        {stat.hsPct > 0 ? `${stat.hsPct.toFixed(0)}%` : <span className="text-m3-outline/70">—</span>}
                       </div>
                     </div>
                   );
@@ -1669,7 +1733,7 @@ export const OverlayView: React.FC = () => {
                 {/* No winning agent here → suggest the rank meta WITHOUT hiding
                     the player's own list. */}
                 {!hasWinningAgentOnMap && personalScope !== 'preview' && (
-                  <div className="mt-1 pt-1.5 border-t border-white/10 flex flex-col gap-1">
+                  <div className="mt-1 pt-1.5 border-t border-m3-outline-subtle/45 flex flex-col gap-1">
                     <div className="px-1 flex items-center justify-between text-[9px] font-mono">
                       <span className="flex items-center gap-1 text-amber-300">
                         <AlertTriangle className="w-3 h-3 shrink-0" />
@@ -1679,7 +1743,7 @@ export const OverlayView: React.FC = () => {
                         type="button"
                         onPointerDown={(e) => e.stopPropagation()}
                         onClick={() => setViewMode('blitz')}
-                        className="text-zinc-400 hover:text-white underline font-bold cursor-pointer shrink-0"
+                        className="text-m3-on-surface-variant hover:text-white underline font-bold cursor-pointer shrink-0"
                       >
                         All
                       </button>
@@ -1691,7 +1755,7 @@ export const OverlayView: React.FC = () => {
                       return (
                         <div
                           key={b.agent}
-                          className="grid grid-cols-[1fr_52px_44px] items-center px-2 py-1 rounded-lg border border-amber-400/15 bg-amber-400/[0.04]"
+                          className="grid grid-cols-[1fr_52px_44px] items-center px-2 py-1 rounded-lg border border-amber-400/15 bg-amber-400/[0.04] whitespace-nowrap"
                         >
                           <div className="flex items-center gap-2 min-w-0">
                             {meta?.icon ? (
@@ -1699,20 +1763,20 @@ export const OverlayView: React.FC = () => {
                                 src={meta.icon}
                                 alt=""
                                 draggable={false}
-                                className="w-6 h-6 rounded-md object-cover shrink-0 border border-white/10 pointer-events-none select-none"
+                                className="w-6 h-6 rounded-md object-cover shrink-0 border border-m3-outline-subtle/45 pointer-events-none select-none"
                               />
                             ) : (
-                              <div className="w-6 h-6 rounded-md bg-zinc-800 shrink-0 border border-white/10" />
+                              <div className="w-6 h-6 rounded-md bg-m3-surface-container-high shrink-0 border border-m3-outline-subtle/45" />
                             )}
-                            <span className="font-bold text-[10px] text-white truncate">{b.agent}</span>
-                            <span className="px-1 py-px rounded bg-purple-500/20 text-purple-300 border border-purple-400/30 text-[7px] font-mono font-bold uppercase shrink-0">
+                            <span className="font-bold text-[10px] text-m3-on-surface truncate">{b.agent}</span>
+                            <span className="px-1 py-px rounded bg-m3-primary/25 text-m3-primary border border-m3-primary/30 text-[7px] font-mono font-bold uppercase shrink-0">
                               {b.matches >= 1000 ? `${(b.matches / 1000).toFixed(1)}k` : b.matches}g
                             </span>
                           </div>
-                          <span className="text-right font-mono text-[10px] font-bold text-m3-mint" title="Win rate">
+                          <span className="text-right font-mono text-[10px] font-bold text-m3-mint tabular-nums whitespace-nowrap" title="Win rate">
                             {b.winRate}%
                           </span>
-                          <span className="text-right font-mono text-[9px] text-zinc-400" title="Pick rate">
+                          <span className="text-right font-mono text-[9px] text-m3-on-surface-variant tabular-nums whitespace-nowrap" title="Pick rate">
                             {b.pickRate}%
                           </span>
                         </div>
@@ -1722,6 +1786,82 @@ export const OverlayView: React.FC = () => {
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* WIDGET 5: Safe Pre-Picker reminder (lobby only)              */}
+      {/* ============================================================ */}
+      {prepickVisible && (
+        <div
+          ref={prepickRef}
+          onPointerDown={(e) => startDrag('prepick', e)}
+          style={{
+            transform: `translate3d(${config.positions.prepick?.x ?? 22}px, ${config.positions.prepick?.y ?? 520}px, 0) scale(${config.scales?.prepick ?? 1.0})`,
+            transformOrigin: 'top left',
+            touchAction: 'none',
+          }}
+          className={`fixed top-0 left-0 ${
+            isEditMode ? 'pointer-events-auto' : 'pointer-events-none'
+          } select-none will-change-transform z-10 ${
+            isEditMode
+              ? 'cursor-grab active:cursor-grabbing border-2 border-dashed border-m3-primary bg-m3-primary/10 rounded-3xl p-1.5 shadow-[0_0_30px_rgba(182,171,247,0.45)] ring-2 ring-white/20'
+              : ''
+          }`}
+        >
+          {isEditMode && (
+            <div
+              onPointerDown={(e) => startDrag('prepick', e)}
+              className="mb-2 px-3.5 py-1.5 rounded-2xl bg-m3-primary-container/50 border border-m3-primary/40 flex items-center justify-between cursor-grab active:cursor-grabbing text-[11px] font-mono font-bold text-m3-on-surface select-none shadow-m3-1 backdrop-blur-md"
+            >
+              <div className="flex items-center gap-1.5">
+                <Move className="w-3.5 h-3.5 text-m3-primary" />
+                <span>
+                  Pre-Pick • ({Math.round(config.positions.prepick?.x ?? 10)},{' '}
+                  {Math.round(config.positions.prepick?.y ?? 10)})
+                </span>
+              </div>
+              <button
+                type="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  saveConfig({ ...config, showPrepick: false });
+                }}
+                className="w-5 h-5 rounded-lg bg-red-500/30 hover:bg-red-500/50 border border-red-500/40 text-red-200 hover:text-white flex items-center justify-center cursor-pointer transition-colors"
+                title="Remove Pre-Pick badge from screen"
+              >
+                <X className="w-3.5 h-3.5 stroke-[2.5]" />
+              </button>
+            </div>
+          )}
+
+          <div className="rounded-2xl border border-m3-outline-variant/40 bg-m3-surface-container/[0.55] backdrop-blur-2xl shadow-m3-2 px-3 py-2.5 flex items-center gap-2.5">
+            {prepickIcon ? (
+              <img
+                src={prepickIcon}
+                alt=""
+                draggable={false}
+                className="w-9 h-9 rounded-xl object-cover shrink-0 border border-m3-outline-variant/40 bg-m3-surface-container-high/60 pointer-events-none select-none"
+              />
+            ) : (
+              <div className="w-9 h-9 rounded-xl shrink-0 border border-m3-outline-variant/40 bg-m3-surface-container-high/60 flex items-center justify-center">
+                <Crosshair className="w-4 h-4 text-m3-primary" />
+              </div>
+            )}
+            <div className="flex flex-col leading-tight min-w-0">
+              <span className="font-display font-bold text-[11px] text-m3-on-surface-variant tracking-wider uppercase">
+                Pre-Pick Armed
+              </span>
+              <span className="font-mono text-[11px] text-m3-on-surface font-bold truncate">
+                {prepickAgent}
+                {prepickCfg.pickDelaySec < PREPICK_MAX_DELAY ? (
+                  <span className="text-m3-outline font-normal"> • {prepickCfg.pickDelaySec}s</span>
+                ) : null}
+              </span>
+            </div>
+            <span className="ml-1 w-1.5 h-1.5 rounded-full bg-m3-mint animate-pulse shrink-0" />
           </div>
         </div>
       )}
@@ -1740,7 +1880,7 @@ const PregameTeamColumn: React.FC<{
   return (
     <div className="flex flex-col gap-1.5 pointer-events-none select-none">
       {/* Table Column Headers: Score badge, Player, Rank, Peak, K/D, Win%, HS% */}
-      <div className="grid grid-cols-[26px_1fr_40px_40px_48px_50px_48px] items-center px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-zinc-400 border-b border-white/10">
+      <div className="grid grid-cols-[26px_1fr_40px_40px_48px_50px_48px] items-center px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-m3-on-surface-variant border-b border-m3-outline-subtle/45 whitespace-nowrap">
         <span className="text-center" title="Tracker Score tier">TS</span>
         <span>Player</span>
         <span className="text-center">Rank</span>
@@ -1765,12 +1905,12 @@ const PregameTeamColumn: React.FC<{
           return (
             <div
               key={p.puuid}
-              className={`relative overflow-hidden grid grid-cols-[26px_1fr_40px_40px_48px_50px_48px] items-center px-2.5 py-1 rounded-xl border text-xs transition-colors ${
+              className={`relative overflow-hidden grid grid-cols-[26px_1fr_40px_40px_48px_50px_48px] items-center px-2.5 py-1 rounded-xl border text-xs transition-colors whitespace-nowrap min-w-0 ${
                 party
-                  ? `${party.bg} border-white/10`
+                  ? `${party.bg} border-m3-outline-subtle/45`
                   : p.isMe
-                  ? 'bg-purple-500/15 border-purple-400/30 text-white shadow-xs'
-                  : 'bg-white/[0.03] hover:bg-white/[0.06] border-white/5 text-zinc-200'
+                  ? 'bg-m3-primary/15 border-m3-primary/30 text-m3-on-surface shadow-xs'
+                  : 'bg-m3-surface-dim/50 hover:bg-m3-surface-container-high/50 border-m3-outline-subtle/45 text-m3-on-surface'
               }`}
             >
               {/* Party identifier: curved bow arc wrapping the left edge when queued in a party */}
@@ -1802,7 +1942,7 @@ const PregameTeamColumn: React.FC<{
                 {p.trnScore != null ? (
                   <ScoreBadge tier={scoreTier(p.trnScore).tier} size={20} />
                 ) : (
-                  <span className="w-5 h-5 rounded border border-white/10 bg-white/[0.03] flex items-center justify-center text-[9px] font-mono text-zinc-600">
+                  <span className="w-5 h-5 rounded border border-m3-outline-subtle/45 bg-m3-surface-container-high/60 flex items-center justify-center text-[9px] font-mono text-m3-outline/70">
                     —
                   </span>
                 )}
@@ -1820,11 +1960,11 @@ const PregameTeamColumn: React.FC<{
                         (e.currentTarget as HTMLElement).style.display = 'none';
                       }}
                       className={`w-[26px] h-[26px] rounded-lg object-cover border ${
-                        locked ? 'border-m3-mint/60' : hasPick ? 'border-amber-300/60' : 'border-white/10'
+                        locked ? 'border-m3-mint/60' : hasPick ? 'border-amber-300/60' : 'border-m3-outline-subtle/45'
                       } pointer-events-none select-none`}
                     />
                   ) : (
-                    <div className="w-[26px] h-[26px] rounded-lg bg-zinc-800 border border-white/10 flex items-center justify-center text-[10px] font-black text-zinc-400">
+                    <div className="w-[26px] h-[26px] rounded-lg bg-m3-surface-container-high border border-m3-outline-subtle/45 flex items-center justify-center text-[10px] font-black text-m3-on-surface-variant">
                       ?
                     </div>
                   )}
@@ -1850,11 +1990,11 @@ const PregameTeamColumn: React.FC<{
                         title={`Queued together in ${party.name}`}
                       />
                     )}
-                    <span className="font-bold text-[12.5px] text-white truncate" title={`${p.name}${p.tag ? '#' + p.tag : ''}`}>
+                    <span className="font-bold text-[12.5px] text-m3-on-surface truncate" title={`${p.name}${p.tag ? '#' + p.tag : ''}`}>
                       {p.name}
                     </span>
                     {p.isMe && (
-                      <span className="px-1.5 py-0.5 rounded bg-purple-500/80 text-[7.5px] font-black text-white uppercase shrink-0">
+                      <span className="px-1.5 py-0.5 rounded bg-m3-primary-container text-[7.5px] font-black text-m3-on-surface uppercase shrink-0">
                         You
                       </span>
                     )}
@@ -1884,7 +2024,7 @@ const PregameTeamColumn: React.FC<{
                         {p.agentName}
                       </span>
                     ) : (
-                      <span className="text-zinc-500">Picking…</span>
+                      <span className="text-m3-outline">Picking…</span>
                     )}
                   </span>
                 </div>
@@ -1898,7 +2038,7 @@ const PregameTeamColumn: React.FC<{
                 {icon ? (
                   <img src={icon} alt="" draggable={false} className="w-[22px] h-[22px] object-contain shrink-0" />
                 ) : (
-                  <span className="text-[10px] font-mono text-zinc-500">—</span>
+                  <span className="text-[10px] font-mono text-m3-outline">—</span>
                 )}
                 {p.tier > 2 && p.rr != null ? (
                   <span className="text-[8.5px] font-mono font-bold text-m3-primary mt-0.5">{p.rr}</span>
@@ -1919,37 +2059,37 @@ const PregameTeamColumn: React.FC<{
                 {peakIcon ? (
                   <img src={peakIcon} alt="" draggable={false} className="w-[18px] h-[18px] object-contain opacity-75 shrink-0" />
                 ) : (
-                  <span className="text-[10px] font-mono text-zinc-500">—</span>
+                  <span className="text-[10px] font-mono text-m3-outline">—</span>
                 )}
                 {p.peakSeasonId && seasons?.[p.peakSeasonId.toLowerCase()] && (
-                  <span className="text-[7.5px] font-mono font-bold text-zinc-400 mt-0.5 tracking-tight">
+                  <span className="text-[7.5px] font-mono font-bold text-m3-on-surface-variant mt-0.5 tracking-tight">
                     {shortAct(seasons[p.peakSeasonId.toLowerCase()])}
                   </span>
                 )}
               </div>
 
               {/* K/D */}
-              <div className="text-right font-mono text-[11px] font-bold" title="K/D Ratio">
+              <div className="text-right font-mono text-[11px] font-bold tabular-nums whitespace-nowrap" title="K/D Ratio">
                 <span className={kd.color}>{kd.text}</span>
               </div>
 
               {/* Win % */}
-              <div className="text-right font-mono text-[11px] font-semibold" title="Act Win Rate">
+              <div className="text-right font-mono text-[11px] font-semibold tabular-nums whitespace-nowrap" title="Act Win Rate">
                 {p.winPct != null ? (
-                  <span className={p.winPct >= 50 ? 'text-m3-mint' : 'text-zinc-400'}>
+                  <span className={p.winPct >= 50 ? 'text-m3-mint' : 'text-m3-on-surface-variant'}>
                     {p.winPct}%
                   </span>
                 ) : (
-                  <span className="text-zinc-600">—</span>
+                  <span className="text-m3-outline/70">—</span>
                 )}
               </div>
 
               {/* HS % */}
-              <div className="text-right font-mono text-[11px]" title="Headshot %">
+              <div className="text-right font-mono text-[11px] tabular-nums whitespace-nowrap" title="Headshot %">
                 {p.hsPct != null ? (
                   <span className="text-amber-200/90 font-medium">{p.hsPct}%</span>
                 ) : (
-                  <span className="text-zinc-600">—</span>
+                  <span className="text-m3-outline/70">—</span>
                 )}
               </div>
             </div>
@@ -1969,7 +2109,7 @@ const VerticalSquadColumn: React.FC<{
   <div className="flex flex-col gap-1">
     <div className="flex items-center justify-between px-1.5 py-0.5">
       <span className={`text-[10px] font-bold uppercase tracking-wider ${tagColor}`}>{title}</span>
-      <span className="text-[9px] font-mono text-zinc-400">{players.length}P</span>
+      <span className="text-[9px] font-mono text-m3-on-surface-variant">{players.length}P</span>
     </div>
     {/* Strongest combat score first — the board reads like the in-game
         leaderboard. Players with no ACS yet keep their relative order at the
@@ -1986,12 +2126,12 @@ const VerticalSquadColumn: React.FC<{
         <div
           key={p.puuid}
           title={`${p.name}${p.tag ? '#' + p.tag : ''} • ${p.agentName}${countryName ? ` • ${countryName}` : ''}`}
-          className={`relative overflow-hidden grid grid-cols-[18px_24px_28px_26px_36px_32px_36px_34px] items-center gap-x-1.5 h-[28px] px-2 rounded-lg border text-xs transition-colors shrink-0 ${
+          className={`relative overflow-hidden grid grid-cols-[18px_22px_26px_24px_minmax(32px,1fr)_minmax(30px,1fr)_minmax(32px,1fr)_minmax(32px,1fr)] items-center gap-x-1.5 h-[28px] px-2 rounded-lg border text-xs transition-colors shrink-0 whitespace-nowrap min-w-0 ${
             party
-              ? `${party.bg} border-white/10`
+              ? `${party.bg} border-m3-outline-subtle/45`
               : p.isMe
-              ? 'bg-purple-950/70 border-purple-400/60 ring-1 ring-purple-400/30 text-white shadow-xs'
-              : 'bg-black/60 hover:bg-black/70 border-white/10 text-zinc-100'
+              ? 'bg-m3-primary/25 border-m3-primary/45 ring-1 ring-m3-primary/30 text-m3-on-surface shadow-xs'
+              : 'bg-m3-surface-dim/50 hover:bg-m3-surface-container-high/50 border-m3-outline-subtle/45 text-m3-on-surface'
           }`}
         >
           {/* Party identifier: curved bow arc wrapping the left edge when queued in a party */}
@@ -2023,7 +2163,7 @@ const VerticalSquadColumn: React.FC<{
             {p.trnScore != null ? (
               <ScoreBadge tier={scoreTier(p.trnScore).tier} size={15} />
             ) : (
-              <span className="w-3.5 h-3.5 rounded border border-white/10 bg-white/[0.03] flex items-center justify-center text-[7.5px] font-mono text-zinc-600">
+              <span className="w-3.5 h-3.5 rounded border border-m3-outline-subtle/45 bg-m3-surface-container-high/60 flex items-center justify-center text-[7.5px] font-mono text-m3-outline/70">
                 —
               </span>
             )}
@@ -2039,10 +2179,10 @@ const VerticalSquadColumn: React.FC<{
                 onError={(e) => {
                   (e.currentTarget as HTMLElement).style.display = 'none';
                 }}
-                className="w-5 h-5 rounded-md object-cover pointer-events-none select-none border border-white/10"
+                className="w-5 h-5 rounded-md object-cover pointer-events-none select-none border border-m3-outline-subtle/45"
               />
             ) : (
-              <div className="w-5 h-5 rounded-md bg-zinc-800 border border-white/10 flex items-center justify-center text-[9px] font-bold text-zinc-400">
+              <div className="w-5 h-5 rounded-md bg-m3-surface-container-high border border-m3-outline-subtle/45 flex items-center justify-center text-[9px] font-bold text-m3-on-surface-variant">
                 ?
               </div>
             )}
@@ -2071,7 +2211,7 @@ const VerticalSquadColumn: React.FC<{
             {icon ? (
               <img src={icon} alt="" draggable={false} className="w-4 h-4 object-contain shrink-0" />
             ) : (
-              <span className="text-[10px] font-mono text-zinc-500">—</span>
+              <span className="text-[10px] font-mono text-m3-outline">—</span>
             )}
             {p.tier > 2 && p.rr != null ? (
               <span className="text-[7px] font-mono font-bold text-m3-primary mt-0.5">{p.rr}</span>
@@ -2085,43 +2225,43 @@ const VerticalSquadColumn: React.FC<{
             {peakIcon ? (
               <img src={peakIcon} alt="" draggable={false} className="w-3.5 h-3.5 object-contain opacity-75 shrink-0" />
             ) : (
-              <span className="text-[10px] font-mono text-zinc-500">—</span>
+              <span className="text-[10px] font-mono text-m3-outline">—</span>
             )}
           </div>
 
           {/* ACS — the sort key, so it reads first among the numbers */}
           <div
-            className="text-right font-mono text-[10px] font-bold"
+            className="text-right font-mono text-[10px] font-bold tabular-nums leading-none"
             title="Act-wide average combat score"
           >
             {p.acs != null ? (
-              <span className={p.acs >= 200 ? 'text-m3-primary' : p.acs >= 150 ? 'text-zinc-200' : 'text-zinc-400'}>
+              <span className={p.acs >= 200 ? 'text-m3-primary' : p.acs >= 150 ? 'text-m3-on-surface' : 'text-m3-on-surface-variant'}>
                 {p.acs}
               </span>
             ) : (
-              <span className="text-zinc-600">—</span>
+              <span className="text-m3-outline/70">—</span>
             )}
           </div>
 
           {/* KD */}
-          <div className="text-right font-mono text-[10px]" title="Act-wide K/D">
+          <div className="text-right font-mono text-[10px] tabular-nums whitespace-nowrap" title="Act-wide K/D">
             <span className={kd.color}>{kd.text}</span>
           </div>
 
           {/* Act-wide win rate */}
-          <div className="text-right font-mono text-[10px]" title="Act-wide win rate">
+          <div className="text-right font-mono text-[10px] tabular-nums whitespace-nowrap" title="Act-wide win rate">
             {p.winPct != null ? (
               <span className={p.winPct >= 50 ? 'text-m3-mint font-semibold' : 'text-rose-400'}>
                 {p.winPct.toFixed(0)}%
               </span>
             ) : (
-              <span className="text-zinc-600">—</span>
+              <span className="text-m3-outline/70">—</span>
             )}
           </div>
 
           {/* Act-wide headshot % */}
-          <div className="text-right font-mono text-[10px] text-amber-200/90" title="Act-wide headshot %">
-            {p.hsPct != null && p.hsPct > 0 ? `${p.hsPct.toFixed(0)}%` : <span className="text-zinc-600">—</span>}
+          <div className="text-right font-mono text-[10px] text-amber-200/90 tabular-nums whitespace-nowrap" title="Act-wide headshot %">
+            {p.hsPct != null && p.hsPct > 0 ? `${p.hsPct.toFixed(0)}%` : <span className="text-m3-outline/70">—</span>}
           </div>
         </div>
       );

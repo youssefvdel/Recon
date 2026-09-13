@@ -34,6 +34,9 @@ import {
 import { IS_DEV } from '../utils/devTools';
 import { performGlobalRefresh } from '../hooks/useTrackerData';
 import { trnCooldownRemainingMs, resetTrnCooldown } from '../utils/trn';
+import { peekLiveMatchState } from '../utils/tracker';
+import type { LiveMatchState } from '../types';
+import { listen } from '@tauri-apps/api/event';
 
 interface TopBarProps {
   currentTab: TabType;
@@ -148,6 +151,37 @@ export const TopBar: React.FC<TopBarProps> = ({
   const [showClove, setShowClove] = useState(false);
   const [dodgeOffset, setDodgeOffset] = useState({ x: 0, y: 0 });
   const [dodgeCount, setDodgeCount] = useState(0);
+  const [liveActive, setLiveActive] = useState(false);
+
+  // Live-match shortcut: surface a jump pill next to APIs Ready while a
+  // pregame/coregame lobby exists. Driven by the shared live-match sync bus.
+  useEffect(() => {
+    let alive = true;
+    const isLive = (s: LiveMatchState | null | undefined): boolean =>
+      !!s && (s.phase === 'pregame' || s.phase === 'coregame') && (s.blueTeam.length > 0 || s.redTeam.length > 0);
+    try {
+      if (alive) setLiveActive(isLive(peekLiveMatchState()));
+    } catch {}
+    let unlisten: (() => void) | undefined;
+    if (isTauri()) {
+      listen<LiveMatchState>('recon:live-match-sync', (event) => {
+        if (alive && event.payload) setLiveActive(isLive(event.payload));
+      })
+        .then((fn) => {
+          unlisten = fn;
+        })
+        .catch(() => {});
+    }
+    return () => {
+      alive = false;
+      if (unlisten) unlisten();
+    };
+  }, []);
+
+  const handleGotoLive = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    window.dispatchEvent(new CustomEvent('recon:goto-live'));
+  };
   const cloveRef = useRef<HTMLDivElement>(null);
   const coffeeBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -334,6 +368,21 @@ export const TopBar: React.FC<TopBarProps> = ({
         className="flex items-center space-x-2.5 shrink-0"
         onMouseDown={(e) => e.stopPropagation()}
       >
+        {/* Live-match shortcut: pops in beside APIs Ready while a lobby is live */}
+        {liveActive && (
+          <button
+            type="button"
+            onClick={handleGotoLive}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/15 border border-red-400/50 text-red-300 text-[10px] font-mono font-bold cursor-pointer hover:bg-red-500/25 active:scale-95 transition-all"
+            title="Live match in progress — jump to Live Match tab"
+          >
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
+            </span>
+            <span>LIVE</span>
+          </button>
+        )}
         {/* Rate Limit & API Health Indicator */}
         {trnCoolingSec > 0 ? (
           <button
