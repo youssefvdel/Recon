@@ -530,15 +530,26 @@ const FileCard: React.FC<{
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          <label className="flex items-center gap-1 text-[10px] text-m3-on-surface-variant cursor-pointer select-none mr-1">
-            <input
-              type="checkbox"
-              checked={lock}
-              onChange={(e) => setLock(e.target.checked)}
-              className="w-3 h-3 accent-m3-primary cursor-pointer"
-            />
+          <button
+            type="button"
+            role="switch"
+            aria-checked={lock}
+            onClick={() => setLock(!lock)}
+            className="flex items-center gap-1.5 text-[10px] text-m3-on-surface-variant cursor-pointer select-none mr-1"
+          >
+            <div
+              className={`w-6 h-3.5 flex items-center rounded-full p-0.5 transition-colors shrink-0 ${
+                lock ? 'bg-m3-primary' : 'bg-m3-surface-container-highest border border-m3-outline-subtle'
+              }`}
+            >
+              <div
+                className={`w-2.5 h-2.5 rounded-full bg-white shadow-sm transition-transform ${
+                  lock ? 'translate-x-2.5' : 'translate-x-0'
+                }`}
+              />
+            </div>
             <span>Lock after write</span>
-          </label>
+          </button>
           <button
             onClick={() => onShowRaw(cfg)}
             className="h-7 px-2.5 rounded-full bg-m3-surface-container-high border border-m3-outline-subtle text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
@@ -777,11 +788,26 @@ export const ValorantConfig: React.FC = () => {
             <input value={targetH} onChange={(e) => setTargetH(e.target.value)} inputMode="numeric"
               className="w-16 bg-transparent text-m3-on-surface font-mono text-xs focus:outline-none text-center font-bold" placeholder="H" />
           </div>
-          <label className="flex items-center gap-1.5 text-[11px] text-m3-on-surface cursor-pointer select-none">
-            <input type="checkbox" checked={lockAll} onChange={(e) => setLockAll(e.target.checked)}
-              className="rounded w-3.5 h-3.5 accent-m3-primary cursor-pointer" />
+          <button
+            type="button"
+            role="switch"
+            aria-checked={lockAll}
+            onClick={() => setLockAll(!lockAll)}
+            className="flex items-center gap-1.5 text-[11px] text-m3-on-surface cursor-pointer select-none"
+          >
+            <div
+              className={`w-6 h-3.5 flex items-center rounded-full p-0.5 transition-colors shrink-0 ${
+                lockAll ? 'bg-m3-primary' : 'bg-m3-surface-container-highest border border-m3-outline-subtle'
+              }`}
+            >
+              <div
+                className={`w-2.5 h-2.5 rounded-full bg-white shadow-sm transition-transform ${
+                  lockAll ? 'translate-x-2.5' : 'translate-x-0'
+                }`}
+              />
+            </div>
             <span>Lock read-only</span>
-          </label>
+          </button>
           <div className="flex items-center gap-1.5 px-2 h-7 rounded-full bg-m3-surface-container-lowest border border-m3-outline-subtle focus-within:border-m3-primary transition-all">
             <Search className="w-3 h-3 text-m3-outline shrink-0" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search settings…"

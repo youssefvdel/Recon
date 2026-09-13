@@ -52,7 +52,7 @@ impl ShortcutBinding {
     }
 
     pub const fn f4() -> Self {
-        Self { ctrl: false, shift: false, alt: false, win: false, vk: 0x73 }
+        Self { ctrl: true, shift: false, alt: false, win: false, vk: 0x73 }
     }
 
     #[allow(dead_code)]

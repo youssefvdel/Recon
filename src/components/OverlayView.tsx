@@ -373,22 +373,28 @@ export const OverlayView: React.FC = () => {
   // Widget config + positions (persisted)
   const [config, setConfig] = useState<OverlayConfig>(() => {
     const MIGRATION_KEY = 'recon_overlay_cfg_v7_defaults';
+    const mergeSaved = (saved: string | null) => {
+      if (!saved) return null;
+      const parsed = JSON.parse(saved);
+      return {
+        ...DEFAULT_OVERLAY_CONFIG,
+        ...parsed,
+        positions: { ...DEFAULT_OVERLAY_CONFIG.positions, ...(parsed.positions || {}) },
+        scales: { ...DEFAULT_OVERLAY_CONFIG.scales, ...(parsed.scales || {}) },
+      } as OverlayConfig;
+    };
     try {
+      // Read the saved layout FIRST: writing defaults before reading (as an
+      // earlier revision did) wipes custom widget positions/scales.
+      const saved = localStorage.getItem('recon_overlay_cfg_v7') || localStorage.getItem('recon_overlay_cfg_v6') || localStorage.getItem('recon_overlay_cfg_v5');
       if (!localStorage.getItem(MIGRATION_KEY)) {
         localStorage.setItem(MIGRATION_KEY, '1');
-        localStorage.setItem('recon_overlay_cfg_v7', JSON.stringify(DEFAULT_OVERLAY_CONFIG));
-        return DEFAULT_OVERLAY_CONFIG;
+        const merged = mergeSaved(saved);
+        localStorage.setItem('recon_overlay_cfg_v7', JSON.stringify(merged ?? DEFAULT_OVERLAY_CONFIG));
+        return merged ?? DEFAULT_OVERLAY_CONFIG;
       }
-      const saved = localStorage.getItem('recon_overlay_cfg_v7') || localStorage.getItem('recon_overlay_cfg_v6') || localStorage.getItem('recon_overlay_cfg_v5');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return {
-          ...DEFAULT_OVERLAY_CONFIG,
-          ...parsed,
-          positions: { ...DEFAULT_OVERLAY_CONFIG.positions, ...(parsed.positions || {}) },
-          scales: { ...DEFAULT_OVERLAY_CONFIG.scales, ...(parsed.scales || {}) },
-        };
-      }
+      const merged = mergeSaved(saved);
+      if (merged) return merged;
     } catch {}
     return DEFAULT_OVERLAY_CONFIG;
   });
@@ -403,7 +409,7 @@ export const OverlayView: React.FC = () => {
   const { detailsById, mapById, profile, trnAgents, trnMaps } = useTrackerData();
 
   const activeMapName =
-    matchState?.mapName && matchState.mapName !== 'No Match Active' && matchState.mapName !== 'Live Match Status'
+    matchState && matchState.phase !== 'idle' && matchState.mapName && matchState.mapName !== 'No Match Active' && matchState.mapName !== 'Live Match Status'
       ? matchState.mapName
       : 'Ascent';
 
@@ -473,22 +479,25 @@ export const OverlayView: React.FC = () => {
 
   // 4. Live rank-tuned map meta from Blitz (this map, this rank). Replaces the
   //    hardcoded table, which was stale within a patch or two.
+  // One tier const for label + fetch + peek: the label must never claim a
+  // Diamond meta while the fetch runs the unranked slice (or vice versa).
   const userTier = profile?.tier || 0;
-  const rankTierLabel = getRankTierLabel(userTier || 22);
+  const metaTier = userTier || 22;
+  const rankTierLabel = getRankTierLabel(metaTier);
   const [metaPicks, setMetaPicks] = useState<BlitzAgentStat[]>(
-    () => peekBlitzAgentStats(activeMapName, userTier) ?? []
+    () => peekBlitzAgentStats(activeMapName, metaTier) ?? []
   );
 
   useEffect(() => {
     let alive = true;
-    fetchBlitzAgentStats(activeMapName, userTier).then((rows) => {
+    fetchBlitzAgentStats(activeMapName, metaTier).then((rows) => {
       // Keep the last good list if Blitz is unreachable or has no sample.
       if (alive && rows.length > 0) setMetaPicks(rows);
     });
     return () => {
       alive = false;
     };
-  }, [activeMapName, userTier]);
+  }, [activeMapName, metaTier]);
 
   // Agent select is the one moment a suggestion is actionable — and the HUD is
   // click-through while the overlay is locked, so a toggle the user has to click
@@ -719,6 +728,7 @@ export const OverlayView: React.FC = () => {
       setActiveDragKey(null);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
 
       setConfig((prev) => {
         const next = {
@@ -735,6 +745,9 @@ export const OverlayView: React.FC = () => {
 
     window.addEventListener('pointermove', onPointerMove, { passive: false });
     window.addEventListener('pointerup', onPointerUp, { passive: false });
+    // A cancelled gesture (Alt-Tab / touch interrupt mid-drag) must release
+    // the drag too, or the window listeners stay attached with stale state.
+    window.addEventListener('pointercancel', onPointerUp, { passive: false });
   };
 
   const startResize = (key: keyof OverlayConfig['positions'], e: React.PointerEvent) => {
@@ -766,6 +779,7 @@ export const OverlayView: React.FC = () => {
       upEv.preventDefault();
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
 
       setConfig((prev) => {
         const next = {
@@ -782,6 +796,7 @@ export const OverlayView: React.FC = () => {
 
     window.addEventListener('pointermove', onPointerMove, { passive: false });
     window.addEventListener('pointerup', onPointerUp, { passive: false });
+    window.addEventListener('pointercancel', onPointerUp, { passive: false });
   };
 
   // Phase-split visibility: agent select gets its own big centered panel;
@@ -791,29 +806,33 @@ export const OverlayView: React.FC = () => {
   const showScorePanel = isEditMode || (isCoregame && tabHeld);
   const showPregamePanel = isEditMode || isPregame;
 
-  // Single source of truth for players:
+  // Single source of truth for players. Persisted states can arrive with
+  // missing team arrays (corrupt/legacy storage) — a bare `.length` here
+  // would throw and unmount the whole overlay, so default defensively.
   // If a live match is detected, always display real players.
   // Only fall back to PREVIEW_PLAYERS when no game is running (idle).
+  const liveBlue = matchState?.blueTeam ?? [];
+  const liveRed = matchState?.redTeam ?? [];
   const hasLivePlayers = !!(
     matchState &&
     matchState.phase !== 'idle' &&
-    (matchState.blueTeam.length > 0 || matchState.redTeam.length > 0)
+    (liveBlue.length > 0 || liveRed.length > 0)
   );
 
   const yourTeam = hasLivePlayers
-    ? matchState.blueTeam.some((p) => p.isMe)
-      ? matchState.blueTeam
-      : matchState.redTeam.some((p) => p.isMe)
-      ? matchState.redTeam
-      : matchState.blueTeam.length > 0
-      ? matchState.blueTeam
-      : matchState.redTeam
+    ? liveBlue.some((p) => p.isMe)
+      ? liveBlue
+      : liveRed.some((p) => p.isMe)
+      ? liveRed
+      : liveBlue.length > 0
+      ? liveBlue
+      : liveRed
     : PREVIEW_PLAYERS;
 
   const enemyTeam = hasLivePlayers
-    ? yourTeam === matchState.blueTeam
-      ? matchState.redTeam
-      : matchState.blueTeam
+    ? yourTeam === liveBlue
+      ? liveRed
+      : liveBlue
     : PREVIEW_OPPONENTS;
   // Scoreboard mounts/unmounts on every Tab press and panels flip on phase
   // changes — repaint after each transition so DWM never keeps a stale
@@ -1186,7 +1205,7 @@ export const OverlayView: React.FC = () => {
                 <VerticalSquadColumn
                   title="Deathmatch"
                   tagColor="text-m3-gold"
-                  players={matchState.blueTeam}
+                  players={liveBlue}
                   tierIcons={tierIcons}
                 />
               ) : (

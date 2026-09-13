@@ -36,7 +36,8 @@ interface UnifiedStretchProps {
 }
 
 const PRESET_HOTKEYS: { label: string; binding: ShortcutBinding }[] = [
-  { label: 'F4 (Default)', binding: { ctrl: false, shift: false, alt: false, win: false, vk: 0x73 } },
+  { label: 'Ctrl + F4 (Default)', binding: { ctrl: true, shift: false, alt: false, win: false, vk: 0x73 } },
+  { label: 'F4', binding: { ctrl: false, shift: false, alt: false, win: false, vk: 0x73 } },
   { label: 'F11', binding: { ctrl: false, shift: false, alt: false, win: false, vk: 0x7a } },
   { label: 'F10', binding: { ctrl: false, shift: false, alt: false, win: false, vk: 0x79 } },
   { label: 'F9', binding: { ctrl: false, shift: false, alt: false, win: false, vk: 0x78 } },
@@ -473,7 +474,7 @@ export const UnifiedStretch: React.FC<UnifiedStretchProps> = ({
             className="h-7 px-3 rounded-full border border-m3-primary/50 bg-m3-primary-container/40 hover:bg-m3-primary-container/70 text-m3-primary text-[10px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
           >
             <Keyboard className="w-3.5 h-3.5" />
-            <span>{shortcut ? formatShortcut(shortcut) : 'F4'} to toggle • change</span>
+            <span>{shortcut ? formatShortcut(shortcut) : 'CTRL + F4'} to toggle • change</span>
           </button>
         </div>
       </section>
@@ -612,15 +613,26 @@ export const UnifiedStretch: React.FC<UnifiedStretchProps> = ({
             </div>
           </div>
           <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
-            <label className="flex items-center gap-1.5 text-[10px] text-m3-on-surface cursor-pointer select-none bg-m3-surface-container-high px-2 py-1 rounded-full border border-m3-outline-subtle">
-              <input
-                type="checkbox"
-                checked={autoBorderless}
-                onChange={(e) => handleToggleAutoBorderless(e.target.checked)}
-                className="w-3 h-3 rounded accent-m3-primary cursor-pointer"
-              />
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoBorderless}
+              onClick={() => handleToggleAutoBorderless(!autoBorderless)}
+              className="flex items-center gap-2 text-[10px] text-m3-on-surface cursor-pointer select-none bg-m3-surface-container-high hover:bg-m3-surface-container-highest px-2.5 py-1 rounded-full border border-m3-outline-subtle transition-colors"
+            >
+              <div
+                className={`w-6 h-3.5 flex items-center rounded-full p-0.5 transition-colors shrink-0 ${
+                  autoBorderless ? 'bg-m3-primary' : 'bg-m3-surface-container-lowest border border-m3-outline-subtle'
+                }`}
+              >
+                <div
+                  className={`w-2.5 h-2.5 rounded-full bg-white shadow-sm transition-transform ${
+                    autoBorderless ? 'translate-x-2.5' : 'translate-x-0'
+                  }`}
+                />
+              </div>
               <span className="font-semibold text-m3-on-surface">Auto-borderless</span>
-            </label>
+            </button>
             <span className="text-[9px] text-m3-primary font-mono tabular-nums px-1.5 py-0.5 rounded-full bg-m3-surface-container-high border border-m3-outline-subtle">
               {windows.length} found
             </span>

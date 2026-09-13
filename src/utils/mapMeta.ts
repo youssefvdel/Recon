@@ -33,12 +33,15 @@ export function computeMapAgentStats(
 
   const statsMap: Record<
     string,
-    { matches: number; wins: number; losses: number; kills: number; deaths: number; headshots: number; totalShots: number }
+    { name: string; matches: number; wins: number; losses: number; kills: number; deaths: number; headshots: number; totalShots: number }
   > = {};
 
   for (const match of Object.values(detailsById)) {
     const rawMap = (mapById[match.mapId?.toLowerCase()] || match.mapId || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (!rawMap.includes(normMap) && !normMap.includes(rawMap)) continue;
+    // Exact match only: substring matching collides (ice ↔ icebox), and when
+    // both sides miss the lookup both strings are '' — and ''.includes('')
+    // is true, attributing EVERY unknown-map game to the active map.
+    if (!rawMap || !normMap || rawMap !== normMap) continue;
 
     const me = match.players?.find((p) => p.puuid === myPuuid);
     if (!me || !me.agent) continue;
@@ -48,27 +51,32 @@ export function computeMapAgentStats(
     const enemyTeam = Object.keys(match.teamScore || {}).find((t) => t !== myTeam);
     const enemyScore = enemyTeam ? match.teamScore[enemyTeam] ?? 0 : 0;
     const won = teamScore > enemyScore;
+    const tied = teamScore === enemyScore;
 
-    const aName = me.agent;
-    if (!statsMap[aName]) {
-      statsMap[aName] = { matches: 0, wins: 0, losses: 0, kills: 0, deaths: 0, headshots: 0, totalShots: 0 };
+    const aName = me.agent.trim();
+    const key = aName.toLowerCase();
+    if (!statsMap[key]) {
+      statsMap[key] = { name: aName, matches: 0, wins: 0, losses: 0, kills: 0, deaths: 0, headshots: 0, totalShots: 0 };
     }
-    statsMap[aName].matches += 1;
-    if (won) statsMap[aName].wins += 1;
-    else statsMap[aName].losses += 1;
-    statsMap[aName].kills += me.kills || 0;
-    statsMap[aName].deaths += me.deaths || 0;
-    statsMap[aName].headshots += me.headshots || 0;
-    statsMap[aName].totalShots += (me.headshots || 0) + (me.bodyshots || 0) + (me.legshots || 0);
+    statsMap[key].matches += 1;
+    // Draws are neither — counting them as losses fabricates the record.
+    if (!tied) {
+      if (won) statsMap[key].wins += 1;
+      else statsMap[key].losses += 1;
+    }
+    statsMap[key].kills += me.kills || 0;
+    statsMap[key].deaths += me.deaths || 0;
+    statsMap[key].headshots += me.headshots || 0;
+    statsMap[key].totalShots += (me.headshots || 0) + (me.bodyshots || 0) + (me.legshots || 0);
   }
 
   return Object.entries(statsMap)
-    .map(([agent, s]) => {
+    .map(([, s]) => {
       const winPct = s.matches > 0 ? (s.wins / s.matches) * 100 : 0;
       const kd = s.deaths > 0 ? s.kills / s.deaths : s.kills;
       const hsPct = s.totalShots > 0 ? (s.headshots / s.totalShots) * 100 : 0;
       return {
-        agent,
+        agent: s.name,
         matches: s.matches,
         wins: s.wins,
         losses: s.losses,

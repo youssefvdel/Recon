@@ -577,7 +577,7 @@ export const ResolutionVisualizer: React.FC<ResolutionVisualizerProps> = ({
                 onPointerLeave={() => setIsDragging(false)}
                 onPointerCancel={() => setIsDragging(false)}
                 onChange={(e) => commitSliderRatio(parseFloat(e.target.value))}
-                className="w-full h-1.5 bg-m3-surface-container-highest rounded-full appearance-none accent-m3-primary cursor-pointer"
+                className="w-full m3-range"
               />
               <div className="flex justify-between text-[9px] text-m3-outline font-mono tabular-nums font-medium">
                 <span>1.0:1</span>

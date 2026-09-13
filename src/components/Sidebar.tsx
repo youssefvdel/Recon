@@ -5,6 +5,10 @@ import {
   Settings,
   TrendingUp,
   FileCode2,
+  ShoppingBag,
+  Crosshair,
+  Users,
+  UserCheck,
 } from 'lucide-react';
 import type { DisplayInfo, GpuInfo, TabType } from '../types';
 import { TrackerMini } from './TrackerMini';
@@ -13,7 +17,6 @@ import { APP_VERSION, appVersion } from '../utils/version';
 interface SidebarTab {
   id: TabType;
   label: string;
-  shortcut: string;
   icon: React.ComponentType<{ className?: string }>;
 }
 
@@ -31,8 +34,43 @@ const TRACKER_TABS: SidebarTab[] = [
   {
     id: 'overview',
     label: 'Tracker',
-    shortcut: '1',
     icon: TrendingUp,
+  },
+];
+
+/* Store group — the account's daily shop, live from Riot. */
+const STORE_TABS: SidebarTab[] = [
+  {
+    id: 'store',
+    label: 'Store',
+    icon: ShoppingBag,
+  },
+];
+
+/* Crosshair group — recolor any profile to any color, live from the client. */
+const CROSSHAIR_TABS: SidebarTab[] = [
+  {
+    id: 'crosshair',
+    label: 'Crosshair',
+    icon: Crosshair,
+  },
+];
+
+/* Pre-Picker group — auto-hover agent per map safely in agent select. */
+const PREPICK_TABS: SidebarTab[] = [
+  {
+    id: 'prepick',
+    label: 'Pre-Picker',
+    icon: UserCheck,
+  },
+];
+
+/* Accounts group — quick-switch Riot logins, snapshots live in Rust. */
+const ACCOUNTS_TABS: SidebarTab[] = [
+  {
+    id: 'accounts',
+    label: 'Accounts',
+    icon: Users,
   },
 ];
 
@@ -41,7 +79,6 @@ const UTILITY_TABS: SidebarTab[] = [
   {
     id: 'switcher',
     label: 'Resolution Switch',
-    shortcut: '2',
     icon: Monitor,
   },
 ];
@@ -51,7 +88,6 @@ const CONFIG_TABS: SidebarTab[] = [
   {
     id: 'game_config',
     label: 'Game Config',
-    shortcut: '3',
     icon: FileCode2,
   },
 ];
@@ -61,7 +97,6 @@ const SETTINGS_TABS: SidebarTab[] = [
   {
     id: 'settings',
     label: 'Settings',
-    shortcut: '4',
     icon: Settings,
   },
 ];
@@ -90,8 +125,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const allTabs: SidebarTab[] = [
     ...TRACKER_TABS,
+    ...STORE_TABS,
+    ...CROSSHAIR_TABS,
+    ...PREPICK_TABS,
     ...UTILITY_TABS,
     ...CONFIG_TABS,
+    ...ACCOUNTS_TABS,
     ...SETTINGS_TABS,
   ];
 
@@ -146,6 +185,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {allTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive =
+              tab.id === currentTab ||
               (tab.id === 'overview' && (currentTab === 'overview' || currentTab === 'matches')) ||
               (tab.id === 'switcher' && (currentTab === 'switcher' || currentTab === 'visualizer' || currentTab === 'borderless')) ||
               (tab.id === 'game_config' && (currentTab === 'game_config' || currentTab === 'valorant' || currentTab === 'gpu')) ||
@@ -176,15 +216,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     {tab.label}
                   </div>
                 </div>
-                <span
-                  className={`w-5 h-5 rounded-full font-mono text-[10px] font-semibold flex items-center justify-center transition-colors shrink-0 ${
-                    isActive
-                      ? 'bg-m3-surface-container-highest text-m3-primary'
-                      : 'bg-m3-surface-container text-m3-outline group-hover:text-m3-on-surface'
-                  }`}
-                >
-                  {tab.shortcut}
-                </span>
               </button>
             );
           })}

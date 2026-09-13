@@ -21,6 +21,10 @@ const readFlag = (key: string): string | null => {
 };
 
 export const getDevMockPhase = (): DevMockPhase => {
+  // Ungated, any prod user (or stray extension) with this localStorage key
+  // would get canned fake-match data in live paths. Dev-only, like the
+  // sibling flags below.
+  if (!IS_DEV) return 'off';
   const v = readFlag(DEV_MOCK_KEY);
   return v === 'pregame' || v === 'coregame' || v === 'deathmatch' ? v : 'off';
 };
@@ -191,6 +195,9 @@ function mockDeathmatch(): LiveMatchState {
 
 /** Canned match state for testing overlay + live views with Riot closed. */
 export function getDevMockMatch(): LiveMatchState | null {
+  // Belt-and-braces alongside the getDevMockPhase gate: mock data must never
+  // reach a production build even if a caller bypasses the phase check.
+  if (!IS_DEV) return null;
   switch (getDevMockPhase()) {
     case 'pregame':
       return mockPregame();

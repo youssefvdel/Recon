@@ -29,7 +29,8 @@ pub fn is_riot_client_running() -> bool {
 
 /// name:pid:port:password:protocol. Stale lockfile (dead client) surfaces
 /// as a connect failure downstream with a clear message.
-fn lockfile_auth() -> Result<(String, String), String> {
+/// `pub(crate)`: the accounts module reuses the same trust boundary.
+pub(crate) fn lockfile_auth() -> Result<(String, String), String> {
     let lockfile = std::env::var("LOCALAPPDATA")
         .map(|la| {
             std::path::PathBuf::from(la)
@@ -61,7 +62,8 @@ fn curl_args() -> Command {
 
 /// GET against the local client (self-signed cert). Password lives only in
 /// the curl argument for one local call — never logged or stored.
-fn local_get(port: &str, password: &str, path: &str) -> Result<serde_json::Value, String> {
+/// `pub(crate)`: the accounts module reads the live Riot ID through it.
+pub(crate) fn local_get(port: &str, password: &str, path: &str) -> Result<serde_json::Value, String> {
     let url = format!("https://127.0.0.1:{}{}", port, path);
     let output = curl_args()
         .args([
@@ -84,6 +86,95 @@ fn local_get(port: &str, password: &str, path: &str) -> Result<serde_json::Value
         .map_err(|_| "Unexpected local response.".to_string())
 }
 
+/// PUT twin of `riot_direct_post_blocking`: same hosts/headers, but `-X PUT`
+/// with a real JSON body. Needed for player-preferences routes (notably
+/// `PUT /playerPref/v3/savePreference` — crosshair saves).
+fn riot_direct_put_blocking(
+    host: String,
+    path: String,
+    body_arg: String,
+    access_token: String,
+    entitlements: String,
+    client_platform: String,
+    client_version: String,
+) -> Result<String, String> {
+    if host.contains(|c: char| !(c.is_ascii_alphanumeric() || c == '.' || c == '-')) {
+        return Err("Invalid host.".to_string());
+    }
+    if path.contains([' ', '\n', '\r']) {
+        return Err("Invalid path.".to_string());
+    }
+    let url = format!("https://{}{}", host, path);
+    let ua = format!("ShooterGame/{} Windows/10.0.19042.1.256.64bit", client_version);
+    let output = curl_args()
+        .args([
+            "-s",
+            "--connect-timeout",
+            "2",
+            "--max-time",
+            "10",
+            "-X",
+            "PUT",
+            "-H",
+            "Content-Type: application/json",
+            "-H",
+            &format!("Authorization: Bearer {}", access_token),
+            "-H",
+            &format!("X-Riot-Entitlements-JWT: {}", entitlements),
+            "-H",
+            &format!("X-Riot-ClientPlatform: {}", client_platform),
+            "-H",
+            &format!("X-Riot-ClientVersion: {}", client_version),
+            "-H",
+            &format!("User-Agent: {}", ua),
+            "-d",
+            &body_arg,
+            &url,
+        ])
+        .output()
+        .map_err(|e| format!("Riot query failed: {}", e))?;
+    let body = String::from_utf8_lossy(&output.stdout).to_string();
+    if body.contains("\"statusCode\":401")
+        || body.contains("\"httpStatus\":401")
+        || body.contains("\"statusCode\": 401")
+        || body.contains("\"httpStatus\": 401")
+        || body.contains("BAD_AUTH")
+        || body.contains("EXPIRED_AUTH")
+        || body.contains("FORBIDDEN")
+    {
+        return Err("RIOT_EXPIRED".to_string());
+    }
+    if !output.status.success() {
+        return Err(format!("Riot error: {}", body.chars().take(160).collect::<String>()));
+    }
+    Ok(body)
+}
+
+/// PUT twin of `riot_direct_post`: same pipeline, real JSON body.
+#[tauri::command]
+pub async fn riot_direct_put(
+    host: String,
+    path: String,
+    body_arg: String,
+    access_token: String,
+    entitlements: String,
+    client_platform: String,
+    client_version: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        riot_direct_put_blocking(
+            host,
+            path,
+            body_arg,
+            access_token,
+            entitlements,
+            client_platform,
+            client_version,
+        )
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
 /// POST a JSON body to the local Riot Client. Same trust boundary as
 /// `local_get` (loopback + lockfile credentials).
 fn local_post(port: &str, password: &str, path: &str, body: &str) -> Result<serde_json::Value, String> {
@@ -377,6 +468,32 @@ pub async fn riot_direct_get(
     .map_err(|e| format!("Task failed: {}", e))?
 }
 
+/// POST twin of `riot_direct_get`: same hosts/headers, but `-X POST` with an
+/// empty JSON body. Needed because some player-data routes (notably
+/// `POST /store/v3/storefront/{puuid}` — the daily shop) reject GET with 405.
+#[tauri::command]
+pub async fn riot_direct_post(
+    host: String,
+    path: String,
+    access_token: String,
+    entitlements: String,
+    client_platform: String,
+    client_version: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        riot_direct_post_blocking(
+            host,
+            path,
+            access_token,
+            entitlements,
+            client_platform,
+            client_version,
+        )
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
+
 fn riot_direct_get_blocking(
     host: String,
     path: String,
@@ -410,6 +527,66 @@ fn riot_direct_get_blocking(
             &format!("X-Riot-ClientVersion: {}", client_version),
             "-H",
             &format!("User-Agent: {}", ua),
+            &url,
+        ])
+        .output()
+        .map_err(|e| format!("Riot query failed: {}", e))?;
+    let body = String::from_utf8_lossy(&output.stdout).to_string();
+    if body.contains("\"statusCode\":401")
+        || body.contains("\"httpStatus\":401")
+        || body.contains("\"statusCode\": 401")
+        || body.contains("\"httpStatus\": 401")
+        || body.contains("BAD_AUTH")
+        || body.contains("EXPIRED_AUTH")
+        || body.contains("FORBIDDEN")
+    {
+        return Err("RIOT_EXPIRED".to_string());
+    }
+    if !output.status.success() {
+        return Err(format!("Riot error: {}", body.chars().take(160).collect::<String>()));
+    }
+    Ok(body)
+}
+
+fn riot_direct_post_blocking(
+    host: String,
+    path: String,
+    access_token: String,
+    entitlements: String,
+    client_platform: String,
+    client_version: String,
+) -> Result<String, String> {
+    if host.contains(|c: char| !(c.is_ascii_alphanumeric() || c == '.' || c == '-')) {
+        return Err("Invalid host.".to_string());
+    }
+    if path.contains([' ', '\n', '\r']) {
+        return Err("Invalid path.".to_string());
+    }
+    let url = format!("https://{}{}", host, path);
+    let ua = format!("ShooterGame/{} Windows/10.0.19042.1.256.64bit", client_version);
+    let output = curl_args()
+        .args([
+            "-s",
+            "--connect-timeout",
+            "2",
+            "--max-time",
+            "6",
+            "-X",
+            "POST",
+            "-H",
+            "Content-Type: application/json",
+            "-H",
+            &format!("Authorization: Bearer {}", access_token),
+            "-H",
+            &format!("X-Riot-Entitlements-JWT: {}", entitlements),
+            "-H",
+            &format!("X-Riot-ClientPlatform: {}", client_platform),
+            "-H",
+            &format!("X-Riot-ClientVersion: {}", client_version),
+            "-H",
+            &format!("User-Agent: {}", ua),
+            "-d",
+            "{}",
             &url,
         ])
         .output()

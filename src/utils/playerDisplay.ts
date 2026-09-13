@@ -9,7 +9,7 @@ import type { LiveMatchPlayer } from '../types';
 /** Country code → flag image. Rejects Riot's region codes (EU/NA/AP/KR) so we
  *  never show a flag we don't actually know. */
 export function getFlagUrl(code?: string): string | null {
-  if (!code || code.length !== 2 || ['EU', 'NA', 'AP', 'KR'].includes(code.toUpperCase())) return null;
+  if (!code || !/^[a-z]{2}$/i.test(code) || ['EU', 'NA', 'AP', 'KR'].includes(code.toUpperCase())) return null;
   let lower = code.toLowerCase();
   if (lower === 'uk') lower = 'gb';
   return `https://flagcdn.com/24x18/${lower}.png`;
@@ -19,7 +19,7 @@ const regionNames = typeof Intl !== 'undefined' && Intl.DisplayNames ? new Intl.
 
 /** Full human-readable country name (e.g. 'EG' → 'Egypt', 'DE' → 'Germany'). */
 export function getCountryName(code?: string): string | null {
-  if (!code || code.length !== 2 || ['EU', 'NA', 'AP', 'KR'].includes(code.toUpperCase())) return null;
+  if (!code || !/^[a-z]{2}$/i.test(code) || ['EU', 'NA', 'AP', 'KR'].includes(code.toUpperCase())) return null;
   let upper = code.toUpperCase();
   if (upper === 'UK') upper = 'GB';
   try {
@@ -34,7 +34,10 @@ export function getTrackerUrls(name: string, tag?: string) {
   const cleanName = (name || '').trim();
   const cleanTag = (tag || '').trim();
   const riotIdEncoded = `${encodeURIComponent(cleanName)}%23${encodeURIComponent(cleanTag)}`;
-  const blitzSlug = `${encodeURIComponent(cleanName)}-${encodeURIComponent(cleanTag)}`;
+  // No trailing dash when the tag is unknown — "TenZ-" matches nothing.
+  const blitzSlug = cleanTag
+    ? `${encodeURIComponent(cleanName)}-${encodeURIComponent(cleanTag)}`
+    : encodeURIComponent(cleanName);
 
   return {
     trn: `https://tracker.gg/valorant/profile/riot/${riotIdEncoded}/overview`,
@@ -61,7 +64,7 @@ export function rankTooltip(p: LiveMatchPlayer, actLabel?: string): string {
 export function shortAct(label?: string): string {
   if (!label) return '';
   return label
-    .replace(/ACT\s*/i, '')
+    .replace(/\bACT\b\s*/i, '')
     .replace(/\s*·\s*/g, '·')
     .trim();
 }
@@ -217,5 +220,5 @@ export function byAcsDesc(a: LiveMatchPlayer, b: LiveMatchPlayer): number {
   if (diff !== 0) return diff;
   const tierDiff = (b.tier || 0) - (a.tier || 0);
   if (tierDiff !== 0) return tierDiff;
-  return a.puuid.localeCompare(b.puuid);
+  return (a.puuid ?? '').localeCompare(b.puuid ?? '');
 }

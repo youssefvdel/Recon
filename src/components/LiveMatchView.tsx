@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
-  RefreshCw,
   Shield,
   Radio,
   Lock,
@@ -23,6 +22,7 @@ import {
   fetchMatchLoadouts,
   isMatchStateEqual,
 } from '../utils/tracker';
+import { getPrepickConfig } from '../utils/prepick';
 import {
   loadWeaponCatalog,
   parseLoadouts,
@@ -67,27 +67,25 @@ export const LiveMatchView: React.FC = () => {
   const [matchState, setMatchState] = useState<LiveMatchState | null>(() =>
     peekLiveMatchState()
   );
-  // Loadout viewer — Riot only serves equipped skins while a match is live, so
-  // the data is fetched on demand rather than polled with the rest of the HUD.
+  // Loadout viewer — Riot serves equipped skins per phase (agent select +
+  // live match), so the data is fetched on demand rather than polled.
   const [loadoutFor, setLoadoutFor] = useState<LiveMatchPlayer | null>(null);
+  const loadoutReq = useRef(0);
   const [loadoutData, setLoadoutData] = useState<PlayerLoadout | null>(null);
   const [loadoutLoading, setLoadoutLoading] = useState(false);
   const [loadoutAmbiguous, setLoadoutAmbiguous] = useState(false);
   const [loadoutReason, setLoadoutReason] = useState<string | null>(null);
   const [tierIcons, setTierIcons] = useState<Record<number, string>>({});
-  const [loading, setLoading] = useState(false);
   const prevStateRef = useRef<LiveMatchState | null>(null);
 
   // Act labels for the peak-act caption under the peak emblem.
   const { seasonNames } = useTrackerData();
 
   const loadState = useCallback(async () => {
-    setLoading(true);
     try {
       const s = await fetchLiveMatchState(undefined, true);
       setMatchState(s);
     } catch {}
-    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -159,9 +157,10 @@ export const LiveMatchView: React.FC = () => {
   /**
    * Open a player's loadout.
    *
-   * Riot serves equipped skins only from the in-progress match route, so this
-   * needs a live `matchId`. Pre-match the endpoint returns nothing, and the
-   * viewer says so rather than rendering an empty grid as if it were real.
+   * Riot serves equipped skins from the per-phase match route
+   * (`pregame/v1/.../loadouts` during agent select, `core-game/v1/.../loadouts`
+   * once the match is live), so this needs a live `matchId`. With no live
+   * match the viewer says so instead of rendering a grid of fake defaults.
    */
   const openLoadout = useCallback(
     async (p: LiveMatchPlayer) => {
@@ -171,22 +170,24 @@ export const LiveMatchView: React.FC = () => {
       setLoadoutReason(null);
 
       const matchId = matchState?.matchId ?? '';
-      if (!matchId || matchState?.phase !== 'coregame') {
-        setLoadoutReason(
-          matchState?.phase === 'pregame'
-            ? 'Loadouts only become available once the match is in progress (not during agent select).'
-            : 'Loadouts are available only while a match is in progress.'
-        );
+      const phase = matchState?.phase;
+      if (!matchId || (phase !== 'coregame' && phase !== 'pregame')) {
+        setLoadoutReason('Loadouts are available only while a match is in progress.');
         return;
       }
 
       setLoadoutLoading(true);
+      // Rapid Skins clicks interleave freely — a slow first click must not
+      // overwrite the second player's result. Stale completions exit quietly.
+      const seq = ++loadoutReq.current;
+      const isLatest = () => seq === loadoutReq.current;
       try {
         const region = (p.region || 'eu').replace(/[0-9]+$/, '').toLowerCase();
         const [raw, catalog] = await Promise.all([
-          fetchMatchLoadouts(matchId, region),
+          fetchMatchLoadouts(matchId, region, phase),
           loadWeaponCatalog(),
         ]);
+        if (!isLatest()) return;
         const all = parseLoadouts(raw, catalog);
         if (all.length === 0) {
           setLoadoutReason('Riot returned no loadout data for this match yet.');
@@ -199,18 +200,19 @@ export const LiveMatchView: React.FC = () => {
           characterId: p.agentId,
           index: index >= 0 ? index : undefined,
         });
+        if (!isLatest()) return;
         setLoadoutAmbiguous(ambiguous);
         if (!loadout) {
           setLoadoutReason(
-            'No loadout entry matched this player. Riot keys loadouts by agent, so duplicate agents can make the match ambiguous.'
+            'No loadout entry matched this player for this match — it may have rotated since the lobby loaded. Close and reopen Skins.'
           );
           return;
         }
         setLoadoutData(loadout);
       } catch {
-        setLoadoutReason('Could not read the loadout from the Riot client.');
+        if (isLatest()) setLoadoutReason('Could not read the loadout from the Riot client.');
       } finally {
-        setLoadoutLoading(false);
+        if (isLatest()) setLoadoutLoading(false);
       }
     },
     [matchState]
@@ -248,8 +250,6 @@ export const LiveMatchView: React.FC = () => {
       {isLive && effectiveState && (
         <MatchStatusStrip
           state={effectiveState}
-          onRefresh={loadState}
-          refreshing={loading}
         />
       )}
 
@@ -269,6 +269,17 @@ export const LiveMatchView: React.FC = () => {
             <Shield className="w-3.5 h-3.5 text-m3-mint" />
             <span>100% Vanguard Safe • Zero DLL / Game Memory Injections</span>
           </div>
+          {(() => {
+            const prepick = getPrepickConfig();
+            const targetAgent = prepick.defaultAgentName;
+            if (!prepick.enabled || !targetAgent) return null;
+            return (
+              <div className="mt-3 flex items-center gap-2 text-[11px] font-mono font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/25 px-3 py-1.5 rounded-xl">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Auto-Hover Ready: {targetAgent}</span>
+              </div>
+            );
+          })()}
         </div>
       ) : teams.isFfa ? (
         <PlayerTable
@@ -345,9 +356,7 @@ export const LiveMatchView: React.FC = () => {
 
 const MatchStatusStrip: React.FC<{
   state: LiveMatchState;
-  onRefresh: () => void;
-  refreshing: boolean;
-}> = ({ state, onRefresh, refreshing }) => {
+}> = ({ state }) => {
   const units = (n: number) => `${n} Player${n === 1 ? '' : 's'}`;
 
   return (
@@ -373,6 +382,23 @@ const MatchStatusStrip: React.FC<{
             : 'IDLE'}
         </span>
       </div>
+
+      {/* Safe Pre-pick status badge */}
+      {(() => {
+        const prepick = getPrepickConfig();
+        const mapKey = state.mapName ? state.mapName.toLowerCase() : '';
+        const targetAgent = (mapKey && prepick.mapAgents[mapKey]?.agentName) || prepick.defaultAgentName;
+        if (!prepick.enabled || !targetAgent) return null;
+        return (
+          <span
+            className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-[9.5px] font-mono font-bold text-emerald-300 shrink-0"
+            title="Safe pre-hover enabled: automatically hovers this agent upon entering Agent Select"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span>Pre-pick: {targetAgent}</span>
+          </span>
+        );
+      })()}
 
       {/* Map */}
       <span className="flex items-center gap-1.5 font-mono text-m3-outline shrink-0">
@@ -407,17 +433,8 @@ const MatchStatusStrip: React.FC<{
         <span>{units(state.blueTeam.length + state.redTeam.length)} in lobby</span>
       </span>
 
-      {/* Refresh button moved right beside sync timestamp */}
+      {/* Sync timestamp (refresh lives in the top bar) */}
       <div className="flex items-center gap-2 font-mono text-m3-outline ml-auto shrink-0">
-        <button
-          onClick={onRefresh}
-          disabled={refreshing}
-          className="flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-white/5 hover:bg-white/10 text-m3-primary border border-white/10 text-[10px] font-semibold cursor-pointer active:scale-95 disabled:opacity-50 transition-colors"
-          title="Refresh match data"
-        >
-          <RefreshCw className={`w-2.5 h-2.5 ${refreshing ? 'animate-spin' : ''}`} />
-          <span>Refresh</span>
-        </button>
         <span className="flex items-center gap-1 text-m3-outline text-[9.5px]">
           <Clock className="w-3 h-3" />
           <span>synced {state.updatedAt ? new Date(state.updatedAt).toLocaleTimeString() : '—'}</span>

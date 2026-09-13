@@ -25,6 +25,16 @@ const STANDARD_MARSHAL = 'fd44b2d5-49ee-77ab-fa56-588f3ac0c268';
 // Real expression assets: a spray and a flex, which need DIFFERENT image paths.
 const SPRAY_ID = '0a6db78c-48b9-a32d-c47a-82be597584c1'; // "VALORANT Spray"
 const FLEX_ID = 'fc33f376-4a58-687c-6961-bd8a7e529346'; // "ORA by OneTap Flex"
+// Real Neptune Odin variant rig: variant chroma + parent skin + VFX level,
+// plus a real gun buddy — what Riot puts in the four sockets of a skinned gun.
+const ODIN = '63e6c2b6-4a8e-869c-3d4c-e38355226584';
+const SKIN_ID_SOCKET = 'bcef87d6-209b-46c6-8b19-fbe40bd95abc';
+const SKIN_LEVEL_SOCKET = 'e7c63390-eda7-46e0-bb7a-a6abdacd2433';
+const BUDDY_SOCKET = '77258665-71d1-4623-bc72-44db9bd5b3b3';
+const NEPTUNE_VARIANT = 'ac845334-4df4-8f44-443c-4b93ebfffdc4'; // "…(Variant 1 Black)"
+const NEPTUNE_SKIN = 'a67c2daa-4f4d-1af0-0ff4-6fafde471776'; // "Neptune Odin"
+const NEPTUNE_LEVEL3 = 'a40c3bb0-46d1-be46-42ad-71bce3e7cd66';
+const COIN_BUDDY = 'ac72bb9a-4368-8502-5dac-698d72021c81'; // "VALORANT Coin Buddy"
 
 const payload = {
   Loadouts: [
@@ -45,6 +55,16 @@ const payload = {
             Sockets: { [SKIN_SOCKET]: { ID: 's2', Item: { ID: STANDARD_MARSHAL, TypeID: 't2' } } },
           },
           [CLASSIC]: { ID: CLASSIC, TypeID: CLASSIC },
+          [ODIN]: {
+            ID: ODIN,
+            TypeID: ODIN,
+            Sockets: {
+              [SKIN_SOCKET]: { ID: 's3', Item: { ID: NEPTUNE_VARIANT, TypeID: 't3' } },
+              [SKIN_ID_SOCKET]: { ID: 's4', Item: { ID: NEPTUNE_SKIN, TypeID: 't4' } },
+              [SKIN_LEVEL_SOCKET]: { ID: 's5', Item: { ID: NEPTUNE_LEVEL3, TypeID: 't5' } },
+              [BUDDY_SOCKET]: { ID: 's6', Item: { ID: COIN_BUDDY, TypeID: 't6' } },
+            },
+          },
         },
         // Sprays and flexes arrive TOGETHER under AESSelections; `Sprays` is
         // absent from the live payload entirely.
@@ -76,11 +96,12 @@ for (const e of l.expressions) console.log(`  expr: ${e.kind.padEnd(5)} "${e.nam
 
 const vandal = l.weapons.find((w) => w.weaponName === 'Vandal');
 const marshal = l.weapons.find((w) => w.weaponName === 'Marshal');
+const odin = l.weapons.find((w) => w.weaponName === 'Odin');
 const spray = l.expressions.find((e) => e.kind === 'spray');
 const flex = l.expressions.find((e) => e.kind === 'flex');
 
 const checks: [string, boolean][] = [
-  ['3 weapons parsed', l.weapons.length === 3],
+  ['4 weapons parsed', l.weapons.length === 4],
   ['subject (PUUID) extracted', l.subject === '29bf3c62-9f92-5b55-8188-a4e88f04b8ec'],
   ['vandal chroma -> real skin art', !!vandal && vandal.skinName.includes('RGX') && vandal.icon.includes('weaponskinchromas')],
   ['vandal not default', vandal?.isDefaultSkin === false],
@@ -91,6 +112,12 @@ const checks: [string, boolean][] = [
   ['spray named', !!spray && spray.name.length > 0],
   ['flex resolved with FLEX path', !!flex && flex.icon.includes('/flex/')],
   ['flex named', !!flex && flex.name.length > 0],
+  ['variant: parent skin name wins over raw chroma label', !!odin && odin.skinName === 'Neptune Odin'],
+  ['variant: not default', odin?.isDefaultSkin === false],
+  ['variant: shows the equipped variant render', !!odin && odin.icon.includes(NEPTUNE_VARIANT)],
+  ['variant: label extracted', odin?.variantLabel === 'Variant 1 Black'],
+  ['variant: VFX level 3', odin?.level === 3],
+  ['variant: gun buddy resolved', odin?.buddyName === 'VALORANT Coin Buddy' && !!odin?.buddyIcon],
   ['resolve by PUUID', resolveLoadoutForPlayer(all, { puuid: l.subject }).loadout !== null],
   ['resolve by characterId', resolveLoadoutForPlayer(all, { characterId: l.characterId }).loadout !== null],
   ['resolve by index', resolveLoadoutForPlayer(all, { index: 0 }).loadout !== null],

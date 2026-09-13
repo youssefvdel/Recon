@@ -6,6 +6,10 @@ import { UtilityView } from './components/UtilityView';
 import { SettingsView } from './components/SettingsView';
 import { AppSettingsView } from './components/AppSettingsView';
 import { TrackerView } from './components/TrackerView';
+import { StoreView } from './components/StoreView';
+import { CrosshairView } from './components/CrosshairView';
+import { PrepickView } from './components/PrepickView';
+import { AccountsView } from './components/AccountsView';
 import { DevDashboard } from './components/DevDashboard';
 import { OverlayView } from './components/OverlayView';
 import { UpdateModal } from './components/UpdateModal';
@@ -65,6 +69,8 @@ export const App: React.FC = () => {
     } else if (isDevWindow) {
       document.title = 'Recon • Dev Dashboard';
     } else {
+      // Current size becomes the floor — the window can never shrink below this.
+      import('./utils/ipc').then((m) => m.lockMinSizeToCurrent()).catch(() => {});
       return setupGlobalWindowDrag();
     }
   }, [isOverlay, isDevWindow]);
@@ -72,7 +78,7 @@ export const App: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<TabType>(() => {
     try {
       const saved = localStorage.getItem('recon_active_tab') as TabType;
-      if (saved && ['overview', 'switcher', 'visualizer', 'sens', 'custom_res', 'gpu', 'borderless', 'game_config', 'settings', 'valorant', 'matches'].includes(saved)) {
+      if (saved && ['overview', 'switcher', 'visualizer', 'sens', 'custom_res', 'gpu', 'borderless', 'game_config', 'settings', 'valorant', 'matches', 'store', 'crosshair', 'accounts', 'prepick'].includes(saved)) {
         return saved;
       }
     } catch {}
@@ -158,20 +164,6 @@ export const App: React.FC = () => {
   useEffect(() => {
     loadAllTelemetry();
 
-    // Keyboard shortcut navigation (1: Tracker, 2: Utility, 3: Game Config, 4: Settings)
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
-      if (e.key === '1') setCurrentTab('overview');
-      if (e.key === '2') setCurrentTab('switcher');
-      if (e.key === '3') setCurrentTab('game_config');
-      if (e.key === '4') setCurrentTab('settings');
-      if (e.key === '5') setCurrentTab('valorant');
-      if (e.key === '6') setCurrentTab('overview');
-      if (e.key === '7') setCurrentTab('matches');
-      if (e.key === '0' && IS_DEV) setCurrentTab('dev');
-    };
-    window.addEventListener('keydown', handleKeyDown);
-
     // Listen for background global hotkey toggle events from Rust backend
     let unlistenFn: (() => void) | undefined;
     let unlistenBlFn: (() => void) | undefined;
@@ -232,7 +224,6 @@ export const App: React.FC = () => {
 
     return () => {
       clearInterval(tabInterval);
-      window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('blur', handleBlur);
       window.removeEventListener('recon_navigate_tab', handleNavigateTab);
       if (unlistenFn) unlistenFn();
@@ -361,6 +352,14 @@ export const App: React.FC = () => {
                 {(currentTab === 'overview' || currentTab === 'matches') && (
                   <TrackerView initialSubTab={currentTab === 'matches' ? 'matches' : 'overview'} />
                 )}
+
+                {currentTab === 'store' && <StoreView />}
+
+                {currentTab === 'crosshair' && <CrosshairView />}
+
+                {currentTab === 'prepick' && <PrepickView />}
+
+                {currentTab === 'accounts' && <AccountsView />}
 
                 {currentTab === 'dev' && IS_DEV && (
                   <DevDashboard />

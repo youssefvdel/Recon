@@ -242,6 +242,10 @@ export type TabType =
   | 'valorant'
   | 'overview'
   | 'matches'
+  | 'store'
+  | 'crosshair'
+  | 'prepick'
+  | 'accounts'
   | 'dev';
 
 export interface UpdateInfo {

@@ -20,7 +20,7 @@ const mockDisplayInfo: DisplayInfo = {
 };
 
 const mockShortcut: ShortcutBinding = {
-  ctrl: false,
+  ctrl: true,
   shift: false,
   alt: false,
   win: false,
@@ -299,6 +299,19 @@ export async function appMinimize(): Promise<void> {
     const { getCurrentWindow } = await import('@tauri-apps/api/window');
     await getCurrentWindow().minimize();
   }
+}
+
+/** Lock the window's minimum size to its current size — it can never be
+ *  resized smaller than this. Main window only; no-op in overlay/dev. */
+export async function lockMinSizeToCurrent(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    const win = getCurrentWindow();
+    if (win.label !== 'main') return;
+    const size = await win.outerSize();
+    await win.setMinSize(size);
+  } catch {}
 }
 
 export async function appToggleMaximize(): Promise<void> {

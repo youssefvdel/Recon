@@ -285,12 +285,79 @@ async function withRiotSlot<R>(fn: () => Promise<R>): Promise<R> {
   }
 }
 
-/** Authed Riot GET from Rust (browser origins are blocked). Refetches entitlements once on expiry. */
+/** Authed Riot GET from Rust (browser origins are blocked). Refetches entitlements once on expiry.
+ * Exported for player-data reads outside the tracker module (notably the wallet). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function riotGet(host: string, path: string): Promise<any> {
+export async function riotGet(host: string, path: string): Promise<any> {
   const call = async (e: DirectEnt): Promise<string> => {
     const version = await resolveVersion();
     return invoke<string>('riot_direct_get', {
+      host,
+      path,
+      accessToken: e.access_token,
+      entitlements: e.entitlements,
+      clientPlatform: platformBlob(),
+      clientVersion: version,
+    });
+  };
+  try {
+    const raw = await withRiotSlot(async () => call(await getEntitlements()));
+    const j = JSON.parse(raw);
+    if (j?.httpStatus === 401 || j?.errorCode === 'BAD_AUTH' || j?.message === 'Unauthorized') {
+      clearEntitlements();
+      return JSON.parse(await withRiotSlot(async () => call(await getEntitlements())));
+    }
+    return j;
+  } catch (e) {
+    if (String(e).includes('RIOT_EXPIRED')) {
+      clearEntitlements();
+      return JSON.parse(await withRiotSlot(async () => call(await getEntitlements())));
+    }
+    throw e;
+  }
+}
+
+/** Authed Riot PUT from Rust — same pipeline as riotGet, but `-X PUT` with a
+ *  real JSON body. Exported for player-data routes that take PUT
+ *  (notably `PUT /playerPref/v3/savePreference` — crosshair saves). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function riotPut(host: string, path: string, body: string): Promise<any> {
+  const call = async (e: DirectEnt): Promise<string> => {
+    const version = await resolveVersion();
+    return invoke<string>('riot_direct_put', {
+      host,
+      path,
+      bodyArg: body,
+      accessToken: e.access_token,
+      entitlements: e.entitlements,
+      clientPlatform: platformBlob(),
+      clientVersion: version,
+    });
+  };
+  try {
+    const raw = await withRiotSlot(async () => call(await getEntitlements()));
+    const j = JSON.parse(raw);
+    if (j?.httpStatus === 401 || j?.errorCode === 'BAD_AUTH' || j?.message === 'Unauthorized') {
+      clearEntitlements();
+      return JSON.parse(await withRiotSlot(async () => call(await getEntitlements())));
+    }
+    return j;
+  } catch (e) {
+    if (String(e).includes('RIOT_EXPIRED')) {
+      clearEntitlements();
+      return JSON.parse(await withRiotSlot(async () => call(await getEntitlements())));
+    }
+    throw e;
+  }
+}
+/** Authed Riot POST from Rust — same pipeline as riotGet, but `-X POST` with
+ *  an empty JSON body. Exported for player-data routes that reject GET
+ *  (notably `POST /store/v3/storefront/{puuid}` — the daily shop). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function riotPost(host: string, path: string): Promise<any> {
+  const call = async (e: DirectEnt): Promise<string> => {
+    const version = await resolveVersion();
+    return invoke<string>('riot_direct_post', {
       host,
       path,
       accessToken: e.access_token,
@@ -601,7 +668,7 @@ export interface PlayerIdentity {
   level: number;
 }
 
-let identityCache: { at: number; id: PlayerIdentity } | null = null;
+let identityCache: { at: number; puuid: string; id: PlayerIdentity } | null = null;
 
 /** Equipped player card + account level.
  *
@@ -636,8 +703,15 @@ function decodeBase64Utf8(b64: string): string {
 }
 
 export async function fetchIdentityDirect(_region: string): Promise<PlayerIdentity> {
-  if (identityCache && Date.now() - identityCache.at < 30 * 60 * 1000) return identityCache.id;
   const ent = await getEntitlements();
+  // Keyed by account: after an account switch the previous user's card/level
+  // must not be served from cache for 30 minutes.
+  if (
+    identityCache &&
+    identityCache.puuid.toLowerCase() === ent.puuid.toLowerCase() &&
+    Date.now() - identityCache.at < 30 * 60 * 1000
+  )
+    return identityCache.id;
   const fromPresence = await fetchPresenceIdentity(ent.puuid).catch(() => null);
   const id: PlayerIdentity = {
     cardId: fromPresence?.cardId ?? '',
@@ -645,7 +719,7 @@ export async function fetchIdentityDirect(_region: string): Promise<PlayerIdenti
     level: fromPresence?.level ?? 0,
   };
   if (!id.cardId) throw new Error('No player card equipped.');
-  identityCache = { at: Date.now(), id };
+  identityCache = { at: Date.now(), puuid: ent.puuid, id };
   return id;
 }
 
@@ -696,7 +770,18 @@ export async function detectRegion(): Promise<string> {
       if (part) {
         const decoded = JSON.parse(atob(part));
         const reg = decoded?.pp?.c || decoded?.c;
-        if (reg && typeof reg === 'string') return reg.toLowerCase();
+        if (reg && typeof reg === 'string') {
+          // Persist so the 7-day cache branch below can hit when the token
+          // is momentarily unreadable — without a writer that branch is dead
+          // and non-EU users fall through to 'eu'.
+          try {
+            localStorage.setItem(
+              'aspect_tracker_shard',
+              JSON.stringify({ savedAt: Date.now(), region: reg.toLowerCase() })
+            );
+          } catch {}
+          return reg.toLowerCase();
+        }
       }
     }
   } catch {}
@@ -1321,14 +1406,26 @@ export const glzHostFor = (region: string): string => {
 };
 
 /**
- * Equipped skins + sprays for everyone in the IN-PROGRESS match.
+ * Equipped skins + sprays for everyone in the match — agent select AND in-progress.
  *
- * Only valid while the match is live — Riot exposes loadouts nowhere else
- * (the per-player personalization routes 404). Returns the raw `Loadouts`
- * array; `src/utils/loadout.ts` parses it. Never throws: the caller is a
- * poll/UI path, so a miss returns `[]`.
+ * Two routes, one per phase (verified against valapidocs + live payloads):
+ *   GET glz-…/pregame/v1/matches/{pregameId}/loadouts    (agent select)
+ *   GET glz-…/core-game/v1/matches/{coregameId}/loadouts (in match)
+ *
+ * The match-ID namespaces differ per phase, so a pregame ID 404s on the
+ * core-game route and vice versa. The caller's phase is tried first, then the
+ * other one — this runs once per Skins click (never polled), so the extra 404
+ * on a phase change is cheap. First non-empty `Loadouts` array wins.
+ *
+ * Riot exposes loadouts nowhere else (the per-player personalization routes
+ * 404). Returns the raw `Loadouts` array; `src/utils/loadout.ts` parses it.
+ * Never throws: the caller is a UI path, so a miss returns `[]`.
  */
-export async function fetchMatchLoadouts(matchId: string, region: string): Promise<unknown[]> {
+export async function fetchMatchLoadouts(
+  matchId: string,
+  region: string,
+  phase?: 'pregame' | 'coregame',
+): Promise<unknown[]> {
   if (!matchId) return [];
   /* Website preview: no Riot client available, so serve the seeded loadout
      payload. Same shape Riot returns, so parseLoadouts/resolveLoadoutForPlayer
@@ -1342,11 +1439,28 @@ export async function fetchMatchLoadouts(matchId: string, region: string): Promi
   }
   try {
     const glz = glzHostFor(region);
-    const raw = await riotGet(glz, `/core-game/v1/matches/${matchId}/loadouts`).catch(() =>
-      riotGet(glz, `/coregame/v1/matches/${matchId}/loadouts`)
-    );
-    const list = raw?.Loadouts ?? raw?.loadouts;
-    return Array.isArray(list) ? list : [];
+    const routes =
+      phase === 'pregame'
+        ? [
+            `/pregame/v1/matches/${matchId}/loadouts`,
+            `/core-game/v1/matches/${matchId}/loadouts`,
+            `/coregame/v1/matches/${matchId}/loadouts`,
+          ]
+        : [
+            `/core-game/v1/matches/${matchId}/loadouts`,
+            `/coregame/v1/matches/${matchId}/loadouts`,
+            `/pregame/v1/matches/${matchId}/loadouts`,
+          ];
+    for (const route of routes) {
+      try {
+        const raw = await riotGet(glz, route);
+        const list = raw?.Loadouts ?? raw?.loadouts;
+        if (Array.isArray(list) && list.length > 0) return list;
+      } catch {
+        /* Wrong phase namespace 404s here — try the next route. */
+      }
+    }
+    return [];
   } catch {
     return [];
   }
@@ -1433,14 +1547,20 @@ async function fetchLiteMatchResult(
       scores[normTeam(t?.teamId)] = Number(t?.roundsWon ?? 0);
     }
     const row: Record<string, 1 | 0> = {};
+    // FFA modes have no two-sided result — recording one would pick an
+    // arbitrary opponent, so the whole match is unknown rather than wrong.
+    if (Object.keys(scores).length !== 2) return null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     for (const p of (Array.isArray(j?.players) ? j.players : []) as any[]) {
       const sub = String(p?.subject ?? '');
       if (!sub) continue;
       const tm = normTeam(p?.teamId);
       const opp = Object.keys(scores).find((k) => k !== tm);
+      if (!opp) continue;
       const mine = scores[tm] ?? 0;
-      const theirs = opp ? scores[opp] ?? 0 : 0;
+      const theirs = scores[opp] ?? 0;
+      // Draws are neither — recording them as losses fabricates the record.
+      if (mine === theirs) continue;
       row[sub] = mine > theirs ? 1 : 0;
     }
     if (Object.keys(row).length === 0) return null;
@@ -1494,6 +1614,7 @@ export function isMatchStateEqual(a: LiveMatchState | null, b: LiveMatchState | 
     a.phase !== b.phase ||
     a.matchId !== b.matchId ||
     a.mapId !== b.mapId ||
+    a.mapName !== b.mapName ||
     a.mode !== b.mode ||
     a.queueId !== b.queueId ||
     a.isDeathmatch !== b.isDeathmatch ||
@@ -1502,15 +1623,18 @@ export function isMatchStateEqual(a: LiveMatchState | null, b: LiveMatchState | 
     a.startingSide !== b.startingSide ||
     a.allyScore !== b.allyScore ||
     a.enemyScore !== b.enemyScore ||
+    a.error !== b.error ||
     a.blueTeam.length !== b.blueTeam.length ||
     a.redTeam.length !== b.redTeam.length
   ) {
     return false;
   }
+  // NOTE: `updatedAt` is deliberately excluded — it advances every poll and
+  // would make every comparison unequal.
 
   const isPlayerEqual = (p1: LiveMatchPlayer, p2: LiveMatchPlayer) => {
     return (
-      p1.puuid === p2.puuid &&
+      p1.puuid.toLowerCase() === p2.puuid.toLowerCase() &&
       p1.name === p2.name &&
       p1.tag === p2.tag &&
       p1.team === p2.team &&
@@ -1643,8 +1767,11 @@ export async function fetchPlayer24hRecord(
       recent24hCache.set(key, record);
       return record;
     } catch {
-      recent24hCache.set(key, empty);
-      return empty;
+      // A transient Riot blip must not blank a known W/L + streak for the
+      // full TTL (contrast the MMR path, which preserves last-good). Keep the
+      // previous record; only genuine results are cached.
+      const prev = recent24hCache.get(key);
+      return prev ?? empty;
     } finally {
       recent24hInflight.delete(key);
     }
@@ -1667,6 +1794,10 @@ export interface LivePlayerStatsEntry {
   country?: string;
   fetchedAt: number;
   retryAfter?: number;
+  /** Last successful 24h-record refresh — decoupled from `fetchedAt`, which
+   *  TRN updates also bump. Sharing one timestamp let each source suppress
+   *  the other's refresh. */
+  recFetchedAt?: number;
 }
 
 const livePlayerStatsCache = new Map<string, LivePlayerStatsEntry>();
@@ -1686,14 +1817,22 @@ export function getCachedLivePlayerStats(puuid: string): LivePlayerStatsEntry | 
       if (raw) {
         const store = JSON.parse(raw) as Record<string, LivePlayerStatsEntry>;
         const entry = store[pU];
-        if (entry && Date.now() - entry.fetchedAt < LIVE_STATS_TTL) {
-          livePlayerStatsCache.set(pU, entry);
-          return entry;
+        if (entry) {
+          // Self-heal: clear poisoned multi-hour lockouts from previous sessions
+          if (entry.retryAfter && entry.retryAfter > Date.now() + 2 * 60 * 1000) {
+            entry.retryAfter = undefined;
+          }
+          if (Date.now() - entry.fetchedAt < LIVE_STATS_TTL) {
+            livePlayerStatsCache.set(pU, entry);
+            return entry;
+          }
         }
       }
     } catch {}
   }
-  return mem;
+  // TTL-expired with no fresh persisted copy: stale must not masquerade as
+  // fresh. Callers treat a return value as valid stats.
+  return undefined;
 }
 
 export function setCachedLivePlayerStats(puuid: string, entry: Partial<LivePlayerStatsEntry>): void {
@@ -1778,12 +1917,27 @@ const LIVE_MATCH_CACHE_KEY = 'recon_live_match_state_v2';
 /* Seeded lobby used by the website preview (see website/src/previewData.ts). */
 const PREVIEW_LIVE_MATCH_KEY = 'recon_preview_live_match';
 const LAST_ACTIVE_MATCH_KEY = 'recon_last_active_match_v1';
+/** A stored lobby older than this is never shown as "previous match". */
+const LAST_ACTIVE_TTL_MS = 6 * 60 * 60 * 1000;
+/** Key of the match whose round sequence is tracked (old keys are deleted). */
+let lastRoundSeqMatchId = '';
+const isLastActiveFresh = (s: LiveMatchState | null): s is LiveMatchState =>
+  !!s && Date.now() - (s.updatedAt ?? 0) < LAST_ACTIVE_TTL_MS;
 let lastLiveMatchFetchTime = 0;
 let lastLiveMatchResult: LiveMatchState | null = null;
 let lastActiveMatchState: LiveMatchState | null = null;
+/** Shared by concurrent pollers so overlapping polls run one fetch, not three. */
+let liveMatchInflight: Promise<LiveMatchState> | null = null;
+/** Fetch-starter sequence — lets superseded executions adopt the newest result. */
+let liveMatchIssue = 0;
+/** Monotonic execution id — only the newest fetch may persist shared state. */
+let liveMatchSeq = 0;
 
 /** Returns the last completed/active match so the UI stays populated while waiting in queue. */
 export function getLastActiveMatch(): LiveMatchState | null {
+  if (lastActiveMatchState && !isLastActiveFresh(lastActiveMatchState)) {
+    lastActiveMatchState = null;
+  }
   if (lastActiveMatchState && (lastActiveMatchState.blueTeam.length > 0 || lastActiveMatchState.redTeam.length > 0)) {
     return healMapName(lastActiveMatchState);
   }
@@ -1793,6 +1947,10 @@ export function getLastActiveMatch(): LiveMatchState | null {
       if (raw) {
         const parsed = JSON.parse(raw) as LiveMatchState;
         if (parsed && (parsed.blueTeam?.length > 0 || parsed.redTeam?.length > 0)) {
+          if (!isLastActiveFresh(parsed)) {
+            localStorage.removeItem(LAST_ACTIVE_MATCH_KEY);
+            return null;
+          }
           lastActiveMatchState = parsed;
           return healMapName(parsed);
         }
@@ -1838,15 +1996,61 @@ export function peekLiveMatchState(): LiveMatchState | null {
   return null;
 }
 
-export async function fetchLiveMatchState(regionOverride?: string, forceRefresh = false): Promise<LiveMatchState> {
+/**
+ * Live-match entry point shared by every poller (overlay, LiveMatchView,
+ * focus/visibility handlers, global refresh).
+ *
+ * Concurrent callers share one in-flight fetch, and a monotonic sequence
+ * guards the shared writes — a slow poll N can neither fork duplicate Riot
+ * traffic nor overwrite a fresh poll N+1's teams/scores in memory,
+ * localStorage, or the cross-window event.
+ */
+export function fetchLiveMatchState(regionOverride?: string, forceRefresh = false): Promise<LiveMatchState> {
+  const devMock = getDevMockMatch();
+  if (devMock) return Promise.resolve(devMock);
+  if (!forceRefresh && liveMatchInflight) {
+    // Sharer: hand back whatever is newest when this resolves — never a
+    // stale intermediate result.
+    const shared = liveMatchInflight;
+    return shared.then((s) => {
+      const cur = liveMatchInflight;
+      return cur && cur !== shared ? cur : s;
+    });
+  }
+  const task = fetchLiveMatchStateInner(regionOverride, forceRefresh);
+  const myIssue = ++liveMatchIssue;
+  liveMatchInflight = task;
+  task.then(
+    () => {
+      if (liveMatchInflight === task) liveMatchInflight = null;
+    },
+    () => {
+      if (liveMatchInflight === task) liveMatchInflight = null;
+    }
+  );
+  // Adopt-newest: if a newer fetch started while this one ran, hand back the
+  // newest result instead of flashing stale data for a frame. Overlapping
+  // executions (interval poll vs manual refresh vs focus handler) used to
+  // resolve out of order — live, then idle — which is the match↔waiting flicker.
+  return task.then((s) => {
+    if (myIssue !== liveMatchIssue && liveMatchInflight && liveMatchInflight !== task) {
+      return liveMatchInflight;
+    }
+    return s;
+  });
+}
+
+async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = false): Promise<LiveMatchState> {
   // Dev dashboard simulator: canned match without Riot open (dev builds only).
   const devMock = getDevMockMatch();
   if (devMock) return devMock;
+  // Newest-wins token for the shared writes at the end of this fetch.
+  const mySeq = ++liveMatchSeq;
 
   const now = Date.now();
   if (!forceRefresh) {
     if (lastLiveMatchResult && now - lastLiveMatchFetchTime < 2500) {
-      return lastLiveMatchResult;
+      return healMapName(lastLiveMatchResult);
     }
     if (typeof localStorage !== 'undefined') {
       try {
@@ -1935,12 +2139,15 @@ export async function fetchLiveMatchState(regionOverride?: string, forceRefresh 
           matchData = await riotGet(glz, `/pregame/v1/matches/${matchId}`);
           if (matchData && !matchData.httpStatus) {
             phase = 'pregame';
+            // Safe Agent Pre-Picker: safely hover preferred agent once per match
+            import('./prepick').then((m) => m.trySafePrepick(matchId, region, matchData?.MapID)).catch(() => {});
           }
         }
       } catch {}
     }
 
     if (phase === 'idle' || !matchData) {
+      import('./prepick').then((m) => m.resetPrepickLatch()).catch(() => {});
       // If we were previously in a live match or agent select, verify local presence before declaring idle.
       // This prevents mid-game session loss caused by transient Riot cloud gateway blips or token re-auth.
       if (lastLiveMatchResult && lastLiveMatchResult.phase !== 'idle') {
@@ -1975,10 +2182,11 @@ export async function fetchLiveMatchState(regionOverride?: string, forceRefresh 
               }
               if (phase === 'idle' || !matchData) {
                 // Game client is still INGAME/PREGAME; transient Riot cloud hiccup: preserve live match state!
-                return {
-                  ...lastLiveMatchResult,
-                  updatedAt: Date.now(),
-                };
+                // (Widened read: the outer guard already narrowed `.phase`, so a
+                // direct `=== 'idle'` comparison won't compile.)
+                const prevPhase: string = lastLiveMatchResult?.phase ?? 'idle';
+                if (!lastLiveMatchResult || prevPhase === 'idle') return idleState;
+                return healMapName({ ...lastLiveMatchResult, updatedAt: Date.now() });
               }
             }
           }
@@ -2164,8 +2372,15 @@ export async function fetchLiveMatchState(regionOverride?: string, forceRefresh 
     >();
     const missingMmr = puuids.filter((p) => {
       const pU = p.toLowerCase();
-      const cached =
-        liveMmrCache.get(p) ?? liveMmrCache.get(pU) ?? liveMmrCache.get(p.toUpperCase());
+      // Prune stale entries so one map per player cannot grow without bound
+      // across matches.
+      if (liveMmrCache.size > 150) {
+        const cutoff = Date.now() - MMR_TTL_MS;
+        for (const [k, v] of liveMmrCache) {
+          if (v.fetchedAt < cutoff) liveMmrCache.delete(k);
+        }
+      }
+      const cached = liveMmrCache.get(p) ?? liveMmrCache.get(pU);
       if (cached) {
         // A failed entry backs off briefly; a resolved rank is good for the
         // session, so one transient blip can no longer blank a lobby for 15min.
@@ -2399,12 +2614,18 @@ export async function fetchLiveMatchState(regionOverride?: string, forceRefresh 
     // Sort all clusters by their primary member PUUID so order never flips
     validClusters.sort((a, b) => a[0].localeCompare(b[0]));
 
-    // Match-scoped cache so party indices stay 100% static for the match duration
+    // Match-scoped cache so party indices stay 100% static for the match duration.
+    // Pregame and core-game IDs live in different namespaces, so the raw key
+    // changes mid-match — carry indices over instead of resetting (pruning
+    // players who left), so party colors survive agent select → match start.
     const currentMatchKey = String(matchId || phase || 'current').toLowerCase().trim();
     if (activePartyMatchKey !== currentMatchKey) {
       activePartyMatchKey = currentMatchKey;
-      matchPartyIndexMap.clear();
-      nextMatchPartyIndex = 1;
+      const present = new Set(rawPlayers.map((rp) => rp.puuid.toLowerCase()));
+      for (const k of [...matchPartyIndexMap.keys()]) {
+        if (!present.has(k)) matchPartyIndexMap.delete(k);
+      }
+      if (matchPartyIndexMap.size === 0) nextMatchPartyIndex = 1;
     }
 
     const playerPartyIndexMap = new Map<string, number>();
@@ -2443,14 +2664,17 @@ export async function fetchLiveMatchState(regionOverride?: string, forceRefresh 
         lastLiveMatchResult?.blueTeam.find((bp) => bp.puuid.toLowerCase() === pU) ||
         lastLiveMatchResult?.redTeam.find((rp) => rp.puuid.toLowerCase() === pU);
       const prevHasRealName = !!prevPlayer && !!prevPlayer.name && !prevPlayer.name.startsWith('Player ');
-      const name = realName || (prevHasRealName ? prevPlayer!.name : isSelf ? 'You' : `Player ${idx + 1}`);
+      // Deterministic placeholder: poll-order indexes (`Player ${idx+1}`) rename
+      // the same unknown PUUID whenever Riot reorders rows, which the comparator
+      // reads as a change and re-renders every poll. A puuid suffix is stable.
+      const anonSuffix = p.puuid.replace(/-/g, '').slice(-4).toUpperCase() || String(idx + 1);
+      const name = realName || (prevHasRealName ? prevPlayer!.name : isSelf ? 'You' : `Player ${anonSuffix}`);
       const tag = realName ? realTag : prevHasRealName ? prevPlayer!.tag : '';
       const nameResolved = !!realName || prevHasRealName;
 
       const mmr =
         mmrMap.get(p.puuid) ||
         mmrMap.get(pU) ||
-        mmrMap.get(p.puuid.toUpperCase()) ||
         (prevPlayer
           ? {
               tier: prevPlayer.tier,
@@ -2507,15 +2731,18 @@ export async function fetchLiveMatchState(regionOverride?: string, forceRefresh 
                   if (res?.stats?.hsPct != null) update.hsPct = Math.round(res.stats.hsPct);
                   if (res?.stats?.trnScore != null) update.trnScore = Math.round(res.stats.trnScore);
                   if (res?.stats?.acs != null) update.acs = Math.round(res.stats.acs);
-                  // If private or no stats found, set long retryAfter (4 hours) so we never spam Tracker.gg
+                  // If private or no stats found, set short backoff (5 min) so we can retry later
                   if (!res || !res.stats || res.stats.kd == null) {
-                    update.retryAfter = Date.now() + 4 * 60 * 60 * 1000;
+                    update.retryAfter = Date.now() + 5 * 60 * 1000;
                   }
                   setCachedLivePlayerStats(p.puuid, update);
                 })
                 .catch(() => {
+                  // Align retry with the live cooldown expiry (+2s) so a player
+                  // never sleeps through availability; floor 30s for transient errors.
+                  const cool = trnCooldownRemainingMs();
                   setCachedLivePlayerStats(p.puuid, {
-                    retryAfter: Date.now() + 2 * 60 * 60 * 1000,
+                    retryAfter: Date.now() + Math.max(30 * 1000, cool + 2000),
                   });
                 })
                 .finally(() => {
@@ -2538,7 +2765,7 @@ export async function fetchLiveMatchState(regionOverride?: string, forceRefresh 
         (cached24h.recentWon == null &&
           cached24h.recentLost == null &&
           Date.now() > (cached24h.retryAfter ?? 0)) ||
-        Date.now() - (cached24h?.fetchedAt ?? 0) > 10 * 60 * 1000;
+        Date.now() - (cached24h?.recFetchedAt ?? 0) > 10 * 60 * 1000;
 
       if (needs24h) {
         fetchPlayer24hRecord(p.puuid, region, liveQueue)
@@ -2550,7 +2777,7 @@ export async function fetchLiveMatchState(regionOverride?: string, forceRefresh 
               recentLost: rec.lost,
               streak: rec.streak,
               streakIsWin: rec.streakIsWin,
-              fetchedAt: Date.now(),
+              recFetchedAt: Date.now(),
             });
           })
           .catch(() => {});
@@ -2642,7 +2869,10 @@ export async function fetchLiveMatchState(regionOverride?: string, forceRefresh 
       updatedAt: Date.now(),
     };
 
-    if (finalState.phase !== 'idle' && (finalState.blueTeam.length > 0 || finalState.redTeam.length > 0)) {
+    // A superseded poll must not overwrite fresher data a newer execution
+    // already persisted — newest execution wins.
+    const isNewest = mySeq === liveMatchSeq;
+    if (isNewest && finalState.phase !== 'idle' && (finalState.blueTeam.length > 0 || finalState.redTeam.length > 0)) {
       lastActiveMatchState = finalState;
       if (typeof localStorage !== 'undefined') {
         try {
@@ -2651,9 +2881,14 @@ export async function fetchLiveMatchState(regionOverride?: string, forceRefresh 
       }
     }
 
-    // Background score progression sequence tracker:
+    // Background score progression sequence tracker. Old match keys are
+    // deleted on match change so one key per matchId cannot accumulate forever.
     if (typeof localStorage !== 'undefined' && matchId) {
       try {
+        if (lastRoundSeqMatchId && lastRoundSeqMatchId !== matchId) {
+          localStorage.removeItem(`recon_live_round_seq_${lastRoundSeqMatchId}`);
+        }
+        lastRoundSeqMatchId = matchId;
         const roundSeqKey = `recon_live_round_seq_${matchId}`;
         const rawSeq = localStorage.getItem(roundSeqKey);
         let seqData: { ally: number; enemy: number; history: boolean[] } = rawSeq
@@ -2661,8 +2896,8 @@ export async function fetchLiveMatchState(regionOverride?: string, forceRefresh 
           : { ally: 0, enemy: 0, history: [] };
 
         if (liveAllyScore === 0 && liveEnemyScore === 0) {
-          seqData = { ally: 0, enemy: 0, history: [] };
-          localStorage.setItem(roundSeqKey, JSON.stringify(seqData));
+          // Write the reset once — every 0-0 poll rewriting it is pure thrash.
+          if (!rawSeq) localStorage.setItem(roundSeqKey, JSON.stringify(seqData));
         } else {
           if (liveAllyScore > seqData.ally) {
             const diff = liveAllyScore - seqData.ally;
@@ -2674,25 +2909,28 @@ export async function fetchLiveMatchState(regionOverride?: string, forceRefresh 
             for (let i = 0; i < diff; i++) seqData.history.push(false);
             seqData.enemy = liveEnemyScore;
           }
+          if (seqData.history.length > 200) seqData.history = seqData.history.slice(-200);
           localStorage.setItem(roundSeqKey, JSON.stringify(seqData));
         }
       } catch {}
     }
 
-    lastLiveMatchResult = finalState;
-    lastLiveMatchFetchTime = Date.now();
-    if (typeof localStorage !== 'undefined') {
-      try {
-        localStorage.setItem(
-          LIVE_MATCH_CACHE_KEY,
-          JSON.stringify({ at: lastLiveMatchFetchTime, state: finalState })
-        );
-      } catch {}
-    }
+    if (isNewest) {
+      lastLiveMatchResult = finalState;
+      lastLiveMatchFetchTime = Date.now();
+      if (typeof localStorage !== 'undefined') {
+        try {
+          localStorage.setItem(
+            LIVE_MATCH_CACHE_KEY,
+            JSON.stringify({ at: lastLiveMatchFetchTime, state: finalState })
+          );
+        } catch {}
+      }
 
-    // Broadcast across windows via Tauri event
-    if (isTauri()) {
-      emit('recon:live-match-sync', finalState).catch(() => {});
+      // Broadcast across windows via Tauri event
+      if (isTauri()) {
+        emit('recon:live-match-sync', finalState).catch(() => {});
+      }
     }
 
     return finalState;

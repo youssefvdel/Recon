@@ -16,6 +16,9 @@ import {
   Monitor,
   RefreshCw,
   Coffee,
+  ShoppingBag,
+  Users,
+  UserCheck,
 } from 'lucide-react';
 import type { DisplayInfo, GpuInfo, TabType } from '../types';
 import {
@@ -30,6 +33,7 @@ import {
 } from '../utils/ipc';
 import { IS_DEV } from '../utils/devTools';
 import { performGlobalRefresh } from '../hooks/useTrackerData';
+import { trnCooldownRemainingMs, resetTrnCooldown } from '../utils/trn';
 
 interface TopBarProps {
   currentTab: TabType;
@@ -105,6 +109,26 @@ const TAB_METADATA: Record<
     description: 'Overview, match history, performance, agents, and maps — live from Riot + TRN',
     icon: TrendingUp,
   },
+  store: {
+    title: 'Account Store',
+    description: 'Daily offers, accessories, and featured bundle — live from Riot',
+    icon: ShoppingBag,
+  },
+  crosshair: {
+    title: 'Crosshair',
+    description: 'Recolor any crosshair profile to any color — saved server-side',
+    icon: Crosshair,
+  },
+  prepick: {
+    title: 'Agent Pre-Picker',
+    description: 'Auto-hover your preferred agent per map — safe hover only, zero ban risk',
+    icon: UserCheck,
+  },
+  accounts: {
+    title: 'Accounts',
+    description: 'Quick-switch Riot logins — snapshots stay on this PC',
+    icon: Users,
+  },
   dev: {
     title: 'Dev Dashboard',
     description: 'Dev-builds only — simulators, IPC smoke tests, backend event log',
@@ -120,11 +144,22 @@ export const TopBar: React.FC<TopBarProps> = ({
   const Icon = meta.icon;
   const [isMaximized, setIsMaximized] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [trnCoolingSec, setTrnCoolingSec] = useState<number>(0);
   const [showClove, setShowClove] = useState(false);
   const [dodgeOffset, setDodgeOffset] = useState({ x: 0, y: 0 });
   const [dodgeCount, setDodgeCount] = useState(0);
   const cloveRef = useRef<HTMLDivElement>(null);
   const coffeeBtnRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const tick = () => {
+      const ms = trnCooldownRemainingMs();
+      setTrnCoolingSec(ms > 0 ? Math.ceil(ms / 1000) : 0);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const handleXDodge = () => {
     if (dodgeCount < 3) {
@@ -296,9 +331,33 @@ export const TopBar: React.FC<TopBarProps> = ({
 
       {/* Right Controls Container */}
       <div
-        className="flex items-center space-x-3 shrink-0"
+        className="flex items-center space-x-2.5 shrink-0"
         onMouseDown={(e) => e.stopPropagation()}
       >
+        {/* Rate Limit & API Health Indicator */}
+        {trnCoolingSec > 0 ? (
+          <button
+            type="button"
+            onClick={() => {
+              resetTrnCooldown();
+              setTrnCoolingSec(0);
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/15 border border-amber-400/40 text-amber-300 text-[10px] font-mono font-bold animate-pulse cursor-pointer hover:bg-amber-500/25 transition-colors"
+            title="Tracker.gg rate limit cooldown active — click to force reset"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+            <span>TRN Cooling ({trnCoolingSec}s)</span>
+          </button>
+        ) : (
+          <div
+            className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-m3-surface-container border border-m3-outline-subtle text-[9.5px] font-mono text-m3-outline"
+            title="All external APIs (TRN, Blitz & Riot) are connected and healthy"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            <span>APIs Ready</span>
+          </div>
+        )}
+
         {/* Separated Square-Rounded Window Controls */}
         <div className="flex items-center gap-1.5">
           <button

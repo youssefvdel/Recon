@@ -7,6 +7,17 @@ html, body {
   padding: 0;
 }
 
+/* Smooth scrolling everywhere — wheel, touch, and programmatic scrolls. */
+html {
+  scroll-behavior: smooth;
+}
+.custom-scrollbar,
+.overflow-y-auto,
+.overflow-x-auto,
+.overflow-auto {
+  scroll-behavior: smooth;
+}
+
 body.bg-transparent,
 html.bg-transparent {
   background: transparent !important;
@@ -100,6 +111,68 @@ input[type="number"] {
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #e8def8 !important;
+}
+
+/* Shared custom range slider — taken from the stretch preview's ratio slider:
+   thin rounded track + round primary thumb with glow. */
+input[type='range'].m3-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 9999px;
+  background: #3a2a4c;
+  outline: none;
+  cursor: pointer;
+}
+input[type='range'].m3-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: #d0bcff;
+  border: none;
+  box-shadow: 0 0 8px rgba(208, 188, 255, 0.6);
+  cursor: pointer;
+}
+input[type='range'].m3-range::-moz-range-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: #3a2a4c;
+}
+input[type='range'].m3-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: #d0bcff;
+  border: none;
+  box-shadow: 0 0 8px rgba(208, 188, 255, 0.6);
+  cursor: pointer;
+}
+
+/* Shared custom color swatch — strips native picker chrome, themed rounded
+   well. Pair with an inline box-shadow glow of the current color. */
+input[type='color'].m3-color {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 34px;
+  height: 24px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: #1a1626;
+  padding: 2px;
+  cursor: pointer;
+}
+input[type='color'].m3-color::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+input[type='color'].m3-color::-webkit-color-swatch {
+  border: none;
+  border-radius: 6px;
+}
+input[type='color'].m3-color::-moz-color-swatch {
+  border: none;
+  border-radius: 6px;
 }
 
 @layer utilities {

@@ -43,11 +43,23 @@
  * ---------------------------------------------------------------------------
  */
 
-const CATALOG_KEY = 'recon_weapon_catalog_v4';
+const CATALOG_KEY = 'recon_weapon_catalog_v5';
 const API = 'https://valorant-api.com/v1';
 
 /** The socket holding the equipped weapon skin. Fixed across patches so far. */
 export const SKIN_SOCKET = '3ad1b2b2-acdb-4524-852f-954a76ddae0a';
+/**
+ * Full socket map per weapon entry (verified against live pregame + coregame
+ * payloads and RXJpaw/Valorant-Companion's working parser):
+ *   bcef87d6…  skin        → Item.ID is the SKIN uuid (parent identity)
+ *   3ad1b2b2…  skin_chroma → Item.ID is the CHROMA uuid (the equipped variant)
+ *   e7c63390…  skin_level  → Item.ID is the LEVEL uuid (VFX/finisher stage)
+ *   77258665…  buddy       → Item.ID is the BUDDY uuid (absent when unequipped)
+ * (A fifth dd3bf334… entry carries a buddy instance id — not needed for display.)
+ */
+export const SKIN_ID_SOCKET = 'bcef87d6-209b-46c6-8b19-fbe40bd95abc';
+export const SKIN_LEVEL_SOCKET = 'e7c63390-eda7-46e0-bb7a-a6abdacd2433';
+export const BUDDY_SOCKET = '77258665-71d1-4623-bc72-44db9bd5b3b3';
 
 /** Category strings Riot ships on `/v1/weapons`, mapped to display headings. */
 export const CATEGORY_LABELS: Record<string, string> = {
@@ -154,7 +166,7 @@ export const ARSENAL_COLUMNS: ColumnDef[] = [
 
 /** Canonical top-to-bottom weapon order, matching the collection screen. */
 export const WEAPON_ORDER = [
-  'Classic', 'Shorty', 'Frenzy', 'Ghost', 'Bandit', 'Sheriff',
+  'Classic', 'Shorty', 'Frenzy', 'Ghost', 'Sheriff',
   'Stinger', 'Spectre',
   'Bucky', 'Judge',
   'Bulldog', 'Guardian', 'Phantom', 'Vandal',
@@ -181,11 +193,11 @@ export interface WeaponInfo {
   icon: string;
 }
 
-/** A cosmetic resolved from the sprays or flex table. */
+/** A cosmetic resolved from the sprays, flex, or buddy table. */
 export interface Cosmetic {
   name: string;
   icon: string;
-  kind: 'spray' | 'flex';
+  kind: 'spray' | 'flex' | 'buddy';
 }
 
 export interface WeaponCatalog {
@@ -197,6 +209,16 @@ export interface WeaponCatalog {
   skinIndex: Record<string, { weaponUuid: string; name: string; icon: string; isDefault: boolean }>;
   sprays: Record<string, Cosmetic>;
   flex: Record<string, Cosmetic>;
+  /** Buddy uuid -> art. The buddy socket is absent when nothing is equipped. */
+  buddies: Record<string, Cosmetic>;
+  /**
+   * Chroma uuid -> Riot's raw chroma label, e.g.
+   * "Neptune Odin Level 3 / (Variant 1 Black)". NEVER shown verbatim: the
+   * viewer shows the parent skin name plus the extracted "(Variant …)" tag.
+   */
+  chromaNames: Record<string, string>;
+  /** Skin-level uuid -> 1-based level number ("Lv 4"), from levels[] order. */
+  levelIndex: Record<string, number>;
 }
 
 export interface EquippedWeapon {
@@ -208,11 +230,34 @@ export interface EquippedWeapon {
   icon: string;
   /** True when the player runs the default (unskinned) weapon entry. */
   isDefaultSkin: boolean;
+  /** Riot's variant tag, e.g. "Variant 1 Black". Empty for base skins. */
+  variantLabel: string;
+  /** Equipped VFX stage, 0 when unknown. */
+  level: number;
+  buddyName: string;
+  buddyIcon: string;
 }
+
+/**
+ * Riot's "(Variant …)" tag out of a raw chroma label like
+ * "Neptune Odin Level 3 / (Variant 1 Black)". Empty when the chroma carries
+ * no variant marking (base colors).
+ */
+export const variantLabelOf = (chromaName: string): string => {
+  const m = /\(([^)]*variant[^)]*)\)/i.exec(chromaName ?? '');
+  return m ? m[1].trim().replace(/\s+/g, ' ') : '';
+};
+
+/** Chroma labels are sometimes just the gun ("Ghost") — never a skin name. */
+const isBareWeaponName = (label: string, weaponName: string): boolean => {
+  const s = (label ?? '').trim().toLowerCase();
+  const w = (weaponName ?? '').trim().toLowerCase();
+  return s !== '' && (s === w || s === `standard ${w}`);
+};
 
 export interface EquippedExpression {
   assetId: string;
-  kind: 'spray' | 'flex';
+  kind: 'spray' | 'flex' | 'buddy';
   name: string;
   icon: string;
 }
@@ -287,15 +332,18 @@ export async function loadWeaponCatalog(): Promise<WeaponCatalog> {
     }
   };
 
-  const [weaponsRaw, chromasRaw, spraysRaw, flexRaw] = await Promise.all([
+  const [weaponsRaw, chromasRaw, spraysRaw, flexRaw, buddiesRaw] = await Promise.all([
     get('/weapons'),
     get('/weapons/skinchromas'),
     get('/sprays'),
     get('/flex'),
+    get('/buddies'),
   ]);
 
   const weapons: Record<string, WeaponInfo> = {};
   const skinIndex: WeaponCatalog['skinIndex'] = {};
+  const chromaNames: Record<string, string> = {};
+  const levelIndex: Record<string, number> = {};
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   for (const w of weaponsRaw as any[]) {
@@ -333,28 +381,46 @@ export async function loadWeaponCatalog(): Promise<WeaponCatalog> {
         : String(s.displayIcon ?? s.chromas?.[0]?.displayIcon ?? '') || canonical3dRender;
       const entry = { weaponUuid: uuid, name: skinName, icon: skinIcon, isDefault: def };
       skinIndex[String(s.uuid).toLowerCase()] = entry;
-      // Chromas / levels inherit the parent skin's identity and art.
+      // Chromas inherit the parent skin's identity and art; their positions
+      // and raw labels are recorded separately for variant display.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      for (const c of [...(s.chromas ?? []), ...(s.levels ?? [])] as any[]) {
-        if (c?.uuid) skinIndex[String(c.uuid).toLowerCase()] = entry;
+      for (const c of [...(s.chromas ?? [])] as any[]) {
+        if (!c?.uuid) continue;
+        const cu = String(c.uuid).toLowerCase();
+        skinIndex[cu] = skinIndex[cu] ?? entry;
+        const cname = String(c.displayName ?? '');
+        if (cname) chromaNames[cu] = cname;
+      }
+      // Levels inherit the parent entry; their 1-based position is the "Lv N" tag.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (let li = 0; li < (s.levels ?? []).length; li++) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const lv = (s.levels as any[])[li];
+        if (!lv?.uuid) continue;
+        const lu = String(lv.uuid).toLowerCase();
+        skinIndex[lu] = skinIndex[lu] ?? entry;
+        levelIndex[lu] = li + 1;
       }
     }
   }
 
   // `/weapons/skinchromas` is authoritative for chroma art and covers chromas
-  // that `/weapons` omits.
+  // that `/weapons` omits. Art only — never names: chroma displayNames are
+  // raw internal labels ("Neptune Odin Level 3 / (Variant 1 Black)", sometimes
+  // just the weapon name) and must not replace the parent skin name.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   for (const c of chromasRaw as any[]) {
     if (!c?.uuid) continue;
     const cu = String(c.uuid).toLowerCase();
     const name = String(c.displayName ?? '');
     const icon = String(c.displayIcon ?? '');
+    if (name && !chromaNames[cu]) chromaNames[cu] = name;
     if (!icon) continue;
     const existing = skinIndex[cu];
     if (existing) {
       // NEVER overwrite a default skin with an X placeholder icon from skinchromas!
       if (!existing.isDefault) {
-        skinIndex[cu] = { ...existing, name: name || existing.name, icon };
+        skinIndex[cu] = { ...existing, icon };
       }
     } else {
       const def = isDefaultSkinName(name);
@@ -362,15 +428,16 @@ export async function loadWeaponCatalog(): Promise<WeaponCatalog> {
     }
   }
 
-  const toCosmetic = (kind: 'spray' | 'flex') =>
+  const toCosmetic = (kind: Cosmetic['kind']) =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (list: any[]): Record<string, Cosmetic> => {
       const out: Record<string, Cosmetic> = {};
       for (const it of list) {
         if (!it?.uuid) continue;
+        const artPath = kind === 'spray' ? 'sprays' : kind === 'buddy' ? 'buddies' : 'flex';
         out[String(it.uuid).toLowerCase()] = {
           name: String(it.displayName ?? ''),
-          icon: String(it.displayIcon ?? '') || mediaUrl(kind === 'spray' ? 'sprays' : 'flex', it.uuid),
+          icon: String(it.displayIcon ?? '') || mediaUrl(artPath, it.uuid),
           kind,
         };
       }
@@ -382,6 +449,9 @@ export async function loadWeaponCatalog(): Promise<WeaponCatalog> {
     skinIndex,
     sprays: toCosmetic('spray')(spraysRaw),
     flex: toCosmetic('flex')(flexRaw),
+    buddies: toCosmetic('buddy')(buddiesRaw),
+    chromaNames,
+    levelIndex,
   };
 
   memCatalog = catalog;
@@ -430,19 +500,51 @@ export function parseLoadoutEntry(entry: any, catalog: WeaponCatalog): PlayerLoa
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const slot = (items as any)[key] ?? {};
-    const sockets = slot?.Sockets ?? slot?.sockets ?? {};
-    const socketEntry = sockets?.[SKIN_SOCKET] ?? Object.values(sockets ?? {})[0] ?? null;
+    // Explicit socket reads (keys lowercased — Riot's casing drifted before).
+    // The old "first socket wins" fallback is gone: it could grab the buddy
+    // socket and paint a buddy uuid as the equipped skin.
+    const bySocket: Record<string, any> = {}; // eslint-disable-line @typescript-eslint/no-explicit-any
+    for (const [sk, sv] of Object.entries(slot?.Sockets ?? slot?.sockets ?? {})) {
+      bySocket[String(sk).toLowerCase()] = sv;
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sock = socketEntry as any;
-    const skinId = str(
-      sock?.Item?.ID ?? sock?.Item?.Id ?? sock?.item?.id ?? sock?.Item?.itemId ?? slot?.ID ?? slot?.Id
-    ).toLowerCase();
+    const sockItemId = (s: any): string =>
+      str(s?.Item?.ID ?? s?.Item?.Id ?? s?.item?.id ?? s?.Item?.itemId).toLowerCase();
+    const chromaUuid = sockItemId(bySocket[SKIN_SOCKET]);
+    const skinUuid = sockItemId(bySocket[SKIN_ID_SOCKET]);
+    const levelUuid = sockItemId(bySocket[SKIN_LEVEL_SOCKET]);
+    const buddyUuid = sockItemId(bySocket[BUDDY_SOCKET]);
 
-    const hit = catalog.skinIndex[skinId];
-    // A default entry must never paint the grey-X placeholder — draw the
-    // weapon-level render instead.
-    const icon = hit && !hit.isDefault ? hit.icon || weapon.icon : weapon.icon;
-    const skinName = hit?.name || weapon.name;
+    const skinHit = skinUuid ? catalog.skinIndex[skinUuid] : undefined;
+    const chromaHit = chromaUuid ? catalog.skinIndex[chromaUuid] : undefined;
+    // Name: the PARENT skin first. Chroma displayNames are raw internal labels
+    // ("Neptune Odin Level 3 / (Variant 1 Black)", sometimes just "Ghost")
+    // and must never stand in for the skin name.
+    let skinName = weapon.name;
+    let isDefault = true;
+    if (skinHit && !skinHit.isDefault) {
+      skinName = skinHit.name;
+      isDefault = false;
+    } else if (
+      chromaHit &&
+      !chromaHit.isDefault &&
+      !isBareWeaponName(chromaHit.name, weapon.name)
+    ) {
+      skinName = chromaHit.name;
+      isDefault = false;
+    }
+    // Art: the equipped variant render when known, else the skin render,
+    // else the canonical weapon render (never the grey-X placeholder).
+    const icon =
+      chromaHit && !chromaHit.isDefault && chromaHit.icon
+        ? chromaHit.icon
+        : skinHit && !skinHit.isDefault && skinHit.icon
+          ? skinHit.icon
+          : weapon.icon;
+    const skinId = chromaUuid || skinUuid;
+    const variantLabel = variantLabelOf(catalog.chromaNames[chromaUuid] ?? '');
+    const level = levelUuid ? catalog.levelIndex[levelUuid] ?? 0 : 0;
+    const buddy = buddyUuid ? catalog.buddies[buddyUuid] : undefined;
 
     weapons.push({
       weaponUuid: weapon.uuid,
@@ -451,7 +553,11 @@ export function parseLoadoutEntry(entry: any, catalog: WeaponCatalog): PlayerLoa
       skinId,
       skinName,
       icon,
-      isDefaultSkin: !hit || hit.isDefault,
+      isDefaultSkin: isDefault,
+      variantLabel,
+      level,
+      buddyName: buddy?.name ?? '',
+      buddyIcon: buddy?.icon ?? '',
     });
   }
 
@@ -469,7 +575,9 @@ export function parseLoadoutEntry(entry: any, catalog: WeaponCatalog): PlayerLoa
     [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   for (const a of (Array.isArray(aes) ? aes : []) as any[]) {
-    const assetId = pick(a, 'AssetID', 'AssetId', 'TypeID');
+    // AssetID only: TypeID identifies the expression SLOT, not the equipped
+    // asset — resolving it paints the wrong icon with a confident label.
+    const assetId = pick(a, 'AssetID', 'AssetId');
     if (!assetId) continue;
     const aid = assetId.toLowerCase();
     const spray = catalog.sprays[aid];
@@ -477,8 +585,9 @@ export function parseLoadoutEntry(entry: any, catalog: WeaponCatalog): PlayerLoa
     if (spray) expressions.push({ assetId, ...spray });
     else if (flex) expressions.push({ assetId, ...flex });
     else {
-      // Unknown cosmetic: still show it, but do not invent a name.
-      expressions.push({ assetId, kind: 'spray', name: '', icon: sprayIcon(assetId) });
+      // Unknown cosmetic: no invented image URL (it 404s into a broken wheel
+      // icon). Empty art renders the wheel's neutral empty-slot dot.
+      expressions.push({ assetId, kind: 'spray', name: '', icon: '' });
     }
   }
 
@@ -512,8 +621,12 @@ export function resolveLoadoutForPlayer(
 ): { loadout: PlayerLoadout | null; ambiguous: boolean } {
   const puuid = str(opts.puuid).toLowerCase();
   if (puuid) {
+    // Exact-key miss is terminal: falling through to agent or positional
+    // matching here can return a DIFFERENT player's loadout with
+    // ambiguous:false (unique-agent case). Weaker keys apply only when no
+    // puuid was supplied at all.
     const hit = all.find((l) => l.subject.toLowerCase() === puuid);
-    if (hit) return { loadout: hit, ambiguous: false };
+    return hit ? { loadout: hit, ambiguous: false } : { loadout: null, ambiguous: false };
   }
 
   const cid = str(opts.characterId).toLowerCase();

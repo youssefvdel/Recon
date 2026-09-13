@@ -1,4 +1,5 @@
 mod calculator;
+mod accounts;
 mod custom_res;
 mod display;
 mod game_config;
@@ -1078,6 +1079,18 @@ pub fn run() {
             tracker::local_presences,
             tracker::local_client_version,
             tracker::riot_direct_get,
+            tracker::riot_direct_post,
+            tracker::riot_direct_put,
+            accounts::accounts_list,
+            accounts::account_current,
+            accounts::account_save_current,
+            accounts::accounts_auto_tick,
+            accounts::account_switch,
+            accounts::account_remove,
+            accounts::accounts_get_auto_start,
+            accounts::accounts_set_auto_start,
+            accounts::account_add_new,
+            accounts::account_launch_client,
             tracker::riot_resolve_names,
             tracker::riot_local_namesets,
             tracker::trn_get,

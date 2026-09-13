@@ -215,7 +215,19 @@ export async function performGlobalRefresh(): Promise<void> {
     }
   } catch {}
 
-  await Promise.allSettled([livePromise, trackerPromise]);
+  const [liveSettled] = await Promise.allSettled([livePromise, trackerPromise]);
+  // Feed the fresh lobby straight to the overlay + live views instead of
+  // discarding it — otherwise they sit stale until their next poll interval.
+  const live = liveSettled.status === 'fulfilled' ? liveSettled.value : null;
+  if (live && live.phase !== 'idle') {
+    try {
+      const { isTauri } = await import('../utils/ipc');
+      if (isTauri()) {
+        const { emit } = await import('@tauri-apps/api/event');
+        emit('recon:live-match-sync', live).catch(() => {});
+      }
+    } catch {}
+  }
 }
 
 async function runRefresh(): Promise<void> {
@@ -449,6 +461,7 @@ async function runRefresh(): Promise<void> {
             trnAgents: store.trnAgents,
             trnMaps: store.trnMaps,
             trnPrev: store.trnPrev,
+            trnMatchTrs: store.trnMatchTrs,
             detailsById: byId,
             detailsReady: Object.keys(byId).length,
           });

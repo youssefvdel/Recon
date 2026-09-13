@@ -33,16 +33,23 @@ interface SlotItemData {
   skinName: string;
   icon: string;
   isDefaultSkin: boolean;
+  variantLabel: string;
+  level: number;
+  buddyName: string;
+  buddyIcon: string;
 }
 
 const WeaponCard: React.FC<{
   slot: SlotItemData;
   className?: string;
 }> = ({ slot, className = '' }) => {
+  const subLine = [slot.variantLabel, slot.level > 0 ? `Lv ${slot.level}` : '']
+    .filter(Boolean)
+    .join(' · ');
   return (
     <div
       className={`flex-1 min-h-0 bg-m3-surface-container-low hover:bg-m3-surface-container-high border border-m3-outline-subtle/70 hover:border-m3-primary/60 rounded-xl transition-all duration-200 overflow-hidden flex flex-col justify-between p-1.5 select-none shadow-m3-1 hover:shadow-m3-2 group relative ${className}`}
-      title={`${slot.weaponName} • ${slot.skinName}`}
+      title={`${slot.weaponName} • ${slot.skinName}${subLine ? ` • ${subLine}` : ''}${slot.buddyName ? ` • Buddy: ${slot.buddyName}` : ''}`}
     >
       {/* Centered weapon artwork */}
       <div className="flex-1 min-h-0 flex items-center justify-center p-0.5 relative">
@@ -56,6 +63,16 @@ const WeaponCard: React.FC<{
         ) : (
           <Crosshair className="w-4 h-4 text-m3-outline/40" />
         )}
+        {/* Equipped gun buddy */}
+        {slot.buddyIcon && (
+          <img
+            src={slot.buddyIcon}
+            alt={slot.buddyName}
+            title={slot.buddyName ? `Buddy: ${slot.buddyName}` : 'Gun buddy'}
+            loading="lazy"
+            className="absolute top-0 right-0 w-10 h-10 rounded-full object-cover border border-m3-outline-subtle bg-m3-surface-container-high shadow-md"
+          />
+        )}
       </div>
 
       {/* Bottom baseline: weapon label and equipped skin name */}
@@ -64,9 +81,16 @@ const WeaponCard: React.FC<{
           <span className="font-mono text-[8.5px] text-m3-outline uppercase tracking-wider truncate">
             {slot.weaponName}
           </span>
-          {!slot.isDefaultSkin && (
-            <span className="w-1.5 h-1.5 rounded-full bg-m3-primary shrink-0 shadow-[0_0_6px_rgba(208,188,255,0.7)]" />
-          )}
+          <div className="flex items-center gap-1 shrink-0">
+            {subLine && (
+              <span className="text-[8px] font-mono font-bold text-amber-300/90 truncate" title={subLine}>
+                {subLine}
+              </span>
+            )}
+            {!slot.isDefaultSkin && (
+              <span className="w-1.5 h-1.5 rounded-full bg-m3-primary shrink-0 shadow-[0_0_6px_rgba(208,188,255,0.7)]" />
+            )}
+          </div>
         </div>
         <span
           className={`text-[10px] font-semibold tracking-wide truncate max-w-full ${
@@ -252,6 +276,10 @@ export const LoadoutViewer: React.FC<{
           skinName: w.skinName,
           icon: w.icon,
           isDefaultSkin: w.isDefaultSkin,
+          variantLabel: w.variantLabel,
+          level: w.level,
+          buddyName: w.buddyName,
+          buddyIcon: w.buddyIcon,
         });
       }
     }
@@ -274,6 +302,10 @@ export const LoadoutViewer: React.FC<{
       skinName: `Standard ${def.name}`,
       icon: defaultWeapon?.icon || '',
       isDefaultSkin: true,
+      variantLabel: '',
+      level: 0,
+      buddyName: '',
+      buddyIcon: '',
     };
   };
 
@@ -357,6 +389,9 @@ export const LoadoutViewer: React.FC<{
         )}
 
         {/* 5-Column Modular Grid (4 Weapon columns + Player Card & Expressions) */}
+        {/* When Riot returns no loadout (e.g. agent select before the server
+            ships loadouts), show an honest empty state — never a grid of
+            fake "Standard" defaults that reads as real data. */}
         <div className="flex-1 min-h-0 relative overflow-hidden">
           {loading && (
             <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-m3-surface/90 backdrop-blur-xs rounded-2xl">
@@ -367,8 +402,9 @@ export const LoadoutViewer: React.FC<{
             </div>
           )}
 
-          <div className="grid grid-cols-5 gap-2.5 sm:gap-3 items-stretch h-full min-h-0">
-            {/* Column 1: SIDEARMS (5 live weapons) */}
+          {loadout ? (
+            <div className="grid grid-cols-5 gap-2.5 sm:gap-3 items-stretch h-full min-h-0">
+          {/* Column 1: SIDEARMS (5 live weapons) */}
             <div className="h-full min-h-0 flex flex-col min-w-0">
               <CategoryHeader title="SIDEARMS" className="mb-1.5 shrink-0" />
               <div className="flex-1 min-h-0 flex flex-col gap-1.5">
@@ -442,7 +478,18 @@ export const LoadoutViewer: React.FC<{
                 </div>
               </div>
             </div>
-          </div>
+            </div>
+            ) : (
+              !loading && (
+                <div className="h-full flex flex-col items-center justify-center gap-2 text-center px-6">
+                  <Crosshair className="w-8 h-8 text-m3-outline/40" />
+                  <p className="text-sm font-display font-bold text-m3-on-surface">No loadout data</p>
+                  <p className="text-xs text-m3-outline max-w-sm leading-relaxed">
+                    {unavailableReason ?? 'Riot returned no loadout data for this match yet.'}
+                  </p>
+                </div>
+              )
+            )}
         </div>
       </div>
     </div>

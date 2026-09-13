@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { X, Swords, Clock } from 'lucide-react';
+import { X, Swords, Clock, Copy, Check } from 'lucide-react';
 import type { TrackerMatchDetail, TrackerMmrPoint } from '../types';
 import { tierName, resolvePlayerNames, gameData } from '../utils/tracker';
 import { getPartyStyle } from '../utils/playerDisplay';
@@ -77,6 +77,15 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
   const [selectedPlayer, setSelectedPlayer] = useState<SelectedPlayerInfo | null>(null);
   const [weaponMap, setWeaponMap] = useState<Record<string, string>>({});
   const [trnTrsMap, setTrnTrsMap] = useState<Record<string, number>>({});
+  const [copiedPuuid, setCopiedPuuid] = useState<string | null>(null);
+
+  const copyPlayerRiotId = (e: React.MouseEvent, p: { displayName: string; displayTag?: string; puuid: string }) => {
+    e.stopPropagation();
+    const id = p.displayTag ? `${p.displayName}#${p.displayTag}` : p.displayName;
+    navigator.clipboard.writeText(id);
+    setCopiedPuuid(p.puuid);
+    setTimeout(() => setCopiedPuuid((cur) => (cur === p.puuid ? null : cur)), 1500);
+  };
 
   useEffect(() => {
     gameData().then((d) => setWeaponMap(d.weapons || {})).catch(() => {});
@@ -641,6 +650,19 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                                     <span className="text-[10px] text-m3-outline font-normal">#{p.displayTag}</span>
                                   ) : null}
                                 </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => copyPlayerRiotId(e, p)}
+                                  className="p-1 rounded hover:bg-m3-surface-container-highest text-m3-outline hover:text-m3-on-surface transition-colors cursor-pointer shrink-0"
+                                  title={copiedPuuid === p.puuid ? 'Copied!' : `Copy ${p.displayName}${p.displayTag ? '#' + p.displayTag : ''}`}
+                                  aria-label={`Copy Riot ID for ${p.displayName}`}
+                                >
+                                  {copiedPuuid === p.puuid ? (
+                                    <Check className="w-3 h-3 text-emerald-400" />
+                                  ) : (
+                                    <Copy className="w-3 h-3" />
+                                  )}
+                                </button>
                                 {rIcon ? (
                                   <img src={rIcon} alt="" className="w-3.5 h-3.5 object-contain" />
                                 ) : null}
@@ -786,6 +808,19 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                                   {p.displayTag ? (
                                     <span className="text-[10px] text-m3-outline font-normal shrink-0">#{p.displayTag}</span>
                                   ) : null}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => copyPlayerRiotId(e, p)}
+                                  className="p-1 rounded hover:bg-m3-surface-container-highest text-m3-outline hover:text-m3-on-surface transition-colors cursor-pointer shrink-0"
+                                  title={copiedPuuid === p.puuid ? 'Copied!' : `Copy ${p.displayName}${p.displayTag ? '#' + p.displayTag : ''}`}
+                                  aria-label={`Copy Riot ID for ${p.displayName}`}
+                                >
+                                  {copiedPuuid === p.puuid ? (
+                                    <Check className="w-3 h-3 text-emerald-400" />
+                                  ) : (
+                                    <Copy className="w-3 h-3" />
+                                  )}
                                 </button>
                                 {rIcon ? (
                                   <img src={rIcon} alt="" className="w-3.5 h-3.5 object-contain shrink-0" />
@@ -970,6 +1005,19 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                                   {p.displayTag ? (
                                     <span className="text-[10px] text-m3-outline font-normal shrink-0">#{p.displayTag}</span>
                                   ) : null}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => copyPlayerRiotId(e, p)}
+                                  className="p-1 rounded hover:bg-m3-surface-container-highest text-m3-outline hover:text-m3-on-surface transition-colors cursor-pointer shrink-0"
+                                  title={copiedPuuid === p.puuid ? 'Copied!' : `Copy ${p.displayName}${p.displayTag ? '#' + p.displayTag : ''}`}
+                                  aria-label={`Copy Riot ID for ${p.displayName}`}
+                                >
+                                  {copiedPuuid === p.puuid ? (
+                                    <Check className="w-3 h-3 text-emerald-400" />
+                                  ) : (
+                                    <Copy className="w-3 h-3" />
+                                  )}
                                 </button>
                                 {rIcon ? (
                                   <img src={rIcon} alt="" className="w-3.5 h-3.5 object-contain shrink-0" />

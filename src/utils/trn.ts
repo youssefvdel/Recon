@@ -80,6 +80,14 @@ async function trnGet(path: string): Promise<unknown> {
   const wait = slot - Date.now();
   if (wait > 0) await sleep(wait);
 
+  // Re-check after the wait: a sibling may have tripped a 429 while we were
+  // queued. Hitting the network during cooldown extends the Cloudflare block.
+  // Refund our slot claim so fail-fast waiters don't phantom-delay the queue.
+  if (trnCooldownRemainingMs() > 0) {
+    if (trnNextSlot === slot + TRN_MIN_GAP_MS) trnNextSlot = slot;
+    throw new Error(`TRN_RATE_LIMITED ${Math.ceil(trnCooldownRemainingMs() / 1000)}s`);
+  }
+
   let raw: string;
   try {
     raw = await invoke<string>('trn_get', { path });
@@ -96,13 +104,17 @@ async function trnGet(path: string): Promise<unknown> {
     }
     throw new Error(msg);
   }
-  // A clean response means we are welcome again.
-  trnCooldownStep = 0;
-  trnCooldownUntil = 0;
-  if (typeof localStorage !== 'undefined') {
-    try {
-      localStorage.removeItem(TRN_COOLDOWN_KEY);
-    } catch {}
+  // A clean response means we are welcome again — but only clear a cooldown
+  // that already expired. A sibling request still in flight may have just set
+  // one; wiping it resumes hammering mid-block.
+  if (Date.now() >= trnCooldownUntil) {
+    trnCooldownStep = 0;
+    trnCooldownUntil = 0;
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.removeItem(TRN_COOLDOWN_KEY);
+      } catch {}
+    }
   }
 
   try {
@@ -135,7 +147,29 @@ function writePersisted<T>(key: string, data: T): void {
   try {
     localStorage.setItem(`${TRN_CACHE_PREFIX}:${key}`, JSON.stringify({ at: Date.now(), data }));
   } catch {
-    /* quota / private mode */
+    // Quota: evict the oldest TRN entries, then retry once. Without this the
+    // cache silently stops persisting and every restart re-fetches everything,
+    // re-tripping the rate limit.
+    try {
+      const victims: { k: string; at: number }[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(TRN_CACHE_PREFIX)) {
+          let at = 0;
+          try {
+            at = JSON.parse(localStorage.getItem(k) || '').at ?? 0;
+          } catch {}
+          victims.push({ k, at });
+        }
+      }
+      victims
+        .sort((a, b) => a.at - b.at)
+        .slice(0, Math.max(10, victims.length - 40))
+        .forEach((v) => localStorage.removeItem(v.k));
+      localStorage.setItem(`${TRN_CACHE_PREFIX}:${key}`, JSON.stringify({ at: Date.now(), data }));
+    } catch {
+      /* private mode — memory caches still cover this session */
+    }
   }
 }
 
@@ -240,6 +274,10 @@ function stat(seg: any, key: string): number {
 // In-memory cache for season segments (10 min TTL)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const seasonSegCache = new Map<string, { at: number; data: any }>();
+// In-flight dedup: agents+maps+acts fan out via Promise.all for the same
+// identity, and without this every cold caller fires its own trnGet.
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+const seasonInFlight = new Map<string, Promise<any>>();
 
 /** Raw season segment for any playlist/season (drives stats + agents parsing). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -247,8 +285,12 @@ const seasonSegCache = new Map<string, { at: number; data: any }>();
 const SEASON_SEG_TTL_MS = 6 * 60 * 60 * 1000;
 
 async function fetchSeasonSeg(name: string, tag: string, playlist: string, seasonId: string): Promise<any> {
+  const n = name.trim();
+  const t = tag.trim();
+  if (!n || !t) throw new Error('TRN bad riot id');
+  const pl = playlist.toLowerCase();
   const sid = seasonId.toLowerCase();
-  const cacheKey = `${name.toLowerCase()}#${tag.toLowerCase()}_${playlist}_${sid}`;
+  const cacheKey = `${n.toLowerCase()}#${t.toLowerCase()}_${pl}_${sid}`;
   const hit = seasonSegCache.get(cacheKey);
   if (hit && Date.now() - hit.at < SEASON_SEG_TTL_MS) return hit.data;
   // Survive reloads: a restart must not re-request every act we already hold.
@@ -257,26 +299,36 @@ async function fetchSeasonSeg(name: string, tag: string, playlist: string, seaso
     seasonSegCache.set(cacheKey, { at: Date.now(), data: persisted });
     return persisted;
   }
+  const running = seasonInFlight.get(cacheKey);
+  if (running) return running;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const j: any = await trnGet(
-    `${riotId(name, tag)}/segments/season?playlist=${encodeURIComponent(playlist)}${seasonId ? `&seasonId=${encodeURIComponent(seasonId)}` : ''}&source=web`
-  );
-  const segs = Array.isArray(j?.data) ? j.data : [];
-  const targetSeg = seasonId
-    ? segs.find(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (s: any) => s?.type === 'season' && String(s?.attributes?.seasonId ?? '').toLowerCase() === sid
-      )
-    : segs.find(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (s: any) => s?.type === 'season'
-      );
-  if (!targetSeg) throw new Error('TRN no season segment.');
-  const result = { seg: targetSeg, data: j?.data };
-  seasonSegCache.set(cacheKey, { at: Date.now(), data: result });
-  writePersisted(`season:${cacheKey}`, result);
-  return result;
+  const task = (async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const j: any = await trnGet(
+      `${riotId(n, t)}/segments/season?playlist=${encodeURIComponent(pl)}${seasonId ? `&seasonId=${encodeURIComponent(seasonId)}` : ''}&source=web`
+    );
+    const segs = Array.isArray(j?.data) ? j.data : [];
+    const targetSeg = seasonId
+      ? segs.find(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (s: any) => s?.type === 'season' && String(s?.attributes?.seasonId ?? '').toLowerCase() === sid
+        )
+      : segs.find(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (s: any) => s?.type === 'season'
+        );
+    if (!targetSeg) throw new Error('TRN no season segment.');
+    const result = { seg: targetSeg, data: j?.data };
+    seasonSegCache.set(cacheKey, { at: Date.now(), data: result });
+    writePersisted(`season:${cacheKey}`, result);
+    return result;
+  })();
+  seasonInFlight.set(cacheKey, task);
+  try {
+    return await task;
+  } finally {
+    if (seasonInFlight.get(cacheKey) === task) seasonInFlight.delete(cacheKey);
+  }
 }
 
 /** Act stats for a Riot ID. seasonId/playlist optional (defaults = current competitive). */
@@ -351,8 +403,10 @@ export async function fetchTrnActStats(
       legHits: stat(seg, 'dealtLegshots'),
       bestKills: stat(seg, 'mostKillsInMatch'),
       avatarUrl,
+      // K/D percentile comes from the K/D stat — not raw kills, which measures
+      // volume instead of efficiency.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      kdPercentile: num((seg?.stats?.kills as any)?.percentile),
+      kdPercentile: num((seg?.stats?.kDRatio as any)?.percentile) || num((seg?.stats?.kills as any)?.percentile),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       hsPercentile: num((seg?.stats?.headshotsPercentage as any)?.percentile),
     },
@@ -949,7 +1003,9 @@ export async function fetchTrnMatchDetails(
       const agent = String(s?.metadata?.agentName || '').toLowerCase().trim();
 
       if (handle) out[handle] = roundedTrs;
-      if (agent) out[`agent:${agent}`] = roundedTrs;
+      // First-wins: mirrored comps field the same agent on both teams, and a
+      // blind overwrite returns the other team's player's score.
+      if (agent && !(`agent:${agent}` in out)) out[`agent:${agent}`] = roundedTrs;
     }
     writePersisted(key, out);
     return out;

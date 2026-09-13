@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Check, Lightbulb } from 'lucide-react';
+import { Check, Lightbulb, Copy } from 'lucide-react';
 import type { TrackerMatchDetail, TrackerMmrPoint } from '../types';
 import { matchCard, queueLabel, shortMapName, tierName } from '../utils/tracker';
 import { useTrackerData } from '../hooks/useTrackerData';
@@ -114,7 +114,17 @@ const MatchRow: React.FC<{
   onToggle: () => void;
   onOpenModal: () => void;
 }> = ({ r, queue, map, index, icon, rankIcon, puuid, open, onToggle, onOpenModal }) => {
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const card = useMemo(() => (r.detail ? matchCard(r.detail, puuid) : null), [r.detail, puuid]);
+
+  const handleCopyPlayer = (e: React.MouseEvent, p: { name?: string; tag?: string; agent: string; puuid?: string }) => {
+    e.stopPropagation();
+    const id = p.name ? (p.tag ? `${p.name}#${p.tag}` : p.name) : p.agent;
+    navigator.clipboard.writeText(id);
+    const k = p.puuid || p.name || p.agent;
+    setCopiedKey(k);
+    setTimeout(() => setCopiedKey((c) => (c === k ? null : c)), 1500);
+  };
   const teams = useMemo(() => {
     if (!r.detail) return [];
     return ['Blue', 'Red']
@@ -318,9 +328,21 @@ const MatchRow: React.FC<{
                     className={`flex items-center justify-between gap-2 py-1 px-1.5 rounded-lg text-[11px] ${
                       isMe ? 'bg-m3-primary/10 border border-m3-primary/30' : ''
                     }`}>
-                    <span className="truncate text-m3-on-surface">
-                      <span className="font-semibold">{isMe ? 'You' : (p.name || p.agent)}</span>
-                      <span className="text-m3-outline"> • {p.agent}{p.tag ? ` #${p.tag}` : ''}</span>
+                    <span className="truncate text-m3-on-surface flex items-center gap-1.5 min-w-0">
+                      <span className="font-semibold truncate">{isMe ? 'You' : (p.name || p.agent)}</span>
+                      <span className="text-m3-outline shrink-0"> • {p.agent}{p.tag ? ` #${p.tag}` : ''}</span>
+                      <button
+                        type="button"
+                        onClick={(e) => handleCopyPlayer(e, p)}
+                        className="p-0.5 rounded hover:bg-white/10 text-m3-outline hover:text-white transition-colors cursor-pointer shrink-0"
+                        title={copiedKey === (p.puuid || p.name || p.agent) ? 'Copied!' : `Copy ${p.name || p.agent}${p.tag ? '#' + p.tag : ''}`}
+                      >
+                        {copiedKey === (p.puuid || p.name || p.agent) ? (
+                          <Check className="w-2.5 h-2.5 text-emerald-400" />
+                        ) : (
+                          <Copy className="w-2.5 h-2.5" />
+                        )}
+                      </button>
                     </span>
                     <span className="font-mono text-m3-on-surface-variant shrink-0 tabular-nums">
                       {p.kills}/{p.deaths}/{p.assists} • {pacs} • {Math.round(phs)}%
