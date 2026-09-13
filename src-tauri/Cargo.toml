@@ -1,6 +1,6 @@
 [package]
 name = "recon"
-version = "0.4.0-alpha.1"
+version = "0.4.0"
 description = "Recon - Competitive Stretched Resolution & Utility"
 authors = ["Youssef Adel <contact@recon.qd.je>"]
 license = "Proprietary"
