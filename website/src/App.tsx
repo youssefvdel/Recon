@@ -357,7 +357,7 @@ export default function App() {
                 </span>
               </div>
               <span className="text-[9.5px] font-mono text-zinc-500 uppercase tracking-widest leading-none mt-0.5">
-                COMPETITIVE ESPORTS TOOLKIT
+                VALORANT TRACKER & ESPORTS TOOLKIT
               </span>
             </div>
           </a>
@@ -443,7 +443,7 @@ export default function App() {
           />
           <br className="hidden sm:inline" />
           <VariableProximity
-            label="Real-Time In-Game Match Recon."
+            label="Real-Time Valorant Match Recon."
             className="text-[#b6abf7]"
             fromFontVariationSettings="'wght' 500, 'opsz' 14"
             toFontVariationSettings="'wght' 950, 'opsz' 40"
@@ -454,7 +454,7 @@ export default function App() {
         </h1>
 
         <p className="gsap-hero-sub mt-6 text-base sm:text-lg text-zinc-300 max-w-2xl mx-auto leading-relaxed">
-          Expand target geometry by <strong className="text-white font-mono tabular-nums">+22.6%</strong> with zero input latency, unmask hidden streamer-mode players, inspect real in-game weapon skins, and customize transparent HUD widgets over Valorant.
+          Recon is the lightweight <strong className="text-white font-semibold">Valorant tracker</strong> and stretched-resolution toolkit: expand target geometry by <strong className="text-white font-mono tabular-nums">+22.6%</strong> with zero input latency, unmask hidden streamer-mode players, inspect real in-game weapon skins, and run transparent HUD widgets over Valorant.
         </p>
 
         {/* CTA Section — CSS entrance (see .hero-cta-enter), never gsap.from */}
