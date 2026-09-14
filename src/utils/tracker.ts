@@ -2140,7 +2140,9 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
           if (matchData && !matchData.httpStatus) {
             phase = 'pregame';
             // Safe Agent Pre-Picker: safely hover preferred agent once per match
-            import('./prepick').then((m) => m.trySafePrepick(matchId, region, matchData?.MapID)).catch(() => {});
+            import('./prepick')
+              .then((m) => m.trySafePrepick(matchId, region, matchData?.MapID, ent.puuid))
+              .catch(() => {});
           }
         }
       } catch {}

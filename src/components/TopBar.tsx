@@ -124,7 +124,7 @@ const TAB_METADATA: Record<
   },
   prepick: {
     title: 'Agent Pre-Picker',
-    description: 'Auto-hover your preferred agent per map — safe hover only, zero ban risk',
+    description: 'Instant hover + timed lock-in, per map or a global default',
     icon: UserCheck,
   },
   accounts: {

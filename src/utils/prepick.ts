@@ -1,5 +1,5 @@
 import { isTauri } from './ipc';
-import { glzHostFor, riotPost, gameData, resolveMapName } from './tracker';
+import { glzHostFor, riotGet, riotPost, gameData, resolveMapName } from './tracker';
 
 const PREPICK_CONFIG_KEY = 'recon_prepick_config_v2';
 
@@ -14,11 +14,12 @@ export interface PrepickConfig {
   defaultAgentId: string;
   defaultAgentName: string;
   mapAgents: Record<string, PrepickMapAgent>;
-  /** Seconds to wait after Agent Select starts before hovering. 1–59 = delay, 60 = never. */
+  /** Seconds after Agent Select starts before LOCKING the hovered agent in.
+   *  1–59 = lock after that many seconds, 60 = hover only, never lock. */
   pickDelaySec: number;
 }
 
-/** Factory default: auto-hover OFF, 20s delay. */
+/** Factory default: auto-pick OFF, lock in 20s after Agent Select opens. */
 export const PREPICK_DEFAULT_DELAY = 20;
 export const PREPICK_MAX_DELAY = 60;
 
@@ -76,17 +77,21 @@ let lastPrepickedMatchId = '';
 let pendingTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
- * Execute safe agent hover in pre-game lobby.
+ * Execute agent pre-pick in the pre-game lobby: instant hover, delayed lock.
  * Resolves map -> checks map-specific agent -> falls back to default agent.
- * Waits `pickDelaySec` after Agent Select starts; 60 ("never") skips the hover.
- * SAFE: Only hovers (`select`), NEVER calls `/lock/`.
+ * Hovers the chosen agent INSTANTLY, then locks it in `pickDelaySec` seconds
+ * later. Setting the slider to 60 hovers without ever locking.
  * Runs at most ONCE per unique match ID.
  */
-export async function trySafePrepick(matchId: string, region: string, mapIdOrName?: string): Promise<boolean> {
+export async function trySafePrepick(
+  matchId: string,
+  region: string,
+  mapIdOrName?: string,
+  selfPuuid?: string
+): Promise<boolean> {
   if (!isTauri() || !matchId || !region) return false;
   const config = getPrepickConfig();
   if (!config.enabled) return false;
-  if (config.pickDelaySec >= PREPICK_MAX_DELAY) return false; // "never" — don't pick
   if (lastPrepickedMatchId === matchId) return false;
 
   const resolvedMap = mapIdOrName ? resolveMapName(mapIdOrName) : '';
@@ -100,19 +105,63 @@ export async function trySafePrepick(matchId: string, region: string, mapIdOrNam
 
   if (!chosen || !chosen.agentId) return false;
 
-  // Mark claimed immediately so repeat polls don't stack timers; fire after the delay.
+  // Mark claimed immediately so repeat polls don't stack timers.
   lastPrepickedMatchId = matchId;
   if (pendingTimer) clearTimeout(pendingTimer);
-  const delayMs = Math.max(1, config.pickDelaySec) * 1000;
-  pendingTimer = setTimeout(() => {
-    pendingTimer = null;
-    const glz = glzHostFor(region);
-    riotPost(glz, `/pregame/v1/matches/${matchId}/select/${chosen.agentId}`).catch(() => {});
-  }, delayMs);
+  const glz = glzHostFor(region);
+
+  // Hover NOW — no waiting. Instant hover is what the player expects to see.
+  riotPost(glz, `/pregame/v1/matches/${matchId}/select/${chosen.agentId}`).catch(() => {});
+
+  // The slider is the lock-in countdown: after `pickDelaySec` seconds we lock
+  // the agent in. 60 means hover only — leave the lock to the player.
+  if (config.pickDelaySec < PREPICK_MAX_DELAY) {
+    const delayMs = Math.max(1, config.pickDelaySec) * 1000;
+    pendingTimer = setTimeout(() => {
+      pendingTimer = null;
+      lockInIfStillOurs(glz, matchId, chosen.agentId, selfPuuid).catch(() => {});
+    }, delayMs);
+  }
   return true;
 }
 
-/** Reset the pre-picked match latch (and cancel any pending delayed hover). */
+/**
+ * Lock the agent in, but only if the player has not hovered something else in
+ * the meantime. A delayed lock that overrides a manual pick is worse than no
+ * lock at all, so re-read the lobby and bail when the hover is no longer ours.
+ */
+async function lockInIfStillOurs(
+  glz: string,
+  matchId: string,
+  agentId: string,
+  selfPuuid?: string
+): Promise<void> {
+  if (selfPuuid) {
+    let currentSelection = '';
+    try {
+      const match = await riotGet(glz, `/pregame/v1/matches/${matchId}`);
+      const allies: Array<Record<string, unknown>> = Array.isArray(match?.AllyTeam?.Players)
+        ? match.AllyTeam.Players
+        : [];
+      const me = allies.find(
+        (a) =>
+          String(a?.Subject ?? a?.PlayerID ?? a?.PUUID ?? '').toLowerCase() === selfPuuid.toLowerCase()
+      );
+      if (me) {
+        currentSelection = String(me?.CharacterID ?? '').toLowerCase();
+        const lockedIn = String(me?.CharacterSelectionState ?? '').toLowerCase() === 'locked';
+        // Someone else already locked, or we hovered a different agent: stop.
+        if (lockedIn || (currentSelection && currentSelection !== agentId.toLowerCase())) return;
+      }
+    } catch {
+      // Lobby unreadable (match ended / query error) — do not blind-lock.
+      return;
+    }
+  }
+  await riotPost(glz, `/pregame/v1/matches/${matchId}/lock/${agentId}`).catch(() => {});
+}
+
+/** Reset the pre-picked match latch (and cancel any pending delayed lock-in). */
 export function resetPrepickLatch(): void {
   lastPrepickedMatchId = '';
   if (pendingTimer) {

@@ -137,7 +137,7 @@ export const PrepickView: React.FC = () => {
                 </span>
               </div>
               <p className="text-[11px] text-m3-outline mt-0.5">
-                Automatically hovers your preferred agent per map upon entering Agent Select. Never insta-locks (<code className="text-m3-on-surface">/lock</code>), zero ban risk.
+                Hovers your preferred agent per map the instant Agent Select opens, then locks it in after the delay below. Set the slider to {PREPICK_MAX_DELAY} to hover without ever locking.
               </p>
             </div>
           </div>
@@ -171,9 +171,9 @@ export const PrepickView: React.FC = () => {
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 sm:p-5 rounded-3xl bg-m3-surface-container-low border border-m3-outline-subtle">
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold text-m3-on-surface">Pick delay</span>
+              <span className="text-xs font-semibold text-m3-on-surface">Lock-in delay</span>
               <span className={`text-[11px] font-mono font-bold tabular-nums ${config.pickDelaySec >= PREPICK_MAX_DELAY ? 'text-amber-300' : 'text-m3-primary'}`}>
-                {config.pickDelaySec >= PREPICK_MAX_DELAY ? 'Never — don’t pick' : `${config.pickDelaySec}s`}
+                {config.pickDelaySec >= PREPICK_MAX_DELAY ? 'Never lock' : `${config.pickDelaySec}s`}
               </span>
             </div>
             <input
@@ -184,10 +184,10 @@ export const PrepickView: React.FC = () => {
               value={config.pickDelaySec}
               onChange={(e) => handleDelayChange(Number(e.target.value))}
               className="w-full mt-2 m3-range"
-              aria-label="Seconds to wait before hovering the agent (60 = never)"
+              aria-label="Seconds after the instant hover before locking the agent in (60 = hover only)"
             />
             <p className="text-[11px] text-m3-outline mt-1">
-              Seconds to wait after Agent Select starts before hovering. Slide to {PREPICK_MAX_DELAY} for never.
+              The hover fires instantly; this is how long to wait before locking that agent in. Slide to {PREPICK_MAX_DELAY} to hover only.
             </p>
           </div>
         </div>

@@ -903,10 +903,10 @@ export const OverlayView: React.FC = () => {
           />
           {/* Screen Boundary Frame so users clearly see their display perimeter */}
           <div className="fixed inset-3 pointer-events-none border-2 border-dashed border-m3-primary/40 rounded-3xl z-40 flex items-start justify-between p-3 select-none">
-            <span className="px-3 py-1 rounded-xl bg-m3-surface-container/[0.55] border border-m3-primary/40 text-[10px] font-mono font-bold text-m3-primary shadow-md">
+            <span className="px-3 py-1 rounded-xl bg-m3-surface-container/[0.75] border border-m3-primary/40 text-[10px] font-mono font-bold text-m3-primary shadow-md">
               SCREEN BOUNDS • {typeof window !== 'undefined' ? `${window.innerWidth}×${window.innerHeight}` : 'DISPLAY'}
             </span>
-            <span className="px-3 py-1 rounded-xl bg-m3-surface-container/[0.55] border border-m3-primary/40 text-[10px] font-mono font-bold text-m3-on-surface-variant shadow-md">
+            <span className="px-3 py-1 rounded-xl bg-m3-surface-container/[0.75] border border-m3-primary/40 text-[10px] font-mono font-bold text-m3-on-surface-variant shadow-md">
               DRAG WIDGETS BY TOP BAR • PRESS ESC TO LOCK
             </span>
           </div>
@@ -917,8 +917,8 @@ export const OverlayView: React.FC = () => {
       {/* EDIT MODE TOP CONTROLS (Center Top)                          */}
       {/* ============================================================ */}
       {isEditMode && (
-        <div className="fixed top-4 inset-x-0 mx-auto w-fit z-50 pointer-events-auto flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-m3-surface-container/[0.55] border border-m3-primary/40 shadow-2xl backdrop-blur-xl">
-          <div className="flex items-center gap-2 pr-2 border-r border-m3-outline-subtle/45">
+        <div className="fixed top-4 inset-x-0 mx-auto w-fit z-50 pointer-events-auto flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-m3-surface-container/[0.75] border border-m3-primary/40 shadow-2xl backdrop-blur-xl">
+          <div className="flex items-center gap-2 pr-2 border-r border-m3-outline-subtle/55">
             <span className="w-2.5 h-2.5 rounded-full bg-m3-mint animate-pulse shadow-[0_0_8px_rgba(58,227,116,0.8)]" />
             <span className="font-display font-black text-xs text-m3-on-surface tracking-wider uppercase">
               HUD Edit Mode
@@ -938,7 +938,7 @@ export const OverlayView: React.FC = () => {
                 },
               });
             }}
-            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-m3-surface-container-high/60 hover:bg-m3-surface-container-highest border border-m3-outline-subtle/45 text-m3-on-surface-variant hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors"
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-m3-surface-container-high/60 hover:bg-m3-surface-container-highest border border-m3-outline-subtle/55 text-m3-on-surface-variant hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors"
             title="Center Agent Select in middle of screen"
           >
             <Move className="w-3.5 h-3.5 text-m3-primary" />
@@ -948,7 +948,7 @@ export const OverlayView: React.FC = () => {
           <button
             type="button"
             onClick={() => saveConfig(getDefaultOverlayConfig())}
-            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-m3-surface-container-high/60 hover:bg-m3-surface-container-highest border border-m3-outline-subtle/45 text-m3-on-surface-variant hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors"
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-m3-surface-container-high/60 hover:bg-m3-surface-container-highest border border-m3-outline-subtle/55 text-m3-on-surface-variant hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors"
             title="Reset all widget positions to defaults"
           >
             <RotateCcw className="w-3.5 h-3.5 text-m3-on-surface-variant" />
@@ -972,8 +972,8 @@ export const OverlayView: React.FC = () => {
       {/* EDIT MODE WIDGETS DRAWER (Top Right Panel)                   */}
       {/* ============================================================ */}
       {isEditMode && (
-        <div className="fixed top-4 right-4 z-50 pointer-events-auto w-72 flex flex-col gap-2 p-3 rounded-3xl bg-m3-surface-container/[0.55] border border-m3-primary/40 shadow-2xl backdrop-blur-xl">
-          <div className="flex items-center justify-between px-1 pb-1.5 border-b border-m3-outline-subtle/45">
+        <div className="fixed top-4 right-4 z-50 pointer-events-auto w-72 flex flex-col gap-2 p-3 rounded-3xl bg-m3-surface-container/[0.75] border border-m3-primary/40 shadow-2xl backdrop-blur-xl">
+          <div className="flex items-center justify-between px-1 pb-1.5 border-b border-m3-outline-subtle/55">
             <span className="font-display font-black text-xs text-m3-on-surface uppercase tracking-wider flex items-center gap-1.5">
               <Layers className="w-3.5 h-3.5 text-m3-primary" />
               <span>Widgets List</span>
@@ -985,7 +985,7 @@ export const OverlayView: React.FC = () => {
 
           {/* 1. AGENT SELECT */}
           <div className={`p-2.5 rounded-2xl border transition-all flex flex-col gap-1.5 ${
-            config.showPregame ? 'bg-m3-primary/10 border-m3-primary/45 shadow-md ring-1 ring-m3-primary/40' : 'bg-m3-surface-container-low/70 border-m3-outline-subtle/45 opacity-60'
+            config.showPregame ? 'bg-m3-primary/10 border-m3-primary/45 shadow-md ring-1 ring-m3-primary/40' : 'bg-m3-surface-container-low/70 border-m3-outline-subtle/55 opacity-60'
           }`}>
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-m3-on-surface flex items-center gap-1.5 min-w-0">
@@ -998,7 +998,7 @@ export const OverlayView: React.FC = () => {
                 className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
                   config.showPregame
                     ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
-                    : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/45'
+                    : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/55'
                 }`}
               >
                 {config.showPregame ? 'ON' : 'OFF'}
@@ -1022,7 +1022,7 @@ export const OverlayView: React.FC = () => {
 
           {/* 2. MATCH STATUS (SCOREBOARD) */}
           <div className={`p-2.5 rounded-2xl border transition-all flex flex-col gap-1.5 ${
-            config.showLobby ? 'bg-m3-primary/10 border-m3-primary/45 shadow-md ring-1 ring-m3-primary/40' : 'bg-m3-surface-container-low/70 border-m3-outline-subtle/45 opacity-60'
+            config.showLobby ? 'bg-m3-primary/10 border-m3-primary/45 shadow-md ring-1 ring-m3-primary/40' : 'bg-m3-surface-container-low/70 border-m3-outline-subtle/55 opacity-60'
           }`}>
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-m3-on-surface flex items-center gap-1.5 min-w-0">
@@ -1035,7 +1035,7 @@ export const OverlayView: React.FC = () => {
                 className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
                   config.showLobby
                     ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
-                    : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/45'
+                    : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/55'
                 }`}
               >
                 {config.showLobby ? 'ON' : 'OFF'}
@@ -1059,7 +1059,7 @@ export const OverlayView: React.FC = () => {
 
           {/* 3. TOP AGENTS */}
           <div className={`p-2.5 rounded-2xl border transition-all flex flex-col gap-1.5 ${
-            config.showTopAgents ? 'bg-m3-primary/10 border-m3-primary/45 shadow-md ring-1 ring-m3-primary/40' : 'bg-m3-surface-container-low/70 border-m3-outline-subtle/45 opacity-60'
+            config.showTopAgents ? 'bg-m3-primary/10 border-m3-primary/45 shadow-md ring-1 ring-m3-primary/40' : 'bg-m3-surface-container-low/70 border-m3-outline-subtle/55 opacity-60'
           }`}>
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-m3-on-surface flex items-center gap-1.5 min-w-0">
@@ -1072,7 +1072,7 @@ export const OverlayView: React.FC = () => {
                 className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
                   config.showTopAgents
                     ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
-                    : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/45'
+                    : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/55'
                 }`}
               >
                 {config.showTopAgents ? 'ON' : 'OFF'}
@@ -1096,7 +1096,7 @@ export const OverlayView: React.FC = () => {
 
           {/* 4. SAFE PRE-PICK (LOBBY ONLY, SELF-HIDES WHEN UNARMED) */}
           <div className={`p-2.5 rounded-2xl border transition-all flex items-center justify-between ${
-            config.showPrepick ? 'bg-m3-primary/10 border-m3-primary/45 shadow-md ring-1 ring-m3-primary/40' : 'bg-m3-surface-container-low/70 border-m3-outline-subtle/45 opacity-60'
+            config.showPrepick ? 'bg-m3-primary/10 border-m3-primary/45 shadow-md ring-1 ring-m3-primary/40' : 'bg-m3-surface-container-low/70 border-m3-outline-subtle/55 opacity-60'
           }`}>
             <div className="flex flex-col">
               <span className="text-xs font-bold text-m3-on-surface flex items-center gap-1.5 min-w-0">
@@ -1111,7 +1111,7 @@ export const OverlayView: React.FC = () => {
               className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
                 config.showPrepick
                   ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
-                  : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/45'
+                  : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/55'
               }`}
             >
               {config.showPrepick ? 'ON' : 'OFF'}
@@ -1120,7 +1120,7 @@ export const OverlayView: React.FC = () => {
 
           {/* 5. STARTING SIDE (ATTACK / DEFENSE) */}
           <div className={`p-2.5 rounded-2xl border transition-all flex items-center justify-between ${
-            config.showStartingSide ? 'bg-m3-primary/10 border-m3-primary/45 shadow-md ring-1 ring-m3-primary/40' : 'bg-m3-surface-container-low/70 border-m3-outline-subtle/45 opacity-60'
+            config.showStartingSide ? 'bg-m3-primary/10 border-m3-primary/45 shadow-md ring-1 ring-m3-primary/40' : 'bg-m3-surface-container-low/70 border-m3-outline-subtle/55 opacity-60'
           }`}>
             <div className="flex flex-col">
               <span className="text-xs font-bold text-m3-on-surface flex items-center gap-1.5 min-w-0">
@@ -1135,7 +1135,7 @@ export const OverlayView: React.FC = () => {
               className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
                 config.showStartingSide
                   ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
-                  : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/45'
+                  : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/55'
               }`}
             >
               {config.showStartingSide ? 'ON' : 'OFF'}
@@ -1209,8 +1209,8 @@ export const OverlayView: React.FC = () => {
           <div
             className={`rounded-2xl border p-2.5 shadow-2xl flex flex-col gap-2 transition-all ${
               isEditMode
-                ? 'bg-m3-surface-container/[0.55] border-m3-outline-variant/40 shadow-[0_12px_40px_rgba(0,0,0,0.85)] ring-1 ring-m3-outline-variant/30 backdrop-blur-xl'
-                : 'bg-m3-surface-container/[0.55] border-m3-outline-variant/40 backdrop-blur-xl shadow-2xl'
+                ? 'bg-m3-surface-container/[0.75] border-m3-outline-variant/50 shadow-[0_12px_40px_rgba(0,0,0,0.85)] ring-1 ring-m3-outline-variant/30 backdrop-blur-xl'
+                : 'bg-m3-surface-container/[0.75] border-m3-outline-variant/50 backdrop-blur-xl shadow-2xl'
             }`}
           >
             {/* Header: Map • Mode • Phase + live game status */}
@@ -1251,7 +1251,7 @@ export const OverlayView: React.FC = () => {
             </div>
 
             {/* Column Titles */}
-            <div className="grid grid-cols-[18px_22px_26px_24px_minmax(32px,1fr)_minmax(30px,1fr)_minmax(32px,1fr)_minmax(32px,1fr)] items-center gap-x-1.5 px-2 text-[8.5px] font-mono text-m3-on-surface-variant uppercase tracking-wider border-b border-m3-outline-subtle/45 pb-1 shrink-0 whitespace-nowrap">
+            <div className="grid grid-cols-[18px_22px_26px_24px_minmax(32px,1fr)_minmax(30px,1fr)_minmax(32px,1fr)_minmax(32px,1fr)] items-center gap-x-1.5 px-2 text-[8.5px] font-mono text-m3-on-surface-variant uppercase tracking-wider border-b border-m3-outline-subtle/55 pb-1 shrink-0 whitespace-nowrap">
               <span className="text-center" title="Tracker Score tier">TS</span>
               <span className="text-center" title="Agent">Agent</span>
               <span className="text-center">Rank</span>
@@ -1289,7 +1289,7 @@ export const OverlayView: React.FC = () => {
                       tierIcons={tierIcons}
                     />
                   ) : matchState?.phase === 'coregame' ? (
-                    <div className="rounded-xl bg-m3-surface-container/[0.45] border border-m3-outline-subtle/45 p-2 flex items-center justify-center gap-2 text-center">
+                    <div className="rounded-xl bg-m3-surface-container/[0.60] border border-m3-outline-subtle/55 p-2 flex items-center justify-center gap-2 text-center">
                       <LockIcon className="w-3.5 h-3.5 text-m3-on-surface-variant" />
                       <span className="text-[10px] font-semibold text-m3-on-surface-variant">Enemy Team Hidden</span>
                       <span className="text-[9px] text-m3-outline">• Visible on match start</span>
@@ -1365,8 +1365,8 @@ export const OverlayView: React.FC = () => {
           <div
             className={`rounded-2xl border p-3 shadow-2xl flex flex-col gap-2 transition-all ${
               isEditMode
-                ? 'bg-m3-surface-container/[0.55] border-m3-outline-variant/40 shadow-[0_16px_50px_rgba(0,0,0,0.9)] ring-1 ring-m3-outline-variant/30 backdrop-blur-xl'
-                : 'bg-m3-surface-container/[0.55] border-m3-outline-variant/40 backdrop-blur-xl shadow-2xl'
+                ? 'bg-m3-surface-container/[0.75] border-m3-outline-variant/50 shadow-[0_16px_50px_rgba(0,0,0,0.9)] ring-1 ring-m3-outline-variant/30 backdrop-blur-xl'
+                : 'bg-m3-surface-container/[0.75] border-m3-outline-variant/50 backdrop-blur-xl shadow-2xl'
             }`}
           >
             {/* Header: Map • Starting Side Badge */}
@@ -1409,7 +1409,7 @@ export const OverlayView: React.FC = () => {
                     )}
                   </span>
                 )}
-                <span className="px-2 py-0.5 rounded-full bg-m3-surface-container-high/60 border border-m3-outline-subtle/45 text-m3-on-surface-variant text-[9px] font-mono font-bold uppercase shrink-0">
+                <span className="px-2 py-0.5 rounded-full bg-m3-surface-container-high/60 border border-m3-outline-subtle/55 text-m3-on-surface-variant text-[9px] font-mono font-bold uppercase shrink-0">
                   {isPregame ? 'Agent Select' : 'Preview'}
                 </span>
               </div>
@@ -1492,8 +1492,8 @@ export const OverlayView: React.FC = () => {
           <div
             className={`rounded-3xl border p-3 shadow-2xl flex flex-col gap-2 transition-all ${
               isEditMode
-                ? 'bg-m3-surface-container/[0.55] border-m3-outline-variant/40 shadow-[0_16px_50px_rgba(0,0,0,0.9)] ring-1 ring-m3-outline-variant/30 backdrop-blur-xl'
-                : 'bg-m3-surface-container/[0.55] border-m3-outline-variant/40 backdrop-blur-xl shadow-2xl'
+                ? 'bg-m3-surface-container/[0.75] border-m3-outline-variant/50 shadow-[0_16px_50px_rgba(0,0,0,0.9)] ring-1 ring-m3-outline-variant/30 backdrop-blur-xl'
+                : 'bg-m3-surface-container/[0.75] border-m3-outline-variant/50 backdrop-blur-xl shadow-2xl'
             }`}
           >
             {/* Header with Map name & Mode toggle */}
@@ -1515,7 +1515,7 @@ export const OverlayView: React.FC = () => {
                   type="button"
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => setViewMode(showMetaPicks ? 'personal' : 'blitz')}
-                  className="px-2 py-0.5 rounded-full bg-m3-surface-container-high/60 hover:bg-m3-surface-container-highest border border-m3-outline-subtle/45 text-m3-on-surface-variant hover:text-white text-[9px] font-mono font-bold uppercase shrink-0 transition-colors flex items-center gap-1 cursor-pointer"
+                  className="px-2 py-0.5 rounded-full bg-m3-surface-container-high/60 hover:bg-m3-surface-container-highest border border-m3-outline-subtle/55 text-m3-on-surface-variant hover:text-white text-[9px] font-mono font-bold uppercase shrink-0 transition-colors flex items-center gap-1 cursor-pointer"
                   title="Toggle between your own agent stats and rank recommended picks"
                 >
                   {showMetaPicks ? (
@@ -1529,7 +1529,7 @@ export const OverlayView: React.FC = () => {
 
             {/* Not enough games on this map to judge — say so instead of guessing */}
             {!showMetaPicks && personalScope === 'all' && (
-              <div className="px-2.5 py-1 rounded-xl bg-m3-surface-container-high/60 border border-m3-outline-subtle/45 flex items-center gap-1.5 text-[10px] font-mono text-m3-on-surface-variant">
+              <div className="px-2.5 py-1 rounded-xl bg-m3-surface-container-high/60 border border-m3-outline-subtle/55 flex items-center gap-1.5 text-[10px] font-mono text-m3-on-surface-variant">
                 <AlertTriangle className="w-3 h-3 text-m3-on-surface-variant shrink-0" />
                 <span>
                   {thinMapSample
@@ -1542,7 +1542,7 @@ export const OverlayView: React.FC = () => {
             {/* This map has no hand-tuned meta — say so instead of borrowing
                 another map's picks and passing them off as this map's. */}
             {!hasMetaForMap && (
-              <div className="px-2.5 py-1 rounded-xl bg-m3-surface-container-high/60 border border-m3-outline-subtle/45 flex items-center gap-1.5 text-[10px] font-mono text-m3-on-surface-variant">
+              <div className="px-2.5 py-1 rounded-xl bg-m3-surface-container-high/60 border border-m3-outline-subtle/55 flex items-center gap-1.5 text-[10px] font-mono text-m3-on-surface-variant">
                 <AlertTriangle className="w-3 h-3 text-m3-on-surface-variant shrink-0" />
                 <span>No {activeMapName} meta yet — showing your real numbers</span>
               </div>
@@ -1570,7 +1570,7 @@ export const OverlayView: React.FC = () => {
             {showMetaPicks ? (
               /* RECOMMENDED PICKS FOR THIS MAP AND RANK (NO TIPS) */
               <div className="flex flex-col gap-1.5">
-                <div className="px-1 text-[9px] font-mono text-m3-on-surface-variant flex items-center justify-between border-b border-m3-outline-subtle/45 pb-1">
+                <div className="px-1 text-[9px] font-mono text-m3-on-surface-variant flex items-center justify-between border-b border-m3-outline-subtle/55 pb-1">
                   <span>Blitz Live Meta ({rankTierLabel})</span>
                   <span className="text-m3-mint font-bold">Top 3 · Win% · Pick%</span>
                 </div>
@@ -1586,7 +1586,7 @@ export const OverlayView: React.FC = () => {
                   return (
                     <div
                       key={b.agent}
-                      className="grid grid-cols-[1fr_56px_50px_46px] items-center px-2.5 py-1.5 rounded-xl border border-m3-outline-subtle/45 bg-transparent hover:bg-m3-surface-container-high/50 text-xs transition-colors whitespace-nowrap min-w-0"
+                      className="grid grid-cols-[1fr_56px_50px_46px] items-center px-2.5 py-1.5 rounded-xl border border-m3-outline-subtle/55 bg-transparent hover:bg-m3-surface-container-high/50 text-xs transition-colors whitespace-nowrap min-w-0"
                     >
                       <div className="flex items-center gap-2 min-w-0 pr-1">
                         {icon ? (
@@ -1597,10 +1597,10 @@ export const OverlayView: React.FC = () => {
                             onError={(e) => {
                               (e.currentTarget as HTMLElement).style.display = 'none';
                             }}
-                            className="w-7 h-7 rounded-lg object-cover shrink-0 border border-m3-outline-subtle/45 pointer-events-none select-none"
+                            className="w-7 h-7 rounded-lg object-cover shrink-0 border border-m3-outline-subtle/55 pointer-events-none select-none"
                           />
                         ) : (
-                          <div className="w-7 h-7 rounded-lg bg-m3-surface-container-high shrink-0 border border-m3-outline-subtle/45 flex items-center justify-center text-[10px] font-black text-m3-on-surface-variant">
+                          <div className="w-7 h-7 rounded-lg bg-m3-surface-container-high shrink-0 border border-m3-outline-subtle/55 flex items-center justify-center text-[10px] font-black text-m3-on-surface-variant">
                             {b.agent.slice(0, 2).toUpperCase()}
                           </div>
                         )}
@@ -1630,7 +1630,7 @@ export const OverlayView: React.FC = () => {
             ) : (
               /* PLAYER'S OWN AGENT STATS */
               <div className="flex flex-col gap-1">
-                <div className="px-1 text-[9px] font-mono text-m3-on-surface-variant flex items-center justify-between border-b border-m3-outline-subtle/45 pb-1 mb-0.5">
+                <div className="px-1 text-[9px] font-mono text-m3-on-surface-variant flex items-center justify-between border-b border-m3-outline-subtle/55 pb-1 mb-0.5">
                   <span>
                     {personalScope === 'map'
                       ? `Your record on ${activeMapName} (${mapGames} games)`
@@ -1643,7 +1643,7 @@ export const OverlayView: React.FC = () => {
                   </span>
                 </div>
                 {/* Column Headers */}
-                <div className="grid grid-cols-[1fr_58px_50px_46px_40px] items-center px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider text-m3-on-surface-variant border-b border-m3-outline-subtle/45 whitespace-nowrap">
+                <div className="grid grid-cols-[1fr_58px_50px_46px_40px] items-center px-2 py-0.5 text-[9px] font-mono uppercase tracking-wider text-m3-on-surface-variant border-b border-m3-outline-subtle/55 whitespace-nowrap">
                   <span>Agent</span>
                   <span className="text-right">Matches</span>
                   <span className="text-right">Win%</span>
@@ -1672,7 +1672,7 @@ export const OverlayView: React.FC = () => {
                   return (
                     <div
                       key={stat.agent}
-                      className="grid grid-cols-[1fr_58px_50px_46px_40px] items-center px-2 py-1.5 rounded-xl border border-m3-outline-subtle/45 bg-transparent hover:bg-m3-surface-container-high/50 text-xs transition-colors whitespace-nowrap min-w-0"
+                      className="grid grid-cols-[1fr_58px_50px_46px_40px] items-center px-2 py-1.5 rounded-xl border border-m3-outline-subtle/55 bg-transparent hover:bg-m3-surface-container-high/50 text-xs transition-colors whitespace-nowrap min-w-0"
                     >
                       {/* Agent Icon & Name */}
                       <div className="flex items-center gap-2 min-w-0 pr-1">
@@ -1684,10 +1684,10 @@ export const OverlayView: React.FC = () => {
                             onError={(e) => {
                               (e.currentTarget as HTMLElement).style.display = 'none';
                             }}
-                            className="w-7 h-7 rounded-lg object-cover shrink-0 border border-m3-outline-subtle/45 pointer-events-none select-none"
+                            className="w-7 h-7 rounded-lg object-cover shrink-0 border border-m3-outline-subtle/55 pointer-events-none select-none"
                           />
                         ) : (
-                          <div className="w-7 h-7 rounded-lg bg-m3-surface-container-high shrink-0 border border-m3-outline-subtle/45 flex items-center justify-center text-[10px] font-black text-m3-on-surface-variant">
+                          <div className="w-7 h-7 rounded-lg bg-m3-surface-container-high shrink-0 border border-m3-outline-subtle/55 flex items-center justify-center text-[10px] font-black text-m3-on-surface-variant">
                             {stat.agent.slice(0, 2).toUpperCase()}
                           </div>
                         )}
@@ -1733,7 +1733,7 @@ export const OverlayView: React.FC = () => {
                 {/* No winning agent here → suggest the rank meta WITHOUT hiding
                     the player's own list. */}
                 {!hasWinningAgentOnMap && personalScope !== 'preview' && (
-                  <div className="mt-1 pt-1.5 border-t border-m3-outline-subtle/45 flex flex-col gap-1">
+                  <div className="mt-1 pt-1.5 border-t border-m3-outline-subtle/55 flex flex-col gap-1">
                     <div className="px-1 flex items-center justify-between text-[9px] font-mono">
                       <span className="flex items-center gap-1 text-amber-300">
                         <AlertTriangle className="w-3 h-3 shrink-0" />
@@ -1763,10 +1763,10 @@ export const OverlayView: React.FC = () => {
                                 src={meta.icon}
                                 alt=""
                                 draggable={false}
-                                className="w-6 h-6 rounded-md object-cover shrink-0 border border-m3-outline-subtle/45 pointer-events-none select-none"
+                                className="w-6 h-6 rounded-md object-cover shrink-0 border border-m3-outline-subtle/55 pointer-events-none select-none"
                               />
                             ) : (
-                              <div className="w-6 h-6 rounded-md bg-m3-surface-container-high shrink-0 border border-m3-outline-subtle/45" />
+                              <div className="w-6 h-6 rounded-md bg-m3-surface-container-high shrink-0 border border-m3-outline-subtle/55" />
                             )}
                             <span className="font-bold text-[10px] text-m3-on-surface truncate">{b.agent}</span>
                             <span className="px-1 py-px rounded bg-m3-primary/25 text-m3-primary border border-m3-primary/30 text-[7px] font-mono font-bold uppercase shrink-0">
@@ -1837,28 +1837,30 @@ export const OverlayView: React.FC = () => {
             </div>
           )}
 
-          <div className="rounded-2xl border border-m3-outline-variant/40 bg-m3-surface-container/[0.55] backdrop-blur-2xl shadow-m3-2 px-3 py-2.5 flex items-center gap-2.5">
+          <div className="rounded-2xl border border-m3-outline-variant/50 bg-m3-surface-container/[0.75] backdrop-blur-2xl shadow-m3-2 px-3 py-2.5 flex items-center gap-2.5">
             {prepickIcon ? (
               <img
                 src={prepickIcon}
                 alt=""
                 draggable={false}
-                className="w-9 h-9 rounded-xl object-cover shrink-0 border border-m3-outline-variant/40 bg-m3-surface-container-high/60 pointer-events-none select-none"
+                className="w-9 h-9 rounded-xl object-cover shrink-0 border border-m3-outline-variant/50 bg-m3-surface-container-high/60 pointer-events-none select-none"
               />
             ) : (
-              <div className="w-9 h-9 rounded-xl shrink-0 border border-m3-outline-variant/40 bg-m3-surface-container-high/60 flex items-center justify-center">
+              <div className="w-9 h-9 rounded-xl shrink-0 border border-m3-outline-variant/50 bg-m3-surface-container-high/60 flex items-center justify-center">
                 <Crosshair className="w-4 h-4 text-m3-primary" />
               </div>
             )}
             <div className="flex flex-col leading-tight min-w-0">
               <span className="font-display font-bold text-[11px] text-m3-on-surface-variant tracking-wider uppercase">
-                Pre-Pick Armed
+                Pre-Pick
               </span>
               <span className="font-mono text-[11px] text-m3-on-surface font-bold truncate">
                 {prepickAgent}
                 {prepickCfg.pickDelaySec < PREPICK_MAX_DELAY ? (
-                  <span className="text-m3-outline font-normal"> • {prepickCfg.pickDelaySec}s</span>
-                ) : null}
+                  <span className="text-m3-outline font-normal"> • locks in {prepickCfg.pickDelaySec}s</span>
+                ) : (
+                  <span className="text-m3-outline font-normal"> • hover only</span>
+                )}
               </span>
             </div>
             <span className="ml-1 w-1.5 h-1.5 rounded-full bg-m3-mint animate-pulse shrink-0" />
@@ -1880,7 +1882,7 @@ const PregameTeamColumn: React.FC<{
   return (
     <div className="flex flex-col gap-1.5 pointer-events-none select-none">
       {/* Table Column Headers: Score badge, Player, Rank, Peak, K/D, Win%, HS% */}
-      <div className="grid grid-cols-[26px_1fr_40px_40px_48px_50px_48px] items-center px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-m3-on-surface-variant border-b border-m3-outline-subtle/45 whitespace-nowrap">
+      <div className="grid grid-cols-[26px_1fr_40px_40px_48px_50px_48px] items-center px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-m3-on-surface-variant border-b border-m3-outline-subtle/55 whitespace-nowrap">
         <span className="text-center" title="Tracker Score tier">TS</span>
         <span>Player</span>
         <span className="text-center">Rank</span>
@@ -1907,10 +1909,10 @@ const PregameTeamColumn: React.FC<{
               key={p.puuid}
               className={`relative overflow-hidden grid grid-cols-[26px_1fr_40px_40px_48px_50px_48px] items-center px-2.5 py-1 rounded-xl border text-xs transition-colors whitespace-nowrap min-w-0 ${
                 party
-                  ? `${party.bg} border-m3-outline-subtle/45`
+                  ? `${party.bg} border-m3-outline-subtle/55`
                   : p.isMe
                   ? 'bg-m3-primary/15 border-m3-primary/30 text-m3-on-surface shadow-xs'
-                  : 'bg-m3-surface-dim/50 hover:bg-m3-surface-container-high/50 border-m3-outline-subtle/45 text-m3-on-surface'
+                  : 'bg-m3-surface-dim/25 hover:bg-m3-surface-container-high/50 border-m3-outline-subtle/55 text-m3-on-surface'
               }`}
             >
               {/* Party identifier: curved bow arc wrapping the left edge when queued in a party */}
@@ -1942,7 +1944,7 @@ const PregameTeamColumn: React.FC<{
                 {p.trnScore != null ? (
                   <ScoreBadge tier={scoreTier(p.trnScore).tier} size={20} />
                 ) : (
-                  <span className="w-5 h-5 rounded border border-m3-outline-subtle/45 bg-m3-surface-container-high/60 flex items-center justify-center text-[9px] font-mono text-m3-outline/70">
+                  <span className="w-5 h-5 rounded border border-m3-outline-subtle/55 bg-m3-surface-container-high/60 flex items-center justify-center text-[9px] font-mono text-m3-outline/70">
                     —
                   </span>
                 )}
@@ -1960,11 +1962,11 @@ const PregameTeamColumn: React.FC<{
                         (e.currentTarget as HTMLElement).style.display = 'none';
                       }}
                       className={`w-[26px] h-[26px] rounded-lg object-cover border ${
-                        locked ? 'border-m3-mint/60' : hasPick ? 'border-amber-300/60' : 'border-m3-outline-subtle/45'
+                        locked ? 'border-m3-mint/60' : hasPick ? 'border-amber-300/60' : 'border-m3-outline-subtle/55'
                       } pointer-events-none select-none`}
                     />
                   ) : (
-                    <div className="w-[26px] h-[26px] rounded-lg bg-m3-surface-container-high border border-m3-outline-subtle/45 flex items-center justify-center text-[10px] font-black text-m3-on-surface-variant">
+                    <div className="w-[26px] h-[26px] rounded-lg bg-m3-surface-container-high border border-m3-outline-subtle/55 flex items-center justify-center text-[10px] font-black text-m3-on-surface-variant">
                       ?
                     </div>
                   )}
@@ -2128,10 +2130,10 @@ const VerticalSquadColumn: React.FC<{
           title={`${p.name}${p.tag ? '#' + p.tag : ''} • ${p.agentName}${countryName ? ` • ${countryName}` : ''}`}
           className={`relative overflow-hidden grid grid-cols-[18px_22px_26px_24px_minmax(32px,1fr)_minmax(30px,1fr)_minmax(32px,1fr)_minmax(32px,1fr)] items-center gap-x-1.5 h-[28px] px-2 rounded-lg border text-xs transition-colors shrink-0 whitespace-nowrap min-w-0 ${
             party
-              ? `${party.bg} border-m3-outline-subtle/45`
+              ? `${party.bg} border-m3-outline-subtle/55`
               : p.isMe
               ? 'bg-m3-primary/25 border-m3-primary/45 ring-1 ring-m3-primary/30 text-m3-on-surface shadow-xs'
-              : 'bg-m3-surface-dim/50 hover:bg-m3-surface-container-high/50 border-m3-outline-subtle/45 text-m3-on-surface'
+              : 'bg-m3-surface-dim/25 hover:bg-m3-surface-container-high/50 border-m3-outline-subtle/55 text-m3-on-surface'
           }`}
         >
           {/* Party identifier: curved bow arc wrapping the left edge when queued in a party */}
@@ -2163,7 +2165,7 @@ const VerticalSquadColumn: React.FC<{
             {p.trnScore != null ? (
               <ScoreBadge tier={scoreTier(p.trnScore).tier} size={15} />
             ) : (
-              <span className="w-3.5 h-3.5 rounded border border-m3-outline-subtle/45 bg-m3-surface-container-high/60 flex items-center justify-center text-[7.5px] font-mono text-m3-outline/70">
+              <span className="w-3.5 h-3.5 rounded border border-m3-outline-subtle/55 bg-m3-surface-container-high/60 flex items-center justify-center text-[7.5px] font-mono text-m3-outline/70">
                 —
               </span>
             )}
@@ -2179,10 +2181,10 @@ const VerticalSquadColumn: React.FC<{
                 onError={(e) => {
                   (e.currentTarget as HTMLElement).style.display = 'none';
                 }}
-                className="w-5 h-5 rounded-md object-cover pointer-events-none select-none border border-m3-outline-subtle/45"
+                className="w-5 h-5 rounded-md object-cover pointer-events-none select-none border border-m3-outline-subtle/55"
               />
             ) : (
-              <div className="w-5 h-5 rounded-md bg-m3-surface-container-high border border-m3-outline-subtle/45 flex items-center justify-center text-[9px] font-bold text-m3-on-surface-variant">
+              <div className="w-5 h-5 rounded-md bg-m3-surface-container-high border border-m3-outline-subtle/55 flex items-center justify-center text-[9px] font-bold text-m3-on-surface-variant">
                 ?
               </div>
             )}

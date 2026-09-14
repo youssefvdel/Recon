@@ -402,7 +402,7 @@ const MatchStatusStrip: React.FC<{
         return (
           <span
             className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-[9.5px] font-mono font-bold text-emerald-300 shrink-0"
-            title="Safe pre-hover enabled: automatically hovers this agent upon entering Agent Select"
+            title="Pre-Picker armed: hovers this agent instantly in Agent Select, then locks it in after your delay"
           >
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
             <span>Pre-pick: {targetAgent}</span>
