@@ -49,6 +49,14 @@ export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""   # key was generated without one
 bun run tauri build
 ```
 
+> Windows gotcha (hit 2026-09-15): the key is encrypted with an EMPTY password,
+> and empty env vars cannot survive PowerShell/.NET (`$env:X = ''` deletes the
+> var), so the build stalls at "Decrypting updater signing key, expect a prompt
+> for password". Run the build from MSYS bash (e.g. Hermes-bundled Git), where
+> `export ...=""` produces a real empty value that reaches Tauri. `python` is
+> not installed on this box, so `make-latest-json.sh` fails — use the Node
+> equivalent (same manifest shape) instead.
+
 > Pass the key **contents**. `TAURI_SIGNING_PRIVATE_KEY_PATH` was tried first and did
 > not take effect — the build proceeded unsigned and only warned at the very end.
 
@@ -104,7 +112,8 @@ gh release create "v${V}" \
   --title "Recon v${V}" --notes-file notes.md --latest
 ```
 
-Five assets go up: the setup exe, its `.sig`, the MSI, its `.sig`, and `latest.json`.
+Three assets go up: the setup exe, its `.sig`, and `latest.json` (bundle targets
+are nsis-only, so there is no MSI).
 
 Two rules:
 
