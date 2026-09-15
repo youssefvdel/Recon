@@ -3,6 +3,8 @@ import { emit } from '@tauri-apps/api/event';
 import type { LiveMatchPlayer, LiveMatchState, LocalRiotAccount, TrackerDuel, TrackerMatchDetail, TrackerMmrPoint, TrackerPlayer, TrackerProfile } from '../types';
 import { isTauri } from './ipc';
 import { getDevMockMatch, isDevNoClient } from './devTools';
+import { extractGamePodId, parseGamePodId } from './matchServer';
+import { assignPartyColors } from './playerDisplay';
 import { logger } from './logger';
 
 /* Keyless tracker: everything comes straight from Riot using the local
@@ -1599,10 +1601,13 @@ const recent24hCache = new Map<string, Recent24hRecord>();
 const recent24hInflight = new Map<string, Promise<Recent24hRecord>>();
 const livePlayerRecentMatchesCache = new Map<string, { matches: string[]; fetchedAt: number }>();
 
-// Stable party assignment across polling cycles for the same match
-let activePartyMatchKey = '';
-const matchPartyIndexMap = new Map<string, number>();
-let nextMatchPartyIndex = 1;
+/** Valid Riot presence party IDs only — rejects the absent/null/empty
+ *  markers Riot sends when a player has no party to report. Shared with
+ *  the presence-union step so grouping and coloring agree on what counts. */
+function validRiotPartyId(id: string): string {
+  const v = (id || '').toLowerCase().trim();
+  return v && v !== '0' && v !== 'null' && v !== 'undefined' && v.length > 5 ? v : '';
+}
 
 /** Compares two live match states to determine if any meaningful UI data changed.
  *  Covers EVERY field that reaches the screen, matched by PUUID (Riot can
@@ -1617,6 +1622,8 @@ export function isMatchStateEqual(a: LiveMatchState | null, b: LiveMatchState | 
     a.mapName !== b.mapName ||
     a.mode !== b.mode ||
     a.queueId !== b.queueId ||
+    a.serverId !== b.serverId ||
+    a.serverName !== b.serverName ||
     a.isDeathmatch !== b.isDeathmatch ||
     a.isRange !== b.isRange ||
     a.isPreviousMatch !== b.isPreviousMatch ||
@@ -1804,6 +1811,178 @@ const livePlayerStatsCache = new Map<string, LivePlayerStatsEntry>();
 const LIVE_STATS_CACHE_KEY = 'recon_live_player_stats_v2';
 const LIVE_STATS_TTL = 24 * 60 * 60 * 1000; // 24 hours — player act stats & country do not change every minute
 const trnInFlightLive = new Set<string>();
+
+/* ---- TRN lobby spread: ONE fetch per ~6s, own team first ---- *
+ * A fresh 10-player lobby used to drain every uncached TRN lookup
+ * back-to-back (2 requests per player behind the 1.5–3s serial gate) —
+ * a burst Cloudflare answers with 1015. The spread queues uncached lobby
+ * players and fetches ONE per TRN_SPREAD_MS, chained setTimeout so ticks
+ * never overlap. The trn.ts serial gate + cooldown ladder + dedup +
+ * caches stay the floor — this only spaces further, never adds volume.
+ * Stops on match/phase change, hidden tab, or stale polls (phase idle /
+ * views unmounted); the next visible live poll re-enqueues whoever is
+ * still uncached. An explicit manual refresh (forceRefresh) bypasses the
+ * spread and fires immediately, exactly as before. */
+
+/** Spacing between lobby TRN fetches. Own team drains first (~30s for 5),
+ *  then enemies — a full lobby resolves in ~60s without ever bursting. */
+export const TRN_SPREAD_MS = 6000;
+/** Views poll every 2.5–3s; no live poll for this long = phase went idle
+ *  or the views unmounted → drop the queue, never fetch for a dead lobby. */
+const TRN_SPREAD_STALE_MS = 10_000;
+
+export interface SpreadPlayer {
+  puuid: string;
+  name: string;
+  tag: string;
+  /** True for own-team players — they drain before enemies. */
+  mine: boolean;
+}
+
+/** Own-team-first ordering. Pure — checked by scripts/trn-spread-check.ts. */
+export function orderSpreadQueue(players: SpreadPlayer[]): SpreadPlayer[] {
+  return players.slice().sort((a, b) => Number(b.mine) - Number(a.mine));
+}
+
+/** True when the lobby spread may fetch for this player now. Reads the
+ *  same caches the poll loop reads, so enqueue and tick always agree. */
+export function playerNeedsTrnStats(puuid: string): boolean {
+  const cached = getCachedLivePlayerStats(puuid);
+  return (
+    !cached ||
+    (cached.kd == null && cached.acs == null && Date.now() > (cached.retryAfter ?? 0))
+  );
+}
+
+let trnSpreadQueue: SpreadPlayer[] = [];
+let trnSpreadTimer: ReturnType<typeof setTimeout> | null = null;
+let trnSpreadKey = '';
+let trnSpreadLastPollAt = 0;
+
+function stopTrnSpread(): void {
+  trnSpreadQueue = [];
+  if (trnSpreadTimer) {
+    clearTimeout(trnSpreadTimer);
+    trnSpreadTimer = null;
+  }
+}
+
+function scheduleTrnSpread(): void {
+  if (trnSpreadTimer || trnSpreadQueue.length === 0) return;
+  trnSpreadTimer = setTimeout(pumpTrnSpread, TRN_SPREAD_MS);
+}
+
+function pumpTrnSpread(): void {
+  trnSpreadTimer = null;
+  // Tab hidden, or live polls gone stale (phase idle / views unmounted) →
+  // stop; the next visible live poll re-enqueues whoever is still uncached.
+  if (typeof document !== 'undefined' && document.hidden) {
+    stopTrnSpread();
+    return;
+  }
+  if (Date.now() - trnSpreadLastPollAt > TRN_SPREAD_STALE_MS) {
+    stopTrnSpread();
+    return;
+  }
+  const head = trnSpreadQueue.shift();
+  if (!head) return;
+  const key = trnSpreadKey;
+  import('./trn')
+    .then(({ trnCooldownRemainingMs }) => {
+      // Match/phase moved on while queued, or a manual refresh already
+      // filled this player → skip without firing.
+      if (key !== trnSpreadKey || !playerNeedsTrnStats(head.puuid)) {
+        scheduleTrnSpread();
+        return;
+      }
+      if (trnCooldownRemainingMs() > 0) {
+        // Fail fast like trnGet: touch no network, retry at cooldown end.
+        trnSpreadQueue.unshift(head);
+        if (!trnSpreadTimer) {
+          trnSpreadTimer = setTimeout(pumpTrnSpread, trnCooldownRemainingMs() + 2000);
+        }
+        return;
+      }
+      fetchTrnStatsNow(head.puuid, head.name, head.tag);
+      scheduleTrnSpread();
+    })
+    .catch(() => {
+      scheduleTrnSpread();
+    });
+}
+
+function enqueueTrnSpread(matchId: string, phase: string, players: SpreadPlayer[]): void {
+  if (typeof document !== 'undefined' && document.hidden) return;
+  const key = `${matchId}:${phase}`;
+  if (key !== trnSpreadKey) {
+    // Match/phase change: a stale queue must never fetch for the old lobby.
+    stopTrnSpread();
+    trnSpreadKey = key;
+  }
+  const queued = new Set(trnSpreadQueue.map((p) => p.puuid.toLowerCase()));
+  for (const p of orderSpreadQueue(players)) {
+    const k = p.puuid.toLowerCase();
+    if (queued.has(k) || trnInFlightLive.has(k) || !playerNeedsTrnStats(p.puuid)) continue;
+    queued.add(k);
+    trnSpreadQueue.push(p);
+  }
+  scheduleTrnSpread();
+}
+
+/** Immediate single-player TRN fetch (deduped + cooldown fail-fast). The
+ *  manual-refresh path calls this directly; the spread calls it one player
+ *  per tick. Never throws into the poll loop. */
+function fetchTrnStatsNow(puuid: string, realName: string, realTag: string): void {
+  const inFlightKey = puuid.toLowerCase();
+  if (trnInFlightLive.has(inFlightKey)) return;
+  trnInFlightLive.add(inFlightKey);
+  import('./trn')
+    .then(({ fetchTrnActStats, trnCooldownRemainingMs }) => {
+      if (trnCooldownRemainingMs() > 0) {
+        trnInFlightLive.delete(inFlightKey);
+        return;
+      }
+      fetchTrnActStats(realName, realTag)
+        .then((res) => {
+          const realCountry =
+            res?.countryCode &&
+            res.countryCode.length === 2 &&
+            !['EU', 'NA', 'AP', 'KR'].includes(res.countryCode.toUpperCase())
+              ? res.countryCode.toUpperCase()
+              : undefined;
+
+          const update: Partial<LivePlayerStatsEntry> = {
+            fetchedAt: Date.now(),
+            retryAfter: undefined,
+          };
+          if (realCountry) update.country = realCountry;
+          if (res?.stats?.kd != null) update.kd = Number(res.stats.kd.toFixed(2));
+          if (res?.stats?.winPct != null) update.winPct = Math.round(res.stats.winPct);
+          if (res?.stats?.hsPct != null) update.hsPct = Math.round(res.stats.hsPct);
+          if (res?.stats?.trnScore != null) update.trnScore = Math.round(res.stats.trnScore);
+          if (res?.stats?.acs != null) update.acs = Math.round(res.stats.acs);
+          // If private or no stats found, set short backoff (5 min) so we can retry later
+          if (!res || !res.stats || res.stats.kd == null) {
+            update.retryAfter = Date.now() + 5 * 60 * 1000;
+          }
+          setCachedLivePlayerStats(puuid, update);
+        })
+        .catch(() => {
+          // Align retry with the live cooldown expiry (+2s) so a player
+          // never sleeps through availability; floor 30s for transient errors.
+          const cool = trnCooldownRemainingMs();
+          setCachedLivePlayerStats(puuid, {
+            retryAfter: Date.now() + Math.max(30 * 1000, cool + 2000),
+          });
+        })
+        .finally(() => {
+          trnInFlightLive.delete(inFlightKey);
+        });
+    })
+    .catch(() => {
+      trnInFlightLive.delete(inFlightKey);
+    });
+}
 
 export function getCachedLivePlayerStats(puuid: string): LivePlayerStatsEntry | undefined {
   if (!puuid) return undefined;
@@ -1997,6 +2176,39 @@ export function peekLiveMatchState(): LiveMatchState | null {
 }
 
 /**
+ * Current match server (GamePodID) for the in-progress match.
+ *
+ * The glz match payload already carries `GamePodID` on most builds, so that
+ * is read first with zero extra traffic. Otherwise the LCU loopback is asked
+ * directly (`GET /pregame/v1/match` in agent select, `GET /core-game/v1/match`
+ * in-game). 404/absent (menus, no match) means no server — never throws, and
+ * an LCU payload for a DIFFERENT match is ignored so a stale server can never
+ * leak across matches.
+ */
+async function fetchLiveGamePodId(
+  phase: 'pregame' | 'coregame',
+  matchId: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  matchData: any
+): Promise<string | null> {
+  try {
+    const fromGlz = extractGamePodId(matchData);
+    if (fromGlz) return fromGlz;
+    if (!isTauri()) return null;
+    const path = phase === 'coregame' ? '/core-game/v1/match' : '/pregame/v1/match';
+    const raw = await invoke<string>('local_request', { method: 'GET', path, bodyArg: null });
+    if (!raw || !raw.trim()) return null;
+    const j = JSON.parse(raw);
+    if (j?.httpStatus === 404 || j?.httpStatusCode === 404) return null;
+    const lcuId = String(j?.ID ?? j?.MatchID ?? j?.MatchId ?? j?.id ?? '').trim();
+    if (lcuId && matchId && lcuId.toLowerCase() !== matchId.toLowerCase()) return null;
+    return extractGamePodId(j);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Live-match entry point shared by every poller (overlay, LiveMatchView,
  * focus/visibility handlers, global refresh).
  *
@@ -2049,7 +2261,9 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
 
   const now = Date.now();
   if (!forceRefresh) {
-    if (lastLiveMatchResult && now - lastLiveMatchFetchTime < 2500) {
+    // Riot-local dedup window: 1s (no rate limit on 127.0.0.1 — the TRN
+    // serial gate downstream is untouched and still paces enrichment).
+    if (lastLiveMatchResult && now - lastLiveMatchFetchTime < 1000) {
       return healMapName(lastLiveMatchResult);
     }
     if (typeof localStorage !== 'undefined') {
@@ -2057,7 +2271,7 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
         const raw = localStorage.getItem(LIVE_MATCH_CACHE_KEY);
         if (raw) {
           const item = JSON.parse(raw) as { at: number; state: LiveMatchState };
-          if (item?.state && now - item.at < 2500) {
+          if (item?.state && now - item.at < 1000) {
             lastLiveMatchResult = item.state;
             lastLiveMatchFetchTime = item.at;
             return healMapName(item.state);
@@ -2558,8 +2772,8 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
     const presenceGroups = new Map<string, string[]>();
     for (const rp of rawPlayers) {
       const pU = rp.puuid.toLowerCase();
-      const pId = (rp.partyId || presencePartyMap.get(pU) || '').toLowerCase().trim();
-      if (pId && pId !== '0' && pId !== 'null' && pId !== 'undefined' && pId.length > 5) {
+      const pId = validRiotPartyId(rp.partyId || presencePartyMap.get(pU) || '');
+      if (pId) {
         const list = presenceGroups.get(pId) || [];
         list.push(pU);
         presenceGroups.set(pId, list);
@@ -2616,42 +2830,50 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
     // Sort all clusters by their primary member PUUID so order never flips
     validClusters.sort((a, b) => a[0].localeCompare(b[0]));
 
-    // Match-scoped cache so party indices stay 100% static for the match duration.
-    // Pregame and core-game IDs live in different namespaces, so the raw key
-    // changes mid-match — carry indices over instead of resetting (pruning
-    // players who left), so party colors survive agent select → match start.
-    const currentMatchKey = String(matchId || phase || 'current').toLowerCase().trim();
-    if (activePartyMatchKey !== currentMatchKey) {
-      activePartyMatchKey = currentMatchKey;
-      const present = new Set(rawPlayers.map((rp) => rp.puuid.toLowerCase()));
-      for (const k of [...matchPartyIndexMap.keys()]) {
-        if (!present.has(k)) matchPartyIndexMap.delete(k);
-      }
-      if (matchPartyIndexMap.size === 0) nextMatchPartyIndex = 1;
+    // Party colors are DERIVED from stable cluster IDs (hash → palette,
+    // probed distinct per lobby) — never from discovery order. The old
+    // sequential counter handed "amber" to whichever cluster's links arrived
+    // first each poll, so colors flickered and swapped every refresh.
+    // Cluster ID = the single shared Riot presence partyId when uniform
+    // (survives member hiccups), else the sorted-membership key
+    // (history-union clusters are immutable mid-match).
+    const riotIdByPuuid = new Map<string, string>();
+    for (const rp of rawPlayers) {
+      const pU = rp.puuid.toLowerCase();
+      riotIdByPuuid.set(pU, validRiotPartyId(rp.partyId || presencePartyMap.get(pU) || ''));
     }
-
-    const playerPartyIndexMap = new Map<string, number>();
-    const playerPartyIdMap = new Map<string, string>();
-
+    const clusterIdByPuuid = new Map<string, string>();
+    const clusterIds: string[] = [];
     for (const members of validClusters) {
-      // If any player in this party already has an index assigned in this match, reuse it
-      let pIdx = members.reduce<number | undefined>((found, m) => found ?? matchPartyIndexMap.get(m), undefined);
-      if (!pIdx) {
-        pIdx = nextMatchPartyIndex++;
-      }
-      const canonicalRoot = members[0];
-      for (const m of members) {
-        matchPartyIndexMap.set(m, pIdx);
-        playerPartyIndexMap.set(m, pIdx);
-        playerPartyIdMap.set(m, `party_${canonicalRoot}`);
-      }
+      const riotIds = new Set(
+        members.map((m) => riotIdByPuuid.get(m) ?? '').filter((id) => id !== '')
+      );
+      const cid = riotIds.size === 1 ? `riot:${[...riotIds][0]}` : `party_${members[0]}`;
+      clusterIds.push(cid);
+      for (const m of members) clusterIdByPuuid.set(m, cid);
+    }
+    const clusterColors = assignPartyColors(clusterIds);
+    const playerPartyIndexMap = new Map<string, number>();
+    for (const [puuid, cid] of clusterIdByPuuid) {
+      const idx = clusterColors.get(cid);
+      if (idx) playerPartyIndexMap.set(puuid, idx);
     }
 
     // In Deathmatch / FFA, keep all players in one unified list (blueTeam) without grouping into teams
+    // Own team for the TRN spread (own-team players drain first). Deathmatch
+    // lobbies are one team, so everyone keeps poll order there.
+    const myTeam = rawPlayers.find(
+      (rp) => rp.puuid.toLowerCase() === ent.puuid.toLowerCase()
+    )?.team;
+    const spreadCandidates: SpreadPlayer[] = [];
     rawPlayers.forEach((p, idx) => {
       const pU = p.puuid.toLowerCase();
       const pPartyIndex = playerPartyIndexMap.get(pU);
-      const pPartyId = playerPartyIdMap.get(pU) || p.partyId || presencePartyMap.get(pU);
+      // Cluster members carry the stable cluster ID; solos carry nothing —
+      // a raw presence ID here would flap with presence hiccups (extra
+      // re-renders) and could masquerade as party identity. Solos stay
+      // neutral via the undefined partyIndex above.
+      const pPartyId = clusterIdByPuuid.get(pU);
       // Case-insensitive name-service lookup + live presence fallback, so
       // hidden/incognito names resolve mid-game instead of only post-game
       // (match-details carries gameName; pregame/coregame carry PUUID only).
@@ -2694,66 +2916,19 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
         (a) => a.name.toLowerCase() === agentRawName.toLowerCase()
       );
 
-      // Asynchronously fetch TRN stats (KD & country) if not cached
-      const statsCached = getCachedLivePlayerStats(p.puuid);
-      const needsStats =
-        !statsCached ||
-        (statsCached.kd == null &&
-          statsCached.acs == null &&
-          Date.now() > (statsCached.retryAfter ?? 0));
-
-      // Fetch TRN stats (KD & country) for any player with a resolved Riot ID,
-      // including unmasked streamer-mode players.
-      if (needsStats && realName && realTag && !realName.startsWith('Player ')) {
-        const inFlightKey = p.puuid.toLowerCase();
-        if (!trnInFlightLive.has(inFlightKey)) {
-          trnInFlightLive.add(inFlightKey);
-          import('./trn')
-            .then(({ fetchTrnActStats, trnCooldownRemainingMs }) => {
-              if (trnCooldownRemainingMs() > 0) {
-                trnInFlightLive.delete(inFlightKey);
-                return;
-              }
-              fetchTrnActStats(realName, realTag)
-                .then((res) => {
-                  const realCountry =
-                    res?.countryCode &&
-                    res.countryCode.length === 2 &&
-                    !['EU', 'NA', 'AP', 'KR'].includes(res.countryCode.toUpperCase())
-                      ? res.countryCode.toUpperCase()
-                      : undefined;
-
-                  const update: Partial<LivePlayerStatsEntry> = {
-                    fetchedAt: Date.now(),
-                    retryAfter: undefined,
-                  };
-                  if (realCountry) update.country = realCountry;
-                  if (res?.stats?.kd != null) update.kd = Number(res.stats.kd.toFixed(2));
-                  if (res?.stats?.winPct != null) update.winPct = Math.round(res.stats.winPct);
-                  if (res?.stats?.hsPct != null) update.hsPct = Math.round(res.stats.hsPct);
-                  if (res?.stats?.trnScore != null) update.trnScore = Math.round(res.stats.trnScore);
-                  if (res?.stats?.acs != null) update.acs = Math.round(res.stats.acs);
-                  // If private or no stats found, set short backoff (5 min) so we can retry later
-                  if (!res || !res.stats || res.stats.kd == null) {
-                    update.retryAfter = Date.now() + 5 * 60 * 1000;
-                  }
-                  setCachedLivePlayerStats(p.puuid, update);
-                })
-                .catch(() => {
-                  // Align retry with the live cooldown expiry (+2s) so a player
-                  // never sleeps through availability; floor 30s for transient errors.
-                  const cool = trnCooldownRemainingMs();
-                  setCachedLivePlayerStats(p.puuid, {
-                    retryAfter: Date.now() + Math.max(30 * 1000, cool + 2000),
-                  });
-                })
-                .finally(() => {
-                  trnInFlightLive.delete(inFlightKey);
-                });
-            })
-            .catch(() => {
-              trnInFlightLive.delete(inFlightKey);
-            });
+      // TRN stats (KD & country) for any player with a resolved Riot ID,
+      // including unmasked streamer-mode players. Manual refresh fires
+      // immediately (unchanged); every other poll joins the paced spread.
+      if (playerNeedsTrnStats(p.puuid) && realName && realTag && !realName.startsWith('Player ')) {
+        if (forceRefresh) {
+          fetchTrnStatsNow(p.puuid, realName, realTag);
+        } else {
+          spreadCandidates.push({
+            puuid: p.puuid,
+            name: realName,
+            tag: realTag,
+            mine: myTeam ? p.team === myTeam : isSelf,
+          });
         }
       }
 
@@ -2848,11 +3023,36 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
       }
     });
 
+    // Paced TRN drain: one uncached player per ~6s while this lobby stays
+    // live. Also stamps the poll clock the spread's stale-stop reads.
+    trnSpreadLastPollAt = Date.now();
+    if (spreadCandidates.length > 0) enqueueTrnSpread(matchId, phase, spreadCandidates);
+
     const startingSide = matchData.AllyTeam?.TeamID === 'Red'
       ? 'Attack'
       : matchData.AllyTeam?.TeamID === 'Blue'
       ? 'Defense'
       : undefined;
+
+    // Match server chip data — resolved alongside this poll and keyed to THIS
+    // matchId. A failed lookup latches the same-match value (no flicker) but
+    // never carries a previous match's server forward.
+    let serverId: string | undefined;
+    let serverName: string | undefined;
+    try {
+      const rawPod = await fetchLiveGamePodId(phase, matchId, matchData).catch(() => null);
+      const prevSameMatch = lastLiveMatchResult?.matchId === matchId ? lastLiveMatchResult : null;
+      const pod = rawPod ?? prevSameMatch?.serverId ?? null;
+      if (pod) {
+        const label = parseGamePodId(pod) ?? prevSameMatch?.serverName ?? null;
+        if (label) {
+          serverId = pod;
+          serverName = label;
+        }
+      }
+    } catch {
+      /* no-server: the chip hides */
+    }
 
     const finalState: LiveMatchState = {
       phase,
@@ -2863,6 +3063,8 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
       isDeathmatch,
       isRange,
       queueId: isRange ? '' : liveQueue,
+      serverId,
+      serverName,
       startingSide,
       allyScore: liveAllyScore,
       enemyScore: liveEnemyScore,

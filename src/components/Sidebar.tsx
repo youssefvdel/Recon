@@ -9,8 +9,10 @@ import {
   Crosshair,
   Users,
   UserCheck,
+  MessageSquare,
 } from 'lucide-react';
 import type { DisplayInfo, GpuInfo, TabType } from '../types';
+import { getConversations } from '../utils/riotChat';
 import { TrackerMini } from './TrackerMini';
 import { APP_VERSION, appVersion } from '../utils/version';
 
@@ -62,6 +64,15 @@ const PREPICK_TABS: SidebarTab[] = [
     id: 'prepick',
     label: 'Pre-Picker',
     icon: UserCheck,
+  },
+];
+
+/* Chat group — the Riot Client's own friends list and messages. */
+const CHAT_TABS: SidebarTab[] = [
+  {
+    id: 'chat',
+    label: 'Riot Chat',
+    icon: MessageSquare,
   },
 ];
 
@@ -123,12 +134,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
     appVersion().then(setAppVer);
   }, []);
 
+  /* Unread Riot chat count, so an incoming message is visible from any tab —
+     a chat that only refreshes while you stare at it is a broken chat. */
+  const [chatUnread, setChatUnread] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      getConversations()
+        .then((rows) => {
+          if (alive) setChatUnread(rows.reduce((n, c) => n + (c.unread_count ?? 0), 0));
+        })
+        .catch(() => {});
+    };
+    tick();
+    const id = setInterval(tick, 10000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+
   const allTabs: SidebarTab[] = [
     ...TRACKER_TABS,
     ...STORE_TABS,
     ...CROSSHAIR_TABS,
-    ...PREPICK_TABS,
     ...UTILITY_TABS,
+    ...CHAT_TABS,
+    ...PREPICK_TABS,
     ...CONFIG_TABS,
     ...ACCOUNTS_TABS,
     ...SETTINGS_TABS,
@@ -216,6 +249,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     {tab.label}
                   </div>
                 </div>
+                {tab.id === 'chat' && chatUnread > 0 && (
+                  <span className="ml-2 px-1.5 rounded-full bg-m3-primary text-m3-on-primary text-[10px] font-bold shrink-0">
+                    {chatUnread > 99 ? '99+' : chatUnread}
+                  </span>
+                )}
               </button>
             );
           })}

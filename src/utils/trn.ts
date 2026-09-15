@@ -27,16 +27,98 @@ const num = (v: unknown): number => {
  * Every request funnels through trnGet, so the gate lives there: requests are
  * serialised with a minimum gap, and a 429/403 puts us in exponential
  * cooldown so the limit is not extended by continued hammering.
+ *
+ * OWNERSHIP: TS owns pacing policy (this gate + the cooldown ladder). The
+ * Rust sidecar/client is a transport backstop only (bounded-concurrency
+ * semaphore) — it must never set request spacing.
  * ------------------------------------------------------------------ */
-const TRN_MIN_GAP_MS = 1500;
+/** Human-paced gap bounds: uniform jitter 1500-3000ms between TRN requests. */
+export const TRN_GAP_MIN_MS = 1500;
+export const TRN_GAP_MAX_MS = 3000;
+/**
+ * Uniform human-paced gap, 1500-3000ms. Pure, seeded-independent,
+ * unit-testable. Pacing lives ONLY here — Go exits per request and
+ * cannot pace across calls.
+ */
+export function trnJitterGapMs(): number {
+  return TRN_GAP_MIN_MS + Math.random() * (TRN_GAP_MAX_MS - TRN_GAP_MIN_MS);
+}
 /** Cool-off after a rate-limit response: 25s, 45s, capped at 60s (was 16m). */
 const TRN_COOLDOWN_BASE_MS = 25 * 1000;
 const TRN_COOLDOWN_MAX_MS = 60 * 1000;
+/** Ladder step cap (matches the clamp already applied in trnGet). */
+const TRN_COOLDOWN_MAX_STEP = 4;
+
+/**
+ * Pure cooldown-ladder math: 25s, 50s, then capped at 60s.
+ * Extracted verbatim from trnGet so the ladder is unit-testable;
+ * trnGet calls this — behavior byte-identical.
+ */
+export function trnCooldownDelayMs(step: number): number {
+  return Math.min(TRN_COOLDOWN_MAX_MS, TRN_COOLDOWN_BASE_MS * 2 ** (Math.max(1, step) - 1));
+}
+
+/**
+ * UA major version the trnfetch sidecar sends (single source of truth is
+ * main.go's trnUserAgent; mirrored here display-only for the Dev QA page).
+ * Major version only — never a secret, never the full UA.
+ */
+export const TRN_UA_MAJOR = 153;
 
 let trnNextSlot = 0;
 let trnCooldownUntil = 0;
 let trnCooldownStep = 0;
 const TRN_COOLDOWN_KEY = 'recon_trn_cooldown_until_v1';
+
+/* ------------------------------------------------------------------ *
+ * Tracker ON/OFF kill-switch (v1, local state only).
+ *
+ * OFF short-circuits trnGet before any gate/cooldown/network work with a
+ * TRN_* throw — the exact shape every caller already swallows as "fall
+ * back to Riot-direct". When ON, the serial gate + cooldown ladder below
+ * run byte-identical. Flag persists in localStorage (absent = ON).
+ * ------------------------------------------------------------------ */
+const TRN_ENABLED_KEY = 'recon_tracker_enabled_v1';
+let trnEnabled: boolean | null = null;
+
+/** Parse the persisted toggle: absent (default ON) or anything but '0' → on. Pure. */
+export function parseTrackerEnabledFlag(raw: unknown): boolean {
+  if (raw === null || raw === undefined) return true;
+  return String(raw) !== '0';
+}
+
+export function isTrackerEnabled(): boolean {
+  if (trnEnabled !== null) return trnEnabled;
+  try {
+    trnEnabled =
+      typeof localStorage !== 'undefined'
+        ? parseTrackerEnabledFlag(localStorage.getItem(TRN_ENABLED_KEY))
+        : true;
+  } catch {
+    trnEnabled = true;
+  }
+  return trnEnabled;
+}
+
+export function setTrackerEnabled(on: boolean): void {
+  trnEnabled = on;
+  if (typeof localStorage !== 'undefined') {
+    try {
+      if (on) localStorage.removeItem(TRN_ENABLED_KEY);
+      else localStorage.setItem(TRN_ENABLED_KEY, '0');
+    } catch {}
+  }
+}
+
+/** Test seam: drop the in-memory cache so the next read re-hits storage. */
+export function resetTrackerEnabledCache(): void {
+  trnEnabled = null;
+}
+
+/** Current cooldown ladder step (0 = no cooldown). QA/test affordance. */
+export function trnCooldownStepCount(): number {
+  return trnCooldownStep;
+}
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -64,7 +146,11 @@ export function resetTrnCooldown(): void {
   }
 }
 
-async function trnGet(path: string): Promise<unknown> {
+async function trnGet(path: string, opts?: { immediate?: boolean }): Promise<unknown> {
+  // Kill-switch first: cheapest possible branch (one cached boolean), no
+  // network, no gate, no timers touched. Same TRN_* throw shape as cooldown
+  // so every caller falls back to Riot-direct data untouched.
+  if (!isTrackerEnabled()) throw new Error('TRN_DISABLED tracker off');
   if (!isTauri()) throw new Error('TRN needs the desktop app.');
 
   const cooling = trnCooldownRemainingMs();
@@ -74,17 +160,27 @@ async function trnGet(path: string): Promise<unknown> {
   }
 
   // Serialise: claim the next slot, then wait for it. Concurrent callers queue
-  // up behind each other instead of bursting.
-  const slot = Math.max(Date.now(), trnNextSlot);
-  trnNextSlot = slot + TRN_MIN_GAP_MS;
-  const wait = slot - Date.now();
-  if (wait > 0) await sleep(wait);
+  // up behind each other instead of bursting. The spacing is uniform jitter
+  // (human pacing); an explicit user refresh (immediate) skips the wait but
+  // still paces its followers. resetTrnCooldown() zeroes the slot, so the
+  // first request after a user refresh likewise fires immediately.
+  const gap = trnJitterGapMs();
+  let slot: number;
+  if (opts?.immediate) {
+    slot = Date.now();
+    trnNextSlot = Math.max(trnNextSlot, slot) + gap;
+  } else {
+    slot = Math.max(Date.now(), trnNextSlot);
+    trnNextSlot = slot + gap;
+    const wait = slot - Date.now();
+    if (wait > 0) await sleep(wait);
+  }
 
   // Re-check after the wait: a sibling may have tripped a 429 while we were
   // queued. Hitting the network during cooldown extends the Cloudflare block.
   // Refund our slot claim so fail-fast waiters don't phantom-delay the queue.
   if (trnCooldownRemainingMs() > 0) {
-    if (trnNextSlot === slot + TRN_MIN_GAP_MS) trnNextSlot = slot;
+    if (trnNextSlot === slot + gap) trnNextSlot = slot;
     throw new Error(`TRN_RATE_LIMITED ${Math.ceil(trnCooldownRemainingMs() / 1000)}s`);
   }
 
@@ -94,8 +190,8 @@ async function trnGet(path: string): Promise<unknown> {
   } catch (e) {
     const msg = String(e);
     if (msg.includes('429') || msg.includes('403') || msg.includes('1015')) {
-      trnCooldownStep = Math.min(trnCooldownStep + 1, 4);
-      trnCooldownUntil = Date.now() + Math.min(TRN_COOLDOWN_MAX_MS, TRN_COOLDOWN_BASE_MS * 2 ** (trnCooldownStep - 1));
+      trnCooldownStep = Math.min(trnCooldownStep + 1, TRN_COOLDOWN_MAX_STEP);
+      trnCooldownUntil = Date.now() + trnCooldownDelayMs(trnCooldownStep);
       if (typeof localStorage !== 'undefined') {
         try {
           localStorage.setItem(TRN_COOLDOWN_KEY, String(trnCooldownUntil));
@@ -959,7 +1055,8 @@ export async function fetchTrnMatches(
         out[matchId] = Math.round(trs);
       }
     }
-    writePersisted(key, out);
+    // Never cache an empty map: a parse miss must not poison the 2h cache.
+    if (Object.keys(out).length > 0) writePersisted(key, out);
     return out;
   } catch (e) {
     if (import.meta.env.DEV) logger.warn('Failed to fetch TRN matches:', e);
@@ -1007,7 +1104,8 @@ export async function fetchTrnMatchDetails(
       // blind overwrite returns the other team's player's score.
       if (agent && !(`agent:${agent}` in out)) out[`agent:${agent}`] = roundedTrs;
     }
-    writePersisted(key, out);
+    // Never cache an empty map: a parse miss must not poison the 7d cache.
+    if (Object.keys(out).length > 0) writePersisted(key, out);
     return out;
   } catch (e) {
     if (import.meta.env.DEV) logger.warn('Failed to fetch TRN match detail:', e);

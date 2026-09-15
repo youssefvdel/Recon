@@ -176,7 +176,6 @@ window — nothing is attached to the game process.
 | Backend | Rust, Tauri v2, Win32 via `windows-rs`, `winreg` |
 | Display engine | Win32 CCD + GDI display settings |
 | Graphics | DirectComposition GPU pipeline (no `WS_EX_LAYERED`, no CSS backdrop blur) |
-| Sidecar | `trnfetch` — a small Go binary that fetches tracker.gg through Chrome's TLS fingerprint |
 
 ---
 

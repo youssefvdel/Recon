@@ -19,6 +19,7 @@ import {
   ShoppingBag,
   Users,
   UserCheck,
+  MessageSquare,
 } from 'lucide-react';
 import type { DisplayInfo, GpuInfo, TabType } from '../types';
 import {
@@ -33,7 +34,7 @@ import {
 } from '../utils/ipc';
 import { IS_DEV } from '../utils/devTools';
 import { performGlobalRefresh } from '../hooks/useTrackerData';
-import { trnCooldownRemainingMs, resetTrnCooldown } from '../utils/trn';
+import { isTrackerEnabled } from '../utils/trn';
 import { peekLiveMatchState } from '../utils/tracker';
 import type { LiveMatchState } from '../types';
 import { listen } from '@tauri-apps/api/event';
@@ -127,6 +128,11 @@ const TAB_METADATA: Record<
     description: 'Instant hover + timed lock-in, per map or a global default',
     icon: UserCheck,
   },
+  chat: {
+    title: 'Riot Chat',
+    description: "The Riot Client's own friends list, requests and messages",
+    icon: MessageSquare,
+  },
   accounts: {
     title: 'Accounts',
     description: 'Quick-switch Riot logins — snapshots stay on this PC',
@@ -147,7 +153,13 @@ export const TopBar: React.FC<TopBarProps> = ({
   const Icon = meta.icon;
   const [isMaximized, setIsMaximized] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [trnCoolingSec, setTrnCoolingSec] = useState<number>(0);
+  const [trackerOn, setTrackerOn] = useState<boolean>(() => {
+    try {
+      return isTrackerEnabled();
+    } catch {
+      return true;
+    }
+  });
   const [showClove, setShowClove] = useState(false);
   const [dodgeOffset, setDodgeOffset] = useState({ x: 0, y: 0 });
   const [dodgeCount, setDodgeCount] = useState(0);
@@ -187,8 +199,12 @@ export const TopBar: React.FC<TopBarProps> = ({
 
   useEffect(() => {
     const tick = () => {
-      const ms = trnCooldownRemainingMs();
-      setTrnCoolingSec(ms > 0 ? Math.ceil(ms / 1000) : 0);
+      // Same existing 1s tick — no new intervals. Surfaces the kill-switch
+      // flipped on the Dev QA page. (Cooldown countdown pill removed: the
+      // mechanism runs silently; users never see seconds.)
+      try {
+        setTrackerOn(isTrackerEnabled());
+      } catch {}
     };
     tick();
     const id = setInterval(tick, 1000);
@@ -383,20 +399,15 @@ export const TopBar: React.FC<TopBarProps> = ({
             <span>LIVE</span>
           </button>
         )}
-        {/* Rate Limit & API Health Indicator */}
-        {trnCoolingSec > 0 ? (
-          <button
-            type="button"
-            onClick={() => {
-              resetTrnCooldown();
-              setTrnCoolingSec(0);
-            }}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/15 border border-amber-400/40 text-amber-300 text-[10px] font-mono font-bold animate-pulse cursor-pointer hover:bg-amber-500/25 transition-colors"
-            title="Tracker.gg rate limit cooldown active — click to force reset"
+        {/* API Health Indicator (Tracker OFF setting only — cooldowns stay invisible) */}
+        {!trackerOn ? (
+          <div
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-500/15 border border-zinc-400/40 text-zinc-300 text-[10px] font-mono font-bold"
+            title="Tracker kill-switch is OFF (Dev QA page) — TRN requests throw immediately, no network. Distinct from rate-limit cooling."
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-            <span>TRN Cooling ({trnCoolingSec}s)</span>
-          </button>
+            <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
+            <span>Tracker OFF</span>
+          </div>
         ) : (
           <div
             className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-m3-surface-container border border-m3-outline-subtle text-[9.5px] font-mono text-m3-outline"

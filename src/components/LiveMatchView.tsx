@@ -32,6 +32,7 @@ import {
 import { LoadoutViewer } from './LoadoutViewer';
 import { useTrackerData } from '../hooks/useTrackerData';
 import { ScoreBadge, scoreTier } from './ScoreBadge';
+import { ServerChip } from './ServerChip';
 import {
   getFlagUrl,
   getCountryName,
@@ -142,7 +143,9 @@ export const LiveMatchView: React.FC = () => {
         })
       : null;
 
-    const interval = setInterval(poll, 6000);
+    // Riot-local endpoints have no rate limit: 3s lobby poll. TRN enrichment
+    // (per-player stats) stays behind its own 1.5–3s serial gate, untouched.
+    const interval = setInterval(poll, 3000);
     return () => {
       clearInterval(interval);
       window.removeEventListener('recon:global-refresh', onGlobalRefresh);
@@ -422,6 +425,9 @@ const MatchStatusStrip: React.FC<{
           {state.mode}
         </span>
       )}
+
+      {/* Match server — hides when Riot reports none (menus / no match) */}
+      <ServerChip serverName={state.serverName} />
 
       {state.startingSide && !state.isDeathmatch && (
         <span className="flex items-center gap-1.5 font-mono text-m3-outline shrink-0">

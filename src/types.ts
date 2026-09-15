@@ -245,6 +245,7 @@ export type TabType =
   | 'store'
   | 'crosshair'
   | 'prepick'
+  | 'chat'
   | 'accounts'
   | 'dev';
 
@@ -313,6 +314,10 @@ export interface LiveMatchState {
   /** Riot queue id ("competitive", "swiftplay", "deathmatch", …). Scopes the
    *  per-player 24h record to the mode actually being played. */
   queueId?: string;
+  /** Raw GamePodID from pregame/coregame (e.g. aresriot.aws-euc1-prod.eu-gp-frankfurt-1). */
+  serverId?: string;
+  /** Human server city parsed from GamePodID (e.g. Frankfurt). */
+  serverName?: string;
   startingSide?: 'Attack' | 'Defense';
   allyScore?: number;
   enemyScore?: number;

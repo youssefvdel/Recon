@@ -28,3 +28,6 @@ tsconfig.tsbuildinfo
 *.njsproj
 *.sln
 *.sw?
+.opencode/
+opencode.json
+ref200.err

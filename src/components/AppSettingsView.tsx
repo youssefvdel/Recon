@@ -44,6 +44,8 @@ import {
 } from '../utils/ipc';
 import { APP_VERSION, appVersion } from '../utils/version';
 import { listen } from '@tauri-apps/api/event';
+import { getRecentLogs } from '../utils/logger';
+import { isCrashOptIn, setCrashOptIn, CONSENT_EVENT } from '../utils/consent';
 
 interface AppSettingsViewProps {
   onUpdateStatusChange?: (hasUpdate: boolean, latestVersion: string) => void;
@@ -78,7 +80,40 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
 
   // Overlay state: window visibility and HUD edit/customization mode
   const [overlayOpen, setOverlayOpen] = useState(false);
-  const [inEditMode, setInEditMode] = useState(false);
+
+  // Diagnostics: log bundle + local-only crash opt-in. Nothing uploads.
+  const [crashOn, setCrashOn] = useState<boolean>(() => {
+    try {
+      return isCrashOptIn();
+    } catch {
+      return false;
+    }
+  });
+  const [logStatus, setLogStatus] = useState<string | null>(null);
+
+  const flipCrashOptIn = (): void => {
+    const next = !crashOn;
+    setCrashOptIn(next);
+    setCrashOn(next);
+  };
+
+  const downloadLogs = (): void => {
+    try {
+      const lines = getRecentLogs(200);
+      const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `recon-logs-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setLogStatus(`Saved ${lines.length} lines`);
+    } catch {
+      setLogStatus('Download failed');
+    }
+  };  const [inEditMode, setInEditMode] = useState(false);
 
   // Update track: "stable" (official release) vs "early-access" (alpha / instant builds)
   const [updateChannel, setUpdateChannelState] = useState<UpdateChannel>(getUpdateChannel);
@@ -721,6 +756,33 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
               <ExternalLink className="w-3.5 h-3.5" />
               <span>Releases & Changelog</span>
             </button>
+          </div>
+          {/* Diagnostics: logs + crash reports stay on this PC. Nothing uploads. */}
+          <div className="flex items-center gap-3 pt-2 flex-wrap border-t border-m3-outline-subtle/60">
+            <button
+              onClick={downloadLogs}
+              className="h-8 px-3 rounded-xl bg-m3-surface-container-high hover:bg-m3-surface-container-highest text-m3-on-surface text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Download recent app logs as recon-logs-*.txt for bug reports"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Download logs</span>
+            </button>
+            <button
+              type="button"
+              onClick={flipCrashOptIn}
+              className={`h-8 px-3 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border ${crashOn ? 'bg-m3-primary/20 border-m3-primary text-m3-primary' : 'bg-m3-surface-container-high border-transparent text-m3-on-surface-variant hover:text-m3-on-surface'}`}
+              title="Opt in to local crash capture (offers copy-to-clipboard diagnostics, never uploads)"
+            >
+              <span>Crash reports: {crashOn ? 'ON' : 'OFF'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent(CONSENT_EVENT))}
+              className="h-8 px-3 rounded-xl bg-m3-surface-container-high hover:bg-m3-surface-container-highest text-m3-on-surface text-xs font-semibold transition-colors cursor-pointer"
+            >
+              <span>Review data consent</span>
+            </button>
+            {logStatus && <span className="text-[11px] text-m3-outline font-medium">{logStatus}</span>}
           </div>
         </div>
       </div>

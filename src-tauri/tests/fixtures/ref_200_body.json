@@ -1,0 +1,1 @@
+{"data":{"platformInfo":{"platformSlug":"riot","platformUserHandle":"TestPlayer","avatarUrl":"https://example.invalid/avatar.png"},"userInfo":{"countryCode":"us"},"metadata":{"defaultSeason":"season-1"},"segments":[{"type":"season","attributes":{"seasonId":"season-1"},"stats":{"matchesWon":{"value":12},"matchesLost":{"value":8},"kDRatio":{"value":1.25}}}]}}

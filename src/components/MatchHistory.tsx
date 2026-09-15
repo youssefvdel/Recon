@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Check, Lightbulb, Copy } from 'lucide-react';
 import type { TrackerMatchDetail, TrackerMmrPoint } from '../types';
 import { matchCard, queueLabel, shortMapName, tierName } from '../utils/tracker';
 import { useTrackerData } from '../hooks/useTrackerData';
 import { calculateTrsFallback } from '../utils/trn';
+import { isOpggFallbackActive, fetchOpggMatches, OPGG_ATTRIBUTION, type OpggMatch } from '../utils/opgg';
 import { buildTips } from '../utils/trackerTips';
 import { HistorySkeletons } from './TrackerSkeletons';
 import { CustomDropdown } from './ValorantConfig';
@@ -52,6 +53,8 @@ interface Row {
   k4: number;
   aces: number;
   trs: number;
+  /** Set on rows supplemented from the OP.GG fallback (renders the OP.GG tag). */
+  source?: 'opgg';
 }
 
 /** Count clutch rounds fought alone (won vs lost). Mirrors matchCard's clutch rule. */
@@ -120,7 +123,8 @@ const MatchRow: React.FC<{
   const handleCopyPlayer = (e: React.MouseEvent, p: { name?: string; tag?: string; agent: string; puuid?: string }) => {
     e.stopPropagation();
     const id = p.name ? (p.tag ? `${p.name}#${p.tag}` : p.name) : p.agent;
-    navigator.clipboard.writeText(id);
+    // Swallow rejection: a denied clipboard must not surface as unhandled (crash capture).
+    void navigator.clipboard.writeText(id).catch(() => {});
     const k = p.puuid || p.name || p.agent;
     setCopiedKey(k);
     setTimeout(() => setCopiedKey((c) => (c === k ? null : c)), 1500);
@@ -192,6 +196,14 @@ const MatchRow: React.FC<{
           </div>
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="text-[15px] font-display font-extrabold text-m3-on-surface truncate">{map}</span>
+            {r.source === 'opgg' && (
+              <span
+                className="text-[9px] font-mono font-bold text-m3-outline border border-m3-outline-subtle rounded px-1 py-px shrink-0"
+                title={`${OPGG_ATTRIBUTION} — TRN fallback row. No rank/RR from this source.`}
+              >
+                OP.GG
+              </span>
+            )}
             {r.place > 0 && (
               <span className="text-[9px] font-mono font-bold text-m3-outline border border-m3-outline-subtle rounded px-1 py-px shrink-0">
                 {ordinal(r.place)}
@@ -209,14 +221,18 @@ const MatchRow: React.FC<{
           )}
         </div>
 
-        {/* Score */}
+        {/* Score (unknown for OP.GG rows — the fallback carries no team score) */}
         <div className="flex flex-col items-center shrink-0 w-16">
           <span className="text-[9px] font-bold uppercase tracking-wider text-m3-outline">Score</span>
+          {r.source === 'opgg' ? (
+            <span className="text-[15px] font-mono text-m3-outline" title="Team score unavailable from OP.GG">—</span>
+          ) : (
           <span className="text-[15px] font-mono font-extrabold tabular-nums whitespace-nowrap">
             <span className="text-m3-mint">{r.us}</span>
             <span className="text-m3-outline"> : </span>
             <span className="text-m3-coral">{r.them}</span>
           </span>
+          )}
         </div>
 
         {/* TRS */}
@@ -373,13 +389,51 @@ export const MatchHistory: React.FC = () => {
     useTrackerData();
   const [agentFilter, setAgentFilter] = useState('All');
   const [mapFilter, setMapFilter] = useState('All');
-  const [openIds, setOpenIds] = useState<Set<string>>(new Set());
-  const [selectedMatch, setSelectedMatch] = useState<{
+  const [openIds, setOpenIds] = useState<Set<string>>(new Set());  const [selectedMatch, setSelectedMatch] = useState<{
     detail: TrackerMatchDetail;
     game: TrackerMmrPoint;
     mapName: string;
     queue: string;
   } | null>(null);
+  // OP.GG fallback rows: this component mounting IS the explicit history
+  // view (never a background poll). Rows supplement matchIds Riot doesn't
+  // list; each carries source:'opgg' for the citation tag.
+  const [opggMatches, setOpggMatches] = useState<OpggMatch[]>([]);
+  const [opggActive, setOpggActive] = useState(false);
+  // Cooldown lives in module state + localStorage with no events; re-check
+  // the gate periodically so this banner clears itself when TRN recovers.
+  const [gateTick, setGateTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setGateTick((n) => n + 1), 30000);
+    return () => clearInterval(t);
+  }, []);
+  useEffect(() => {
+    let live = true;
+    const nm = profile?.name ?? '';
+    const tg = profile?.tag ?? '';
+    if (!nm || !isOpggFallbackActive()) {
+      setOpggActive(false);
+      setOpggMatches([]);
+      return;
+    }
+    // Active flag follows actual rows, never the gate alone: no rows means
+    // no banner, even mid-cooldown.
+    fetchOpggMatches(nm, tg)
+      .then((m) => {
+        if (!live) return;
+        setOpggMatches(m);
+        setOpggActive(m.length > 0);
+      })
+      .catch(() => {
+        if (!live) return;
+        setOpggMatches([]);
+        setOpggActive(false);
+      });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.name, profile?.tag, gateTick]);
   const puuid = profile?.puuid ?? '';
 
   const infoByName = useMemo(() => {
@@ -476,8 +530,51 @@ export const MatchHistory: React.FC = () => {
         trs,
       });
     }
+    // OP.GG fallback rows: only matchIds Riot didn't list (no duplicates),
+    // competitive-or-unknown queue only. Rank/RR stay empty — OP.GG exposes
+    // no rank tool, so no rank icon renders; TRS stays 0 ('—').
+    if (opggMatches.length > 0) {
+      const known = new Set(games.map((x) => x.matchId));
+      for (const m of opggMatches) {
+        if (!m.matchId || known.has(m.matchId)) continue;
+        const q = (m.queue || '').toLowerCase();
+        if (q && q !== 'competitive') continue;
+        const won = m.won ?? false;
+        out.push({
+          g: {
+            tier: '',
+            rr: 0,
+            change: won ? 1 : -1,
+            matchId: m.matchId,
+            mapId: m.map || m.mapId,
+            when: m.when,
+            queueId: q || 'competitive',
+          },
+          detail: undefined,
+          agent: m.agent || '?',
+          won,
+          us: 0,
+          them: 0,
+          k: m.kills,
+          d: m.deaths,
+          a: m.assists,
+          acs: m.rounds > 0 ? Math.round(m.score / m.rounds) : 0,
+          dd: 0,
+          hsPct: 0,
+          place: 0,
+          kast: 0,
+          cw: 0,
+          cl: 0,
+          k3: 0,
+          k4: 0,
+          aces: 0,
+          trs: 0,
+          source: 'opgg',
+        });
+      }
+    }
     return out;
-  }, [games, detailsById, puuid, mapById, queueById, trnMatchTrs, agentFilter, mapFilter]);
+  }, [games, detailsById, puuid, mapById, queueById, trnMatchTrs, agentFilter, mapFilter, opggMatches]);
 
   const agentsPlayed = useMemo(
     () => [...new Set(rows.map((r) => r.agent).filter((a) => a && a !== '?'))].sort(),
@@ -614,6 +711,16 @@ export const MatchHistory: React.FC = () => {
               className="text-m3-primary hover:underline text-xs ml-3 cursor-pointer font-bold shrink-0">
               Dismiss
             </button>
+          </div>
+        )}
+
+        {/* Fallback notice: one line, only when OP.GG rows are actually shown. */}
+        {opggActive && opggMatches.length > 0 && (
+          <div
+            className="px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-400/30 text-amber-200/90 text-[11px] font-mono shrink-0"
+            title={OPGG_ATTRIBUTION}
+          >
+            TRN cooling — showing OP.GG matches <span className="opacity-70">· {OPGG_ATTRIBUTION}</span>
           </div>
         )}
 

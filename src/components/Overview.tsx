@@ -6,11 +6,11 @@ import { ScoreBadge, gradeFor, scoreTier } from './ScoreBadge';
 import {
   fetchTrnActStats,
   fetchTrnAgents,
-  trnCooldownRemainingMs,
   resetTrnCooldown,
   type TrnActStats,
   type TrnAgentStat,
 } from '../utils/trn';
+import { isOpggFallbackActive, OPGG_ATTRIBUTION } from '../utils/opgg';
 import killsIcon from '../assets/icons/kills.png';
 import firstbloodsIcon from '../assets/icons/firstbloods.png';
 import acesIcon from '../assets/icons/aces.png';
@@ -155,13 +155,9 @@ export const Overview: React.FC = () => {
     ]).then(([st, ag]) => {
       if (!live) return;
       if (!st) {
-        // Say so, with the real reason. Do NOT fall back to the live act's numbers.
-        const cooling = trnCooldownRemainingMs();
-        setSelError(
-          cooling > 0
-            ? `tracker.gg rate-limited us — retrying in ${Math.ceil(cooling / 60000)} min.`
-            : 'tracker.gg did not return stats for this act.'
-        );
+        // Plain empty state — no countdowns, no jargon. Data appears silently
+        // when the cooldown expires; Retry just refetches.
+        setSelError('tracker.gg did not return stats for this act.');
         setSelLoading(false);
         return;
       }
@@ -341,6 +337,17 @@ export const Overview: React.FC = () => {
           >
             Retry
           </button>
+        </div>
+      )}
+
+      {/* TRN can't serve history right now — the Matches tab supplements from OP.GG. */}
+      {isOpggFallbackActive() && (
+        <div
+          className="px-1 text-[11px] font-mono text-amber-200/90 shrink-0"
+          title={OPGG_ATTRIBUTION}
+        >
+          TRN cooling — Matches tab may supplement from OP.GG
+          <span className="opacity-70"> · {OPGG_ATTRIBUTION}</span>
         </div>
       )}
 

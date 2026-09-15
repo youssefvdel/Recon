@@ -4,6 +4,7 @@ import type { LiveMatchState, LiveMatchPlayer } from '../types';
 import { fetchLiveMatchState, gameData, matchEndHarvest, harvestMatchNames, isMatchStateEqual } from '../utils/tracker';
 import { useTrackerData } from '../hooks/useTrackerData';
 import { ScoreBadge, scoreTier } from './ScoreBadge';
+import { ServerChip } from './ServerChip';
 import {
   getFlagUrl,
   getCountryName,
@@ -414,7 +415,21 @@ export const OverlayView: React.FC = () => {
         return merged ?? DEFAULT_OVERLAY_CONFIG;
       }
       const merged = mergeSaved(saved);
-      if (merged) return merged;
+      if (merged) {
+        // One-time widget parity: a config written before a widget existed (or
+        // one that inherited an older OFF default) silently hides it, which the
+        // user reads as "my friend doesn't have that widget". Turn the two
+        // advisory widgets on ONCE, then let the persisted value rule — the
+        // marker is separate so hand-placed positions are never touched.
+        const PARITY_KEY = 'recon_overlay_widget_parity_v1';
+        if (!localStorage.getItem(PARITY_KEY)) {
+          localStorage.setItem(PARITY_KEY, '1');
+          const next: OverlayConfig = { ...merged, showTopAgents: true, showPrepick: true };
+          localStorage.setItem('recon_overlay_cfg_v7', JSON.stringify(next));
+          return next;
+        }
+        return merged;
+      }
     } catch {}
     return DEFAULT_OVERLAY_CONFIG;
   });
@@ -608,7 +623,8 @@ export const OverlayView: React.FC = () => {
       // A slow Riot round-trip must not let setInterval stack overlapping polls.
       if (ticking.current) return;
       if (phaseRef.current === 'idle') {
-        idleSkips.current = (idleSkips.current + 1) % 3;
+        // Idle backoff: fetch every 5th tick ≈ 12.5s (was 3 × 4.5s = 13.5s).
+        idleSkips.current = (idleSkips.current + 1) % 5;
         if (idleSkips.current !== 0) return;
       }
       ticking.current = true;
@@ -637,7 +653,9 @@ export const OverlayView: React.FC = () => {
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', onVis);
     }
-    const id = setInterval(tick, 4500);
+    // Riot-local endpoints have no rate limit: 2.5s tick (hidden-tab skip +
+    // idle backoff above stay). TRN enrichment keeps its own serial gate.
+    const id = setInterval(tick, 2500);
 
     const unlistenSync = isTauri()
       ? listen<LiveMatchState>('recon:live-match-sync', (event) => {
@@ -1247,6 +1265,8 @@ export const OverlayView: React.FC = () => {
                 <span className="px-1.5 py-0.5 rounded bg-m3-primary/25 text-m3-primary text-[9px] font-mono font-extrabold uppercase shrink-0">
                   {matchState?.phase === 'coregame' ? 'LIVE' : matchState?.phase === 'pregame' ? 'SELECT' : 'PREVIEW'}
                 </span>
+                {/* Match server — hides when Riot reports none (menus / no match) */}
+                <ServerChip serverName={matchState?.serverName} />
               </div>
             </div>
 
@@ -1388,6 +1408,8 @@ export const OverlayView: React.FC = () => {
                 )}
               </div>
               <div className="flex items-center gap-2">
+                {/* Match server — hides when Riot reports none (menus / no match) */}
+                <ServerChip serverName={matchState?.serverName} />
                 {config.showStartingSide && matchState?.startingSide && (
                   <span
                     className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-mono font-extrabold uppercase shrink-0 border ${

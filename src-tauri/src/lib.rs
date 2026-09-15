@@ -6,6 +6,7 @@ mod game_config;
 mod gpu;
 mod shortcuts;
 mod tracker;
+mod trn_client;
 mod window_manager;
 mod updater;
 
@@ -1076,6 +1077,7 @@ pub fn run() {
             tracker::is_riot_client_running,
             tracker::detect_local_account,
             tracker::local_entitlements,
+            tracker::local_request,
             tracker::local_presences,
             tracker::local_client_version,
             tracker::riot_direct_get,

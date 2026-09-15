@@ -7,6 +7,7 @@ import { SettingsView } from './components/SettingsView';
 import { AppSettingsView } from './components/AppSettingsView';
 import { TrackerView } from './components/TrackerView';
 import { StoreView } from './components/StoreView';
+import { RiotChatView } from './components/RiotChatView';
 import { CrosshairView } from './components/CrosshairView';
 import { PrepickView } from './components/PrepickView';
 import { AccountsView } from './components/AccountsView';
@@ -33,6 +34,9 @@ import {
 } from './utils/ipc';
 import { listen } from '@tauri-apps/api/event';
 import { IS_DEV } from './utils/devTools';
+import { ConsentModal } from './components/ConsentModal';
+import { CrashOffer } from './components/CrashOffer';
+import { hasConsented, installCrashCapture, CONSENT_EVENT } from './utils/consent';
 
 export const App: React.FC = () => {
   const isOverlay = React.useMemo(() => {
@@ -78,7 +82,7 @@ export const App: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<TabType>(() => {
     try {
       const saved = localStorage.getItem('recon_active_tab') as TabType;
-      if (saved && ['overview', 'switcher', 'visualizer', 'sens', 'custom_res', 'gpu', 'borderless', 'game_config', 'settings', 'valorant', 'matches', 'store', 'crosshair', 'accounts', 'prepick'].includes(saved)) {
+      if (saved && ['overview', 'switcher', 'visualizer', 'sens', 'custom_res', 'gpu', 'borderless', 'game_config', 'settings', 'valorant', 'matches', 'store', 'crosshair', 'prepick', 'chat', 'accounts'].includes(saved)) {
         return saved;
       }
     } catch {}
@@ -110,6 +114,22 @@ export const App: React.FC = () => {
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
   const [hasUpdate, setHasUpdate] = useState(false);
   const [_latestVersion, setLatestVersion] = useState('');
+  const [showConsent, setShowConsent] = useState<boolean>(() => {
+    try {
+      return !hasConsented();
+    } catch {
+      return false;
+    }
+  });
+
+  // Local-only crash capture (opt-in flag lives in utils/consent).
+  // Consent modal re-opens from Settings via the CONSENT_EVENT.
+  useEffect(() => {
+    installCrashCapture();
+    const onConsent = (): void => setShowConsent(true);
+    window.addEventListener(CONSENT_EVENT, onConsent);
+    return () => window.removeEventListener(CONSENT_EVENT, onConsent);
+  }, []);
 
   // Background update check on startup (delayed 2.5s so app startup is instantaneous)
   useEffect(() => {
@@ -368,6 +388,8 @@ export const App: React.FC = () => {
 
                 {currentTab === 'store' && <StoreView />}
 
+                {currentTab === 'chat' && <RiotChatView />}
+
                 {currentTab === 'crosshair' && <CrosshairView />}
 
                 {currentTab === 'prepick' && <PrepickView />}
@@ -425,6 +447,10 @@ export const App: React.FC = () => {
           setLatestVersion(ver);
         }}
       />
+
+      {/* First-run data consent + crash diagnostics offer */}
+      {showConsent && <ConsentModal onDone={() => setShowConsent(false)} />}
+      <CrashOffer />
 
       {/* Animated Toast Notification */}
       <AnimatePresence>

@@ -60,6 +60,80 @@ fn curl_args() -> Command {
     cmd
 }
 
+/// Generic loopback request to the Riot Client's OWN API surface — friends,
+/// friend requests, conversations, messages, blocklist, presence (verified
+/// against the client's live swagger: `/chat/v4|v6/*`, `/social/v1|v2/*`).
+///
+/// This is the same trust boundary as `local_get`/`local_post`: loopback only,
+/// credentials read fresh from the lockfile per call, never logged or stored.
+/// The path is validated so a caller can never be talked into an absolute URL.
+fn local_request_blocking(
+    method: String,
+    path: String,
+    body_arg: Option<String>,
+) -> Result<String, String> {
+    let upper = method.to_uppercase();
+    if !matches!(upper.as_str(), "GET" | "POST" | "PUT" | "DELETE" | "PATCH") {
+        return Err("Unsupported method.".to_string());
+    }
+    if !path.starts_with('/') || path.contains([' ', '\n', '\r']) || path.contains("//") {
+        return Err("Invalid path.".to_string());
+    }
+    let (port, password) = lockfile_auth()?;
+    let url = format!("https://127.0.0.1:{}{}", port, path);
+    let mut args: Vec<String> = vec![
+        "-s".into(),
+        "-k".into(),
+        "--connect-timeout".into(),
+        "1".into(),
+        "--max-time".into(),
+        "5".into(),
+        "-u".into(),
+        format!("riot:{}", password),
+        "-X".into(),
+        upper,
+        "-w".into(),
+        "\n%{http_code}".into(),
+    ];
+    if let Some(b) = body_arg {
+        args.push("-H".into());
+        args.push("Content-Type: application/json".into());
+        args.push("-d".into());
+        args.push(b);
+    }
+    args.push(url);
+    let output = curl_args()
+        .args(&args)
+        .output()
+        .map_err(|e| format!("Local query failed: {}", e))?;
+    if !output.status.success() {
+        return Err("Riot Client not responding — launch it and retry.".to_string());
+    }
+    let raw = String::from_utf8_lossy(&output.stdout).to_string();
+    // Split the body from the status code curl appended (`-w '\n%{http_code}'`).
+    let (body, status) = match raw.rfind('\n') {
+        Some(i) => (raw[..i].to_string(), raw[i + 1..].trim().to_string()),
+        None => (raw.clone(), String::new()),
+    };
+    if !status.is_empty() && !status.starts_with('2') {
+        return Err(format!("HTTP {} from Riot Client.", status));
+    }
+    Ok(body)
+}
+
+/// Call the Riot Client's local API. `path` must be one of its own routes
+/// (e.g. `/chat/v4/friends`). Returns the raw JSON response body.
+#[tauri::command]
+pub async fn local_request(
+    method: String,
+    path: String,
+    body_arg: Option<String>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || local_request_blocking(method, path, body_arg))
+        .await
+        .map_err(|e| format!("Task failed: {}", e))?
+}
+
 /// GET against the local client (self-signed cert). Password lives only in
 /// the curl argument for one local call — never logged or stored.
 /// `pub(crate)`: the accounts module reads the live Riot ID through it.
@@ -377,18 +451,18 @@ pub async fn local_presences() -> Result<String, String> {
 }
 
 /// Chrome-impersonated GET for tracker.gg's Cloudflare wall, via the bundled
-/// trnfetch sidecar (Go + uTLS Chrome fingerprint — pure-Rust TLS spoofing has
-/// no Windows-ready crate; BoringSSL won't compile under MSVC toolchains).
+/// trn_get: read-only TRN profile/segment calls through the in-process
+/// BoringSSL client (Chrome fingerprint — pure-Rust TLS spoofing has no
+/// Windows-ready crate; BoringSSL won't compile under MSVC toolchains).
 /// Read-only profile/segment calls, no key, no browser session. If TRN ever
 /// gates them, callers fall back to Riot-direct data.
 #[tauri::command]
 pub async fn trn_get(path: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || trn_get_blocking(path))
-        .await
-        .map_err(|e| format!("Task failed: {}", e))?
+    // 20s: the same budget the sidecar got via `--max-time 20`.
+    trn_get_with_timeout(path, 20).await
 }
 
-fn trn_get_blocking(path: String) -> Result<String, String> {
+async fn trn_get_with_timeout(path: String, timeout_secs: u64) -> Result<String, String> {
     if path.contains([' ', '\n', '\r']) || !path.starts_with("/api/") {
         return Err("Invalid path.".to_string());
     }
@@ -396,47 +470,16 @@ fn trn_get_blocking(path: String) -> Result<String, String> {
         return Err("Path too long.".to_string());
     }
     let url = format!("https://api.tracker.gg{}", path);
-    // Prod: sidecar sits beside the app binary (either trnfetch.exe or trnfetch-x86_64-pc-windows-msvc.exe).
-    // Dev: src-tauri/binaries/.
-    let bin_triple = "trnfetch-x86_64-pc-windows-msvc.exe";
-    let bin_short = "trnfetch.exe";
-    let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf()));
-
-    let bin = exe_dir
-        .as_ref()
-        .map(|d| d.join(bin_short))
-        .filter(|p| p.exists())
-        .or_else(|| {
-            exe_dir
-                .as_ref()
-                .map(|d| d.join(bin_triple))
-                .filter(|p| p.exists())
-        })
-        .unwrap_or_else(|| {
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("binaries")
-                .join(bin_triple)
-        });
-    let mut cmd = Command::new(bin);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
-    let output = cmd
-        .arg(&url)
-        .arg("--max-time")
-        .arg("20")
-        .output()
-        .map_err(|e| format!("sidecar failed: {}", e))?;
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
+    // Same TRN_ surface the sidecar path produced: Go's stderr line,
+    // trimmed to 140 chars. Runs on Tauri's runtime — no child process,
+    // no new threads.
+    match crate::trn_client::fetch(&url, timeout_secs).await {
+        Ok(body) => Ok(body),
+        Err(err) => Err(format!(
             "TRN_{}",
             err.trim().chars().take(140).collect::<String>()
-        ));
+        )),
     }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 /// Generic authed GET against Riot's servers. Tokens stay in arguments;

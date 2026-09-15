@@ -14,6 +14,7 @@ export default defineConfig({
   server: {
     // Fail fast on port conflict: a silent port shift leaves tauri dev
     // pointing at a stale server (blank unresponsive window).
+    host: '127.0.0.1',
     port: 5173,
     strictPort: true,
   },

@@ -166,6 +166,41 @@ export function getPartyStyle(partyIndex?: number) {
   return base;
 }
 
+/** Stable string hash (FNV-1a, 32-bit): same ID → same color across
+ *  refreshes, reorderings, and sessions. No randomness, no counters. */
+function hashPartyId(id: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+/** Party ID → palette index 1..6. Null/empty/whitespace = solo → 0, which
+ *  getPartyStyle maps to the neutral style — never a party color. */
+export function partyColorIndex(partyId?: string | null): number {
+  if (!partyId || !partyId.trim()) return 0;
+  return (hashPartyId(partyId.trim().toLowerCase()) % 6) + 1;
+}
+
+/** Distinct palette indices for one lobby's party IDs. Sorted IDs + linear
+ *  probe: deterministic and order-independent, collision-free up to 6
+ *  parties (a 10-player lobby holds at most five 2+ parties). Blank IDs
+ *  are skipped — they are solos, not parties. */
+export function assignPartyColors(partyIds: string[]): Map<string, number> {
+  const taken = new Set<number>();
+  const out = new Map<string, number>();
+  for (const id of [...new Set(partyIds)].sort()) {
+    if (!id || !id.trim()) continue;
+    let idx = partyColorIndex(id);
+    while (taken.has(idx)) idx = (idx % 6) + 1;
+    taken.add(idx);
+    out.set(id, idx);
+  }
+  return out;
+}
+
 /** Human label for a Riot queue id — captions the queue-scoped columns so a
  *  "24H — Ranked" column can't be mistaken for all modes. */
 export function queueLabel(queueId?: string): string {
