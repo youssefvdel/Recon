@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Copy, Check } from 'lucide-react';
+import { X, Copy, Check, Lock } from 'lucide-react';
 import { ScoreBadge, scoreTier } from './ScoreBadge';
-import { fetchTrnActStats, fetchTrnAgents, type TrnActStats, type TrnAgentStat } from '../utils/trn';
+import { fetchTrnActStats, fetchTrnAgents, isTrnPrivateError, trnNegativeKind, type TrnActStats, type TrnAgentStat } from '../utils/trn';
 import { fetchMmrDirect, gameData } from '../utils/tracker';
-import { getCountryName, getTrackerUrls } from '../utils/playerDisplay';
+import { getCountryName, getTrackerUrls, TRN_PRIVATE_TOOLTIP } from '../utils/playerDisplay';
 import { openExternalUrl } from '../utils/ipc';
 import type { TrackerProfile } from '../types';
 
@@ -54,6 +54,7 @@ export const PlayerOverviewModal: React.FC<Props> = ({
   const [agentIconMap, setAgentIconMap] = useState<Record<string, string>>({});
   const [mmrProfile, setMmrProfile] = useState<TrackerProfile | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isPrivate, setIsPrivate] = useState(false);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -71,11 +72,13 @@ export const PlayerOverviewModal: React.FC<Props> = ({
       setTrnStats(null);
       setTrnAgents([]);
       setMmrProfile(null);
+      setIsPrivate(false);
       return;
     }
 
     let active = true;
     setIsLoading(true);
+    setIsPrivate(false);
 
     const name = player.name;
     const tag = player.tag || '';
@@ -95,6 +98,10 @@ export const PlayerOverviewModal: React.FC<Props> = ({
         setTrnStats(trnRes.value.stats);
       } else {
         setTrnStats(null);
+        // Proven private (fresh 451 or registry) → lock panel, not spinner/error.
+        if (isTrnPrivateError(trnRes.reason) || trnNegativeKind(name, tag) === 'private') {
+          setIsPrivate(true);
+        }
       }
       if (agentsRes.status === 'fulfilled') {
         setTrnAgents(agentsRes.value);
@@ -239,14 +246,6 @@ export const PlayerOverviewModal: React.FC<Props> = ({
                     title="Open on Blitz.gg"
                   >
                     Blitz
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openExternalUrl(trackerUrls.opgg)}
-                    className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-white/5 hover:bg-blue-500/25 hover:text-blue-300 border border-white/10 text-zinc-300 transition-colors cursor-pointer"
-                    title="Open on OP.GG"
-                  >
-                    OP.GG
                   </button>
                 </div>
               )}
@@ -400,6 +399,11 @@ export const PlayerOverviewModal: React.FC<Props> = ({
                     </div>
                   </div>
                 )}
+              </div>
+            ) : isPrivate ? (
+              <div className="p-6 rounded-2xl bg-m3-surface-container-low border border-m3-outline-subtle text-center text-xs text-m3-outline flex flex-col items-center gap-2">
+                <Lock className="w-5 h-5 text-zinc-400" />
+                <span title={TRN_PRIVATE_TOOLTIP}>Private tracker profile — sign in on tracker.gg to make it public.</span>
               </div>
             ) : (
               <div className="p-6 rounded-2xl bg-m3-surface-container-low border border-m3-outline-subtle text-center text-xs text-m3-outline">

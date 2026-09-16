@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+﻿#![allow(dead_code)]
 //! Built-in custom resolution Add (NVIDIA Control Panel + CRU style) without
 //! manual CRU GUI. Works for every GPU (NVIDIA/AMD/Intel) via a minimal
 //! single-descriptor EDID override in the Windows registry.
@@ -32,10 +32,10 @@ use windows::Win32::Devices::DeviceAndDriverInstallation::{
 };
 use windows::Win32::Graphics::Gdi::{
     ChangeDisplaySettingsExW, EnumDisplaySettingsW, CDS_TEST, DEVMODEW, DM_DISPLAYFREQUENCY,
-    DM_PELSWIDTH, DM_PELSHEIGHT, ENUM_CURRENT_SETTINGS,
+    DM_PELSHEIGHT, DM_PELSWIDTH, ENUM_CURRENT_SETTINGS,
 };
 
-use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_BINARY};
+use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_BINARY};
 use winreg::{RegKey, RegValue};
 
 // ---------------------------------------------------------------------------
@@ -47,13 +47,13 @@ pub const ADMIN_REMOVE_ERR: &str = "Requires admin: run TrueStretch as administr
 
 pub fn validate_custom_resolution(w: u32, h: u32, hz: u32) -> Result<(), String> {
     if w < 640 || w > 7680 {
-        return Err(format!("Width {} out of range (640–7680).", w));
+        return Err(format!("Width {} out of range (640â€“7680).", w));
     }
     if h < 480 || h > 4320 {
-        return Err(format!("Height {} out of range (480–4320).", h));
+        return Err(format!("Height {} out of range (480â€“4320).", h));
     }
     if hz < 23 || hz > 500 {
-        return Err(format!("Refresh rate {} out of range (23–500 Hz).", hz));
+        return Err(format!("Refresh rate {} out of range (23â€“500 Hz).", hz));
     }
     if w % 2 != 0 {
         return Err(format!(
@@ -90,28 +90,336 @@ struct AutoPcEntry {
 
 /// Verbatim port of `DetailedResolutionClass::AutomaticPC` (CRU).
 const AUTOMATIC_PC: &[AutoPcEntry] = &[
-    AutoPcEntry { h_active: 1920, v_active: 1080, interlaced: 0, min_vrate: 59500, max_vrate: 60500, h_front: 88, h_sync: 44, h_back: 148, v_front: 4, v_sync: 5, v_back: 36, h_pol: true, v_pol: true },
-    AutoPcEntry { h_active: 1920, v_active: 1080, interlaced: 0, min_vrate: 49500, max_vrate: 50500, h_front: 528, h_sync: 44, h_back: 148, v_front: 4, v_sync: 5, v_back: 36, h_pol: true, v_pol: true },
-    AutoPcEntry { h_active: 1920, v_active: 1080, interlaced: 0, min_vrate: 47500, max_vrate: 48500, h_front: 638, h_sync: 44, h_back: 148, v_front: 4, v_sync: 5, v_back: 36, h_pol: true, v_pol: true },
-    AutoPcEntry { h_active: 1920, v_active: 1080, interlaced: 0, min_vrate: 29500, max_vrate: 30500, h_front: 88, h_sync: 44, h_back: 148, v_front: 4, v_sync: 5, v_back: 36, h_pol: true, v_pol: true },
-    AutoPcEntry { h_active: 1920, v_active: 1080, interlaced: 0, min_vrate: 24500, max_vrate: 25500, h_front: 528, h_sync: 44, h_back: 148, v_front: 4, v_sync: 5, v_back: 36, h_pol: true, v_pol: true },
-    AutoPcEntry { h_active: 1920, v_active: 1080, interlaced: 0, min_vrate: 23500, max_vrate: 24500, h_front: 638, h_sync: 44, h_back: 148, v_front: 4, v_sync: 5, v_back: 36, h_pol: true, v_pol: true },
-    AutoPcEntry { h_active: 1920, v_active: 1080, interlaced: 1, min_vrate: 59500, max_vrate: 60500, h_front: 88, h_sync: 44, h_back: 148, v_front: 4, v_sync: 10, v_back: 31, h_pol: true, v_pol: true },
-    AutoPcEntry { h_active: 1920, v_active: 1080, interlaced: 1, min_vrate: 49500, max_vrate: 50500, h_front: 528, h_sync: 44, h_back: 148, v_front: 4, v_sync: 10, v_back: 31, h_pol: true, v_pol: true },
-    AutoPcEntry { h_active: 1600, v_active: 900, interlaced: 0, min_vrate: 59500, max_vrate: 60500, h_front: 24, h_sync: 80, h_back: 96, v_front: 1, v_sync: 3, v_back: 96, h_pol: true, v_pol: true },
-    AutoPcEntry { h_active: 1366, v_active: 768, interlaced: 0, min_vrate: 59500, max_vrate: 60500, h_front: 70, h_sync: 143, h_back: 213, v_front: 3, v_sync: 3, v_back: 24, h_pol: true, v_pol: true },
-    AutoPcEntry { h_active: 1360, v_active: 768, interlaced: 0, min_vrate: 59500, max_vrate: 60500, h_front: 64, h_sync: 112, h_back: 256, v_front: 3, v_sync: 6, v_back: 18, h_pol: true, v_pol: true },
-    AutoPcEntry { h_active: 1280, v_active: 720, interlaced: 0, min_vrate: 59500, max_vrate: 60500, h_front: 110, h_sync: 40, h_back: 220, v_front: 5, v_sync: 5, v_back: 20, h_pol: true, v_pol: true },
-    AutoPcEntry { h_active: 1280, v_active: 720, interlaced: 0, min_vrate: 49500, max_vrate: 50500, h_front: 440, h_sync: 40, h_back: 220, v_front: 5, v_sync: 5, v_back: 20, h_pol: true, v_pol: true },
-    AutoPcEntry { h_active: 1280, v_active: 720, interlaced: 0, min_vrate: 47500, max_vrate: 48500, h_front: 960, h_sync: 40, h_back: 220, v_front: 5, v_sync: 5, v_back: 20, h_pol: true, v_pol: true },
-    AutoPcEntry { h_active: 1280, v_active: 720, interlaced: 0, min_vrate: 29500, max_vrate: 30500, h_front: 1760, h_sync: 40, h_back: 220, v_front: 5, v_sync: 5, v_back: 20, h_pol: true, v_pol: true },
-    AutoPcEntry { h_active: 1280, v_active: 720, interlaced: 0, min_vrate: 24500, max_vrate: 25500, h_front: 2420, h_sync: 40, h_back: 220, v_front: 5, v_sync: 5, v_back: 20, h_pol: true, v_pol: true },
-    AutoPcEntry { h_active: 1280, v_active: 720, interlaced: 0, min_vrate: 23500, max_vrate: 24500, h_front: 1760, h_sync: 40, h_back: 220, v_front: 5, v_sync: 5, v_back: 20, h_pol: true, v_pol: true },
-    AutoPcEntry { h_active: 1440, v_active: 576, interlaced: 1, min_vrate: 49500, max_vrate: 50500, h_front: 24, h_sync: 126, h_back: 138, v_front: 4, v_sync: 6, v_back: 39, h_pol: false, v_pol: false },
-    AutoPcEntry { h_active: 1440, v_active: 480, interlaced: 1, min_vrate: 59500, max_vrate: 60500, h_front: 38, h_sync: 124, h_back: 114, v_front: 8, v_sync: 6, v_back: 31, h_pol: false, v_pol: false },
-    AutoPcEntry { h_active: 720, v_active: 576, interlaced: 0, min_vrate: 49500, max_vrate: 50500, h_front: 12, h_sync: 64, h_back: 68, v_front: 5, v_sync: 5, v_back: 39, h_pol: false, v_pol: false },
-    AutoPcEntry { h_active: 720, v_active: 480, interlaced: 0, min_vrate: 59500, max_vrate: 60500, h_front: 16, h_sync: 62, h_back: 60, v_front: 9, v_sync: 6, v_back: 30, h_pol: false, v_pol: false },
-    AutoPcEntry { h_active: 640, v_active: 480, interlaced: 0, min_vrate: 59500, max_vrate: 60500, h_front: 16, h_sync: 96, h_back: 48, v_front: 10, v_sync: 2, v_back: 33, h_pol: false, v_pol: false },
+    AutoPcEntry {
+        h_active: 1920,
+        v_active: 1080,
+        interlaced: 0,
+        min_vrate: 59500,
+        max_vrate: 60500,
+        h_front: 88,
+        h_sync: 44,
+        h_back: 148,
+        v_front: 4,
+        v_sync: 5,
+        v_back: 36,
+        h_pol: true,
+        v_pol: true,
+    },
+    AutoPcEntry {
+        h_active: 1920,
+        v_active: 1080,
+        interlaced: 0,
+        min_vrate: 49500,
+        max_vrate: 50500,
+        h_front: 528,
+        h_sync: 44,
+        h_back: 148,
+        v_front: 4,
+        v_sync: 5,
+        v_back: 36,
+        h_pol: true,
+        v_pol: true,
+    },
+    AutoPcEntry {
+        h_active: 1920,
+        v_active: 1080,
+        interlaced: 0,
+        min_vrate: 47500,
+        max_vrate: 48500,
+        h_front: 638,
+        h_sync: 44,
+        h_back: 148,
+        v_front: 4,
+        v_sync: 5,
+        v_back: 36,
+        h_pol: true,
+        v_pol: true,
+    },
+    AutoPcEntry {
+        h_active: 1920,
+        v_active: 1080,
+        interlaced: 0,
+        min_vrate: 29500,
+        max_vrate: 30500,
+        h_front: 88,
+        h_sync: 44,
+        h_back: 148,
+        v_front: 4,
+        v_sync: 5,
+        v_back: 36,
+        h_pol: true,
+        v_pol: true,
+    },
+    AutoPcEntry {
+        h_active: 1920,
+        v_active: 1080,
+        interlaced: 0,
+        min_vrate: 24500,
+        max_vrate: 25500,
+        h_front: 528,
+        h_sync: 44,
+        h_back: 148,
+        v_front: 4,
+        v_sync: 5,
+        v_back: 36,
+        h_pol: true,
+        v_pol: true,
+    },
+    AutoPcEntry {
+        h_active: 1920,
+        v_active: 1080,
+        interlaced: 0,
+        min_vrate: 23500,
+        max_vrate: 24500,
+        h_front: 638,
+        h_sync: 44,
+        h_back: 148,
+        v_front: 4,
+        v_sync: 5,
+        v_back: 36,
+        h_pol: true,
+        v_pol: true,
+    },
+    AutoPcEntry {
+        h_active: 1920,
+        v_active: 1080,
+        interlaced: 1,
+        min_vrate: 59500,
+        max_vrate: 60500,
+        h_front: 88,
+        h_sync: 44,
+        h_back: 148,
+        v_front: 4,
+        v_sync: 10,
+        v_back: 31,
+        h_pol: true,
+        v_pol: true,
+    },
+    AutoPcEntry {
+        h_active: 1920,
+        v_active: 1080,
+        interlaced: 1,
+        min_vrate: 49500,
+        max_vrate: 50500,
+        h_front: 528,
+        h_sync: 44,
+        h_back: 148,
+        v_front: 4,
+        v_sync: 10,
+        v_back: 31,
+        h_pol: true,
+        v_pol: true,
+    },
+    AutoPcEntry {
+        h_active: 1600,
+        v_active: 900,
+        interlaced: 0,
+        min_vrate: 59500,
+        max_vrate: 60500,
+        h_front: 24,
+        h_sync: 80,
+        h_back: 96,
+        v_front: 1,
+        v_sync: 3,
+        v_back: 96,
+        h_pol: true,
+        v_pol: true,
+    },
+    AutoPcEntry {
+        h_active: 1366,
+        v_active: 768,
+        interlaced: 0,
+        min_vrate: 59500,
+        max_vrate: 60500,
+        h_front: 70,
+        h_sync: 143,
+        h_back: 213,
+        v_front: 3,
+        v_sync: 3,
+        v_back: 24,
+        h_pol: true,
+        v_pol: true,
+    },
+    AutoPcEntry {
+        h_active: 1360,
+        v_active: 768,
+        interlaced: 0,
+        min_vrate: 59500,
+        max_vrate: 60500,
+        h_front: 64,
+        h_sync: 112,
+        h_back: 256,
+        v_front: 3,
+        v_sync: 6,
+        v_back: 18,
+        h_pol: true,
+        v_pol: true,
+    },
+    AutoPcEntry {
+        h_active: 1280,
+        v_active: 720,
+        interlaced: 0,
+        min_vrate: 59500,
+        max_vrate: 60500,
+        h_front: 110,
+        h_sync: 40,
+        h_back: 220,
+        v_front: 5,
+        v_sync: 5,
+        v_back: 20,
+        h_pol: true,
+        v_pol: true,
+    },
+    AutoPcEntry {
+        h_active: 1280,
+        v_active: 720,
+        interlaced: 0,
+        min_vrate: 49500,
+        max_vrate: 50500,
+        h_front: 440,
+        h_sync: 40,
+        h_back: 220,
+        v_front: 5,
+        v_sync: 5,
+        v_back: 20,
+        h_pol: true,
+        v_pol: true,
+    },
+    AutoPcEntry {
+        h_active: 1280,
+        v_active: 720,
+        interlaced: 0,
+        min_vrate: 47500,
+        max_vrate: 48500,
+        h_front: 960,
+        h_sync: 40,
+        h_back: 220,
+        v_front: 5,
+        v_sync: 5,
+        v_back: 20,
+        h_pol: true,
+        v_pol: true,
+    },
+    AutoPcEntry {
+        h_active: 1280,
+        v_active: 720,
+        interlaced: 0,
+        min_vrate: 29500,
+        max_vrate: 30500,
+        h_front: 1760,
+        h_sync: 40,
+        h_back: 220,
+        v_front: 5,
+        v_sync: 5,
+        v_back: 20,
+        h_pol: true,
+        v_pol: true,
+    },
+    AutoPcEntry {
+        h_active: 1280,
+        v_active: 720,
+        interlaced: 0,
+        min_vrate: 24500,
+        max_vrate: 25500,
+        h_front: 2420,
+        h_sync: 40,
+        h_back: 220,
+        v_front: 5,
+        v_sync: 5,
+        v_back: 20,
+        h_pol: true,
+        v_pol: true,
+    },
+    AutoPcEntry {
+        h_active: 1280,
+        v_active: 720,
+        interlaced: 0,
+        min_vrate: 23500,
+        max_vrate: 24500,
+        h_front: 1760,
+        h_sync: 40,
+        h_back: 220,
+        v_front: 5,
+        v_sync: 5,
+        v_back: 20,
+        h_pol: true,
+        v_pol: true,
+    },
+    AutoPcEntry {
+        h_active: 1440,
+        v_active: 576,
+        interlaced: 1,
+        min_vrate: 49500,
+        max_vrate: 50500,
+        h_front: 24,
+        h_sync: 126,
+        h_back: 138,
+        v_front: 4,
+        v_sync: 6,
+        v_back: 39,
+        h_pol: false,
+        v_pol: false,
+    },
+    AutoPcEntry {
+        h_active: 1440,
+        v_active: 480,
+        interlaced: 1,
+        min_vrate: 59500,
+        max_vrate: 60500,
+        h_front: 38,
+        h_sync: 124,
+        h_back: 114,
+        v_front: 8,
+        v_sync: 6,
+        v_back: 31,
+        h_pol: false,
+        v_pol: false,
+    },
+    AutoPcEntry {
+        h_active: 720,
+        v_active: 576,
+        interlaced: 0,
+        min_vrate: 49500,
+        max_vrate: 50500,
+        h_front: 12,
+        h_sync: 64,
+        h_back: 68,
+        v_front: 5,
+        v_sync: 5,
+        v_back: 39,
+        h_pol: false,
+        v_pol: false,
+    },
+    AutoPcEntry {
+        h_active: 720,
+        v_active: 480,
+        interlaced: 0,
+        min_vrate: 59500,
+        max_vrate: 60500,
+        h_front: 16,
+        h_sync: 62,
+        h_back: 60,
+        v_front: 9,
+        v_sync: 6,
+        v_back: 30,
+        h_pol: false,
+        v_pol: false,
+    },
+    AutoPcEntry {
+        h_active: 640,
+        v_active: 480,
+        interlaced: 0,
+        min_vrate: 59500,
+        max_vrate: 60500,
+        h_front: 16,
+        h_sync: 96,
+        h_back: 48,
+        v_front: 10,
+        v_sync: 2,
+        v_back: 33,
+        h_pol: false,
+        v_pol: false,
+    },
 ];
 
 const MIN_TIME_CVT_RB2: i64 = 460_000_000;
@@ -142,7 +450,7 @@ fn cvt_rb2_front(v_active: u32, vrate_mhz: i64) -> u32 {
 
 /// Builds an 18-byte EDID detailed timing descriptor (Type 0, progressive).
 ///
-/// Strategy mirrors CRU `CalculateAutomaticPC` → `CalculateCVTRB2Standard`:
+/// Strategy mirrors CRU `CalculateAutomaticPC` â†’ `CalculateCVTRB2Standard`:
 /// exact AutomaticPC table hit first (nearest for known CEA modes), else
 /// CVT-RB2 with a second pass on the actual refresh (like CRU's double-pass
 /// `CalculateCVTRB2Standard`).
@@ -151,22 +459,26 @@ pub fn build_detailed_timing(w: u32, h: u32, hz: u32) -> Result<[u8; 18], String
     let vrate: i64 = hz as i64 * 1000;
 
     // (a) AutomaticPC exact hit.
-    let (h_front, h_sync, h_back, mut v_front, v_sync, v_back, h_pol, v_pol, pclock, h_total, mut v_total): (
-        u32,
-        u32,
-        u32,
-        u32,
-        u32,
-        u32,
-        bool,
-        bool,
-        i64,
-        i64,
-        i64,
-    );
+    let (
+        h_front,
+        h_sync,
+        h_back,
+        mut v_front,
+        v_sync,
+        v_back,
+        h_pol,
+        v_pol,
+        pclock,
+        h_total,
+        mut v_total,
+    ): (u32, u32, u32, u32, u32, u32, bool, bool, i64, i64, i64);
 
     if let Some(hit) = AUTOMATIC_PC.iter().find(|e| {
-        e.h_active == w && e.v_active == h && e.interlaced == 0 && vrate >= e.min_vrate && vrate <= e.max_vrate
+        e.h_active == w
+            && e.v_active == h
+            && e.interlaced == 0
+            && vrate >= e.min_vrate
+            && vrate <= e.max_vrate
     }) {
         h_front = hit.h_front;
         h_sync = hit.h_sync;
@@ -237,7 +549,7 @@ pub fn build_detailed_timing(w: u32, h: u32, hz: u32) -> Result<[u8; 18], String
 
     if pclock <= 0 || pclock > 65535 {
         return Err(format!(
-            "Invalid pixel clock calculated ({:.2} MHz) for {}×{} @ {} Hz.",
+            "Invalid pixel clock calculated ({:.2} MHz) for {}Ã—{} @ {} Hz.",
             pclock as f64 / 100.0,
             w,
             h,
@@ -254,7 +566,11 @@ pub fn build_detailed_timing(w: u32, h: u32, hz: u32) -> Result<[u8; 18], String
     // We clamp VFront to a standard VESA offset (8 lines) while preserving the full 12-bit VBlank.
     // The display controller reconstructs VBack = VBlank - VFront - VSync, preserving 100% exact
     // frame geometry, pixel clock, and refresh rate.
-    let v_front = if vf_raw > 63 { 8.min(v_blank.saturating_sub(10)) } else { vf_raw };
+    let v_front = if vf_raw > 63 {
+        8.min(v_blank.saturating_sub(10))
+    } else {
+        vf_raw
+    };
     let v_sync = if v_sync > 63 { 8 } else { v_sync };
 
     if w > 4095 || h_blank > 4095 || h > 4095 || v_blank > 4095 {
@@ -285,7 +601,11 @@ pub fn build_detailed_timing(w: u32, h: u32, hz: u32) -> Result<[u8; 18], String
     d[8] = (h_front & 0xFF) as u8;
     d[9] = (h_sync & 0xFF) as u8;
     d[10] = (((v_front & 0xF) << 4) | (v_sync & 0xF)) as u8;
-    d[11] = ((((h_front & 0x300) >> 2) | ((h_sync & 0x300) >> 4) | ((v_front & 0x30) >> 2) | ((v_sync & 0x30) >> 4)) & 0xFF) as u8;
+    d[11] = ((((h_front & 0x300) >> 2)
+        | ((h_sync & 0x300) >> 4)
+        | ((v_front & 0x30) >> 2)
+        | ((v_sync & 0x30) >> 4))
+        & 0xFF) as u8;
     d[12] = ((ha >> 2) & 0xFF) as u8;
     d[13] = ((va >> 2) & 0xFF) as u8;
     d[14] = ((((ha >> 2) & 0xF00) >> 4) | (((va >> 2) & 0xF00) >> 8)) as u8;
@@ -347,8 +667,12 @@ fn is_valid_edid(edid: &[u8]) -> bool {
 
 /// Reads the live EDID (`EDID` value) for a canonical PnP path.
 pub fn read_live_edid(pnp: &str) -> Result<Vec<u8>, String> {
-    let (dev, inst) = split_pnp(pnp)
-        .ok_or_else(|| format!("Not a DISPLAY PnP path (need DISPLAY\\<model>\\<uid>): '{}'", pnp))?;
+    let (dev, inst) = split_pnp(pnp).ok_or_else(|| {
+        format!(
+            "Not a DISPLAY PnP path (need DISPLAY\\<model>\\<uid>): '{}'",
+            pnp
+        )
+    })?;
     let path = device_params_path(&dev, &inst);
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     let key = hklm
@@ -408,19 +732,17 @@ fn backup_path_for(pnp: &str) -> Option<std::path::PathBuf> {
 fn write_override(dev: &str, inst: &str, patched: &[u8; 128]) -> Result<(), String> {
     let path = override_path(dev, inst);
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-    let (key, _disp) = hklm
-        .create_subkey(&path)
-        .map_err(|e| {
-            let msg = format!("{}", e);
-            if msg.to_lowercase().contains("access")
-                || msg.to_lowercase().contains("denied")
-                || msg.to_lowercase().contains("privilege")
-            {
-                ADMIN_ADD_ERR.to_string()
-            } else {
-                format!("Failed to create EDID_OVERRIDE key '{}': {}", path, e)
-            }
-        })?;
+    let (key, _disp) = hklm.create_subkey(&path).map_err(|e| {
+        let msg = format!("{}", e);
+        if msg.to_lowercase().contains("access")
+            || msg.to_lowercase().contains("denied")
+            || msg.to_lowercase().contains("privilege")
+        {
+            ADMIN_ADD_ERR.to_string()
+        } else {
+            format!("Failed to create EDID_OVERRIDE key '{}': {}", path, e)
+        }
+    })?;
     key.set_raw_value(
         "0",
         &RegValue {
@@ -462,7 +784,7 @@ fn delete_override_key(dev: &str, inst: &str) -> Result<bool, String> {
         Ok(()) => Ok(true),
         Err(e) => {
             let code = e.raw_os_error().unwrap_or(0);
-            // 2 = FILE_NOT_FOUND: already reset → success.
+            // 2 = FILE_NOT_FOUND: already reset â†’ success.
             if code == 2 {
                 Ok(false)
             } else {
@@ -476,7 +798,10 @@ fn delete_override_key(dev: &str, inst: &str) -> Result<bool, String> {
                     // Fallback: try deleting values individually (handles a
                     // partially-written override without subkey delete rights).
                     let _ = key.delete_value("EDID_OVERRIDE");
-                    Err(format!("Failed to delete EDID_OVERRIDE for '{}\\{}': {}", dev, inst, e))
+                    Err(format!(
+                        "Failed to delete EDID_OVERRIDE for '{}\\{}': {}",
+                        dev, inst, e
+                    ))
                 }
             }
         }
@@ -514,22 +839,13 @@ pub fn test_display_mode(device_name: Option<&str>, w: u32, h: u32, hz: u32) -> 
             dmSize: std::mem::size_of::<DEVMODEW>() as u16,
             ..Default::default()
         };
-        let _ = EnumDisplaySettingsW(
-            PCWSTR(dev_u16.as_ptr()),
-            ENUM_CURRENT_SETTINGS,
-            &mut dm,
-        );
+        let _ = EnumDisplaySettingsW(PCWSTR(dev_u16.as_ptr()), ENUM_CURRENT_SETTINGS, &mut dm);
         dm.dmPelsWidth = w;
         dm.dmPelsHeight = h;
         dm.dmDisplayFrequency = hz;
         dm.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
-        let res = ChangeDisplaySettingsExW(
-            PCWSTR(dev_u16.as_ptr()),
-            Some(&dm),
-            None,
-            CDS_TEST,
-            None,
-        );
+        let res =
+            ChangeDisplaySettingsExW(PCWSTR(dev_u16.as_ptr()), Some(&dm), None, CDS_TEST, None);
         CustomModeTest {
             exists: res.0 == 0,
             code: res.0,
@@ -542,7 +858,7 @@ pub fn cds_code_to_text(code: i32) -> &'static str {
         0 => "SUCCESSFUL",
         1 => "RESTART_REQUIRED",
         -1 => "FAILED",
-        -2 => "BADMODE (mode not in driver list — Add it first)",
+        -2 => "BADMODE (mode not in driver list â€” Add it first)",
         -3 => "NOTUPDATED",
         -4 => "BADFLAGS",
         -5 => "BADPARAM",
@@ -624,7 +940,10 @@ pub fn restart_driver_stack() -> String {
     // Pure in-process SetupDi (no external binary, no console flash).
     match restart_display_stack_inprocess() {
         Ok(n) => {
-            log::info!("[custom_res] in-process driver restart cycled {} adapter(s)", n);
+            log::info!(
+                "[custom_res] in-process driver restart cycled {} adapter(s)",
+                n
+            );
             thread::sleep(Duration::from_millis(2200));
             format!("Graphics driver restarted ({} adapter(s) cycled).", n)
         }
@@ -637,7 +956,7 @@ pub fn restart_driver_stack() -> String {
 
 /// Detects an Intel display adapter (for logging / FakeEDID awareness).
 /// Modern Intel (Win10+) honors `EDID_OVERRIDE` like NVIDIA/AMD, so no extra
-/// `FakeEDID_*` write is needed — `restart64.exe` already handles the legacy
+/// `FakeEDID_*` write is needed â€” `restart64.exe` already handles the legacy
 /// Intel `FakeEDID_14_0_af0d_1723` / `ReadEDIDFromRegistry` recovery path on
 /// fallback. This keeps one code path for every GPU.
 fn intel_adapter_present() -> bool {
@@ -646,7 +965,7 @@ fn intel_adapter_present() -> bool {
     let Ok(class_key) = hklm.open_subkey_with_flags(base, KEY_QUERY_VALUE) else {
         return false;
     };
-    // Subkeys are 0000, 0001, ... — check ProviderName prefix.
+    // Subkeys are 0000, 0001, ... â€” check ProviderName prefix.
     for i in 0..16 {
         let sub = format!("{:04}", i);
         if let Ok(k) = class_key.open_subkey_with_flags(&sub, KEY_QUERY_VALUE) {
@@ -675,183 +994,6 @@ fn intel_adapter_present() -> bool {
 // ---------------------------------------------------------------------------
 // Public flows
 // ---------------------------------------------------------------------------
-
-/// Converts an integer (up to 9999) into 2 BCD bytes (4 decimal nibbles).
-/// e.g. 2090 -> [0x20, 0x90], 1440 -> [0x14, 0x40], 260 -> [0x02, 0x60], 0 -> [0x00, 0x00]
-fn to_bcd_u16(val: u32) -> [u8; 2] {
-    let d0 = ((val / 1000) % 10) as u8;
-    let d1 = ((val / 100) % 10) as u8;
-    let d2 = ((val / 10) % 10) as u8;
-    let d3 = (val % 10) as u8;
-    [(d0 << 4) | d1, (d2 << 4) | d3]
-}
-
-fn set_scaling_recursive(key: &RegKey) {
-    if let Ok(_) = key.get_value::<u32, _>("Scaling") {
-        let _ = key.set_value("Scaling", &4u32);
-    }
-    for sub in key.enum_keys().filter_map(|k| k.ok()) {
-        if let Ok(sub_key) = key.open_subkey_with_flags(&sub, winreg::enums::KEY_READ | KEY_SET_VALUE) {
-            set_scaling_recursive(&sub_key);
-        }
-    }
-}
-
-/// Injects custom resolution modes and hardware scaling policies across ALL
-/// GPU vendors in the system (NVIDIA, AMD Radeon, Intel Arc / Iris / UHD):
-/// - NVIDIA: Appends to NV_Modes REG_MULTI_SZ scaling table
-/// - AMD: Encodes mode into DalNonStandardModesBCD REG_BINARY and enables DalGpuScaling / DalModeBypass
-/// - Intel: Configures ReadEDIDFromRegistry=1 and ScaleOption=3 (Stretched full screen)
-/// - Universal: Sets WDDM D3D Scaling=4 (Fullscreen stretch), DirectFlip=1, and DxgkUsePhysicalMode=0
-pub fn inject_gpu_custom_mode(w: u32, h: u32) -> Result<(), String> {
-    inject_gpu_custom_mode_with_hz(w, h, 0)
-}
-
-pub fn inject_gpu_custom_mode_with_hz(w: u32, h: u32, hz: u32) -> Result<(), String> {
-    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-    let class_path = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
-    let Ok(class_key) = hklm.open_subkey_with_flags(class_path, KEY_QUERY_VALUE) else {
-        return Ok(());
-    };
-
-    let target_sub = format!("{}x{}x32,64", w, h);
-    let bcd_w = to_bcd_u16(w);
-    let bcd_h = to_bcd_u16(h);
-    let bcd_hz = if hz > 0 { to_bcd_u16(hz) } else { [0, 0] };
-
-    for i in 0..16 {
-        let sub_name = format!("{:04}", i);
-        let Ok(sub_key) = class_key.open_subkey_with_flags(&sub_name, KEY_QUERY_VALUE | KEY_SET_VALUE) else {
-            continue;
-        };
-
-        let desc: String = sub_key.get_value("DriverDesc").unwrap_or_default();
-        let prov: String = sub_key.get_value("ProviderName").unwrap_or_default();
-        let combined = format!("{} {}", prov, desc).to_lowercase();
-
-        // 1. NVIDIA Handling
-        if combined.contains("nvidia") || combined.contains("geforce") || combined.contains("quadro") {
-            if let Ok(rv) = sub_key.get_raw_value("NV_Modes") {
-                let u16s: Vec<u16> = rv.bytes
-                    .chunks_exact(2)
-                    .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
-                    .collect();
-
-                let full_text = String::from_utf16_lossy(&u16s);
-                let mut entries: Vec<String> = full_text
-                    .split('\0')
-                    .filter(|s| !s.trim().is_empty())
-                    .map(|s| s.to_string())
-                    .collect();
-
-                let mut changed = false;
-                for entry in entries.iter_mut() {
-                    if entry.contains("{*}S") && !entry.contains(&target_sub) {
-                        if let Some(pos) = entry.find("=1;") {
-                            entry.insert_str(pos, &format!(" {}", target_sub));
-                            changed = true;
-                        } else if let Some(pos) = entry.find(';') {
-                            entry.insert_str(pos, &format!(" {}", target_sub));
-                            changed = true;
-                        }
-                    }
-                }
-
-                if changed {
-                    let mut out_bytes = Vec::new();
-                    for entry in &entries {
-                        for u in entry.encode_utf16() {
-                            out_bytes.extend_from_slice(&u.to_le_bytes());
-                        }
-                        out_bytes.extend_from_slice(&0u16.to_le_bytes());
-                    }
-                    out_bytes.extend_from_slice(&0u16.to_le_bytes());
-
-                    let _ = sub_key.set_raw_value("NV_Modes", &RegValue {
-                        vtype: winreg::enums::REG_MULTI_SZ,
-                        bytes: out_bytes,
-                    });
-                    log::info!("[custom_res] Injected {} into NV_Modes for adapter {}", target_sub, sub_name);
-                }
-            }
-        }
-
-        // 2. AMD Radeon Handling
-        if combined.contains("amd") || combined.contains("advanced micro devices") || combined.contains("ati") || combined.contains("radeon") {
-            let mut bcd_entry = [0u8; 8];
-            bcd_entry[2] = bcd_w[0];
-            bcd_entry[3] = bcd_w[1];
-            bcd_entry[4] = bcd_h[0];
-            bcd_entry[5] = bcd_h[1];
-            bcd_entry[6] = bcd_hz[0];
-            bcd_entry[7] = bcd_hz[1];
-
-            let mut bcd_bytes = match sub_key.get_raw_value("DalNonStandardModesBCD") {
-                Ok(rv) => rv.bytes,
-                Err(_) => Vec::new(),
-            };
-
-            let already_exists = bcd_bytes.chunks_exact(8).any(|chunk| {
-                chunk[2] == bcd_w[0] && chunk[3] == bcd_w[1] && chunk[4] == bcd_h[0] && chunk[5] == bcd_h[1]
-            });
-
-            if !already_exists {
-                bcd_bytes.extend_from_slice(&bcd_entry);
-                if hz > 0 {
-                    let mut all_rates_entry = bcd_entry;
-                    all_rates_entry[6] = 0;
-                    all_rates_entry[7] = 0;
-                    bcd_bytes.extend_from_slice(&all_rates_entry);
-                }
-                let _ = sub_key.set_raw_value("DalNonStandardModesBCD", &RegValue {
-                    vtype: winreg::enums::REG_BINARY,
-                    bytes: bcd_bytes,
-                });
-                log::info!("[custom_res] Injected {}x{} into AMD DalNonStandardModesBCD for adapter {}", w, h, sub_name);
-            }
-
-            let _ = sub_key.set_value("DalEnableModeBypass", &1u32);
-            let _ = sub_key.set_value("DalGpuScaling", &1u32);
-            let _ = sub_key.set_value("DalKeepAspectRatio", &0u32);
-            let _ = sub_key.set_value("DalScaleRule", &0u32);
-            let _ = sub_key.set_value("DalIntegerScaling", &0u32);
-            log::info!("[custom_res] Configured AMD scaling parameters on adapter {}", sub_name);
-        }
-
-        // 3. Intel Graphics Handling (Arc / Iris / UHD)
-        if combined.contains("intel") || combined.contains("arc") || combined.contains("iris") || combined.contains("uhd") {
-            let _ = sub_key.set_value("ReadEDIDFromRegistry", &1u32);
-            let _ = sub_key.set_value("ScaleOption", &3u32);
-            let _ = sub_key.set_value("CustomModeAllowed", &1u32);
-            let _ = sub_key.set_value("EnableCustomResolutions", &1u32);
-            let _ = sub_key.set_value("MaintainAspectRatio", &0u32);
-            let _ = sub_key.set_value("DisableLetterboxing", &1u32);
-            log::info!("[custom_res] Configured Intel scaling parameters (ReadEDIDFromRegistry, ScaleOption=3) on adapter {}", sub_name);
-        }
-    }
-
-    // 4. Universal Windows Display Subsystem Policies (Applies to all GPUs)
-    if let Ok(gd_key) = hklm.open_subkey_with_flags(r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers", KEY_SET_VALUE) {
-        let _ = gd_key.set_value("DxgkUsePhysicalMode", &0u32);
-    }
-
-    if let Ok(config_root) = hklm.open_subkey_with_flags(r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Configuration", winreg::enums::KEY_READ | KEY_SET_VALUE) {
-        set_scaling_recursive(&config_root);
-    }
-
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    if let Ok((dwm_cu, _)) = hkcu.create_subkey(r"Software\Microsoft\Windows\DWM") {
-        let _ = dwm_cu.set_value("DirectFlipEnabled", &1u32);
-    }
-    if let Ok((dwm_lm, _)) = hklm.create_subkey(r"SOFTWARE\Microsoft\Windows\DWM") {
-        let _ = dwm_lm.set_value("DirectFlipEnabled", &1u32);
-    }
-    if let Ok((dx_key, _)) = hkcu.create_subkey(r"Software\Microsoft\DirectX\UserGpuPreferences") {
-        let _ = dx_key.set_value("DisableDXGIWindowedStereo", &1u32);
-    }
-
-    Ok(())
-}
 
 /// Natively clears all custom EDID overrides under HKLM\SYSTEM\CurrentControlSet\Enum\DISPLAY
 /// without external reset-all.exe binary.
@@ -892,12 +1034,7 @@ pub fn reset_all_edid_overrides() -> Result<String, String> {
 ///    offset 54, fixes checksum, writes `EDID_OVERRIDE "0"`.
 /// 4. Restarts the GPU stack (in-process SetupDi, fallback restart64.exe),
 ///    sleeps, re-enumerates, CDS_TESTs again and reports the result.
-pub fn add_custom_resolution(
-    monitor_id: &str,
-    w: u32,
-    h: u32,
-    hz: u32,
-) -> Result<String, String> {
+pub fn add_custom_resolution(monitor_id: &str, w: u32, h: u32, hz: u32) -> Result<String, String> {
     validate_custom_resolution(w, h, hz)?;
 
     if !crate::display::is_process_elevated() {
@@ -906,16 +1043,19 @@ pub fn add_custom_resolution(
 
     let target = monitor_id.trim();
     if target.is_empty() {
-        return Err("Empty monitor identifier. Pass device_id (DISPLAY\\...) or \\\\.\\DISPLAYx.".to_string());
+        return Err(
+            "Empty monitor identifier. Pass device_id (DISPLAY\\...) or \\\\.\\DISPLAYx."
+                .to_string(),
+        );
     }
     let Some(pnp) = crate::display::resolve_display_to_instance_id(target) else {
         return Err(format!(
-            "Could not resolve '{}' to a unique monitor (DISPLAY\\<model>\\<uid>). With duplicate models, pass the exact device_id from the monitor list — refusing to patch the wrong panel.",
+            "Could not resolve '{}' to a unique monitor (DISPLAY\\<model>\\<uid>). With duplicate models, pass the exact device_id from the monitor list â€” refusing to patch the wrong panel.",
             target
         ));
     };
-    let (dev, inst) = split_pnp(&pnp)
-        .ok_or_else(|| format!("Resolved '{}' is not a DISPLAY PnP path.", pnp))?;
+    let (dev, inst) =
+        split_pnp(&pnp).ok_or_else(|| format!("Resolved '{}' is not a DISPLAY PnP path.", pnp))?;
 
     // If the mode already exists, skip the registry write entirely.
     let gdi_hint = if target.len() >= 11 && target[..11].eq_ignore_ascii_case(r"\\.\DISPLAY") {
@@ -926,7 +1066,7 @@ pub fn add_custom_resolution(
     let pre = test_display_mode(gdi_hint, w, h, hz);
     if pre.exists {
         return Ok(format!(
-            "{}×{} @ {} Hz already exists in the driver list (CDS_TEST ok) — no EDID change needed. Use Test to preview it.",
+            "{}Ã—{} @ {} Hz already exists in the driver list (CDS_TEST ok) â€” no EDID change needed. Use Test to preview it.",
             w, h, hz
         ));
     }
@@ -945,12 +1085,11 @@ pub fn add_custom_resolution(
     let timing = build_detailed_timing(w, h, hz)?;
     let patched = patch_edid(&live, timing)?;
     write_override(&dev, &inst, &patched)?;
-    let _ = inject_gpu_custom_mode_with_hz(w, h, hz);
 
     if intel_adapter_present() {
         // No extra FakeEDID_* write: modern Intel honors EDID_OVERRIDE; the
         // legacy FakeEDID recovery path lives in restart64.exe fallback.
-        log::info!("[custom_res] Intel adapter present — EDID_OVERRIDE path used (FakeEDID handled by restart fallback if needed)");
+        log::info!("[custom_res] Intel adapter present â€” EDID_OVERRIDE path used (FakeEDID handled by restart fallback if needed)");
     }
 
     let restart_msg = restart_driver_stack();
@@ -960,12 +1099,12 @@ pub fn add_custom_resolution(
     let post = test_display_mode(gdi_hint, w, h, hz);
     if post.exists {
         Ok(format!(
-            "Added {}×{} @ {} Hz on {} (EDID override, backup saved). {}. Driver now lists the mode (CDS_TEST ok) — run Test (15s safe) to preview.",
+            "Added {}Ã—{} @ {} Hz on {} (EDID override, backup saved). {}. Driver now lists the mode (CDS_TEST ok) â€” run Test (15s safe) to preview.",
             w, h, hz, pnp, restart_msg
         ))
     } else {
         Ok(format!(
-            "Wrote EDID override for {}×{} @ {} Hz on {} (backup saved). {}. Driver does not list it yet (CDS_TEST {}={}) — wait ~10s and Test again, or reboot; use Emergency Reset to undo.",
+            "Wrote EDID override for {}Ã—{} @ {} Hz on {} (backup saved). {}. Driver does not list it yet (CDS_TEST {}={}) â€” wait ~10s and Test again, or reboot; use Emergency Reset to undo.",
             w,
             h,
             hz,
@@ -990,12 +1129,12 @@ pub fn remove_custom_override(monitor_id: &str) -> Result<String, String> {
     }
     let Some(pnp) = crate::display::resolve_display_to_instance_id(target) else {
         return Err(format!(
-            "Could not resolve '{}' to a unique monitor — refusing to delete the wrong override.",
+            "Could not resolve '{}' to a unique monitor â€” refusing to delete the wrong override.",
             target
         ));
     };
-    let (dev, inst) = split_pnp(&pnp)
-        .ok_or_else(|| format!("Resolved '{}' is not a DISPLAY PnP path.", pnp))?;
+    let (dev, inst) =
+        split_pnp(&pnp).ok_or_else(|| format!("Resolved '{}' is not a DISPLAY PnP path.", pnp))?;
     let deleted = delete_override_key(&dev, &inst)?;
     let restart_msg = restart_driver_stack();
     thread::sleep(Duration::from_millis(800));
@@ -1018,18 +1157,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_to_bcd_u16() {
-        assert_eq!(to_bcd_u16(2090), [0x20, 0x90]);
-        assert_eq!(to_bcd_u16(1440), [0x14, 0x40]);
-        assert_eq!(to_bcd_u16(1920), [0x19, 0x20]);
-        assert_eq!(to_bcd_u16(1080), [0x10, 0x80]);
-        assert_eq!(to_bcd_u16(240), [0x02, 0x40]);
-        assert_eq!(to_bcd_u16(144), [0x01, 0x44]);
-        assert_eq!(to_bcd_u16(60), [0x00, 0x60]);
-        assert_eq!(to_bcd_u16(0), [0x00, 0x00]);
-    }
-
-    #[test]
     fn test_validate_res() {
         assert!(validate_custom_resolution(1920, 1080, 144).is_ok());
         assert!(validate_custom_resolution(2090, 1440, 240).is_ok());
@@ -1043,10 +1170,19 @@ mod tests {
     fn test_build_type0_high_hz() {
         for hz in [60, 75, 120, 144, 165, 240, 260, 360] {
             let desc_1440 = build_detailed_timing(2090, 1440, hz);
-            assert!(desc_1440.is_ok(), "1440p @ {}Hz failed: {:?}", hz, desc_1440.err());
+            assert!(
+                desc_1440.is_ok(),
+                "1440p @ {}Hz failed: {:?}",
+                hz,
+                desc_1440.err()
+            );
             let desc_1080 = build_detailed_timing(1568, 1080, hz);
-            assert!(desc_1080.is_ok(), "1080p @ {}Hz failed: {:?}", hz, desc_1080.err());
+            assert!(
+                desc_1080.is_ok(),
+                "1080p @ {}Hz failed: {:?}",
+                hz,
+                desc_1080.err()
+            );
         }
     }
 }
-

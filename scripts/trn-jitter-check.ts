@@ -15,7 +15,7 @@ function check(name: string, ok: boolean, detail?: unknown): void {
   }
 }
 
-check('gap bounds exported', TRN_GAP_MIN_MS === 1500 && TRN_GAP_MAX_MS === 3000, {
+check('gap bounds exported', TRN_GAP_MIN_MS === 6000 && TRN_GAP_MAX_MS === 8000, {
   TRN_GAP_MIN_MS,
   TRN_GAP_MAX_MS,
 });
@@ -36,13 +36,13 @@ for (let i = 0; i < N; i++) {
   seen.add(Math.round(g));
 }
 
-check(`all ${N} samples within [1500, 3000]`, outOfBounds === 0, { outOfBounds });
+  check(`all ${N} samples within [6000, 8000]`, outOfBounds === 0, { outOfBounds });
 check('jitter actually varies (not a fixed slot)', seen.size > 100, { distinct: seen.size });
-check('spread covers the low end', min < 1700, { min });
-check('spread covers the high end', max > 2800, { max });
-// Uniform mean ≈ 2250; generous ±250 tolerance so this never flakes.
+check('spread covers the low end', min < 6200, { min });
+check('spread covers the high end', max > 7800, { max });
+// Uniform mean ≈ 7000; generous ±250 tolerance so this never flakes.
 const mean = sum / N;
-check('mean near uniform midpoint (~2250)', mean > 2000 && mean < 2500, { mean });
+check('mean near uniform midpoint (~7000)', mean > 6750 && mean < 7250, { mean });
 
 // Distribution: uniform-ish means every quartile earns real share.
 // 15% floor at n=2000 is ~10sd below the 25% mean — never flakes.

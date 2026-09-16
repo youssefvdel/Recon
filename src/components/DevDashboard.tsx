@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { FlaskConical, Play, Trash2, Radio, Coffee, Download, Copy, RotateCcw } from 'lucide-react';
+import React, { useEffect, useId, useState } from 'react';
+import { FlaskConical, Play, Trash2, Radio, Coffee, Download, Copy, RotateCcw, Activity } from 'lucide-react';
 import { listen, emit } from '@tauri-apps/api/event';
 import {
   fetchDisplayInfo,
@@ -29,8 +29,14 @@ import {
   isTrackerEnabled,
   setTrackerEnabled,
   fetchTrnActStats,
+  trnGet,
+  trnProfilePath,
+  QA_BURST_TARGETS,
+  burstQaVerdict,
+  trnProxyState,
 } from '../utils/trn';
 import { logger, getRecentLogs } from '../utils/logger';
+import { fetchPerf, PERF_POLL_MS, PERF_RING_CAP, type PerfTimeline, type PerfStats } from '../utils/perf';
 import { debugSimulateCrash } from '../utils/consent';
 import {
   DEV_MOCK_KEY,
@@ -57,6 +63,180 @@ const readQaCooldown = (): string => {
   return ms > 0
     ? `COOLING — step ${step}, retry in ${Math.ceil(ms / 1000)}s (${ms}ms)`
     : `ready — step ${step}, no cooldown`;
+};
+
+const fmtClock = (ms: number): string =>
+  new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+/* Performance timeline chart (dev-only): hand-rolled SVG, zero chart deps.
+ * 720 points max at a 5s cadence is far below Canvas territory (uPlot/ECharts
+ * earn their weight past ~10k points or 60fps streams), so SVG keeps full
+ * M3-theme control with negligible update cost (one small subtree per poll).
+ * Axes + grid, gradient area, hover crosshair with values, spike dots. */
+const PerfChart: React.FC<{
+  label: string;
+  values: number[];
+  times: number[];
+  stats: PerfStats | undefined;
+  color: string;
+  fmt: (v: number) => string;
+  /** Fixed y-domain (shared across stacked series so they compare 1:1). */
+  domain?: [number, number];
+  /** Thinner underlay lines on the same scale (e.g. total parts). */
+  overlay?: { values: number[]; color: string; width?: number }[];
+  /** Color key for the overlay lines. */
+  legend?: { color: string; text: string }[];
+}> = ({ label, values, times, stats, color, fmt, domain, overlay, legend }) => {
+  const [hover, setHover] = useState<number | null>(null);
+  const gradId = `perf-${useId().replace(/:/g, '')}`;
+  const n = values.length;
+
+  const W = 320;
+  const H = 120;
+  const padL = 38;
+  const padR = 8;
+  const padT = 8;
+  const padB = 16;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+
+  const lo = domain ? domain[0] : n > 0 ? Math.min(...values) : 0;
+  const hi = domain ? domain[1] : n > 0 ? Math.max(...values) : 0;
+  // Padded domain keeps the line off the frame; grid labels stay on real data.
+  const rawSpan = hi - lo || 1;
+  const dLo = lo - rawSpan * 0.08;
+  const dHi = hi + rawSpan * 0.08;
+  const dSpan = dHi - dLo || 1;
+  const x = (i: number): number => (n <= 1 ? padL + plotW / 2 : padL + (i / (n - 1)) * plotW);
+  const y = (v: number): number => padT + plotH - ((v - dLo) / dSpan) * plotH;
+
+  const points = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const baseY = padT + plotH;
+  const area = n > 0 ? `${padL},${baseY} ${points} ${padL + plotW},${baseY}` : '';
+
+  // Spikes: mean + 2σ, falling back to the max so a wavy line still names one.
+  const mean = n > 0 ? values.reduce((a, b) => a + b, 0) / n : 0;
+  const sd = n > 0 ? Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / n) : 0;
+  let spikes = values.map((v, i) => (v > mean + 2 * sd ? i : -1)).filter((i) => i >= 0);
+  if (spikes.length === 0 && hi > lo) spikes = [values.indexOf(hi)];
+
+  const gridVals = n > 0 ? [hi, (hi + lo) / 2, lo] : [];
+  const tEnd = times.length === n && n > 0 && times[n - 1] > 0 ? times[n - 1] * 1000 : 0;
+  const tStart = times.length === n && n > 0 && times[0] > 0 ? times[0] * 1000 : 0;
+
+  const hov = hover != null && hover >= 0 && hover < n ? hover : null;
+
+  return (
+    <div className="rounded-xl bg-zinc-950/80 border border-white/10 p-2.5">
+      <div className="flex items-baseline justify-between mb-1">
+        <span className="text-[10px] font-mono font-bold uppercase tracking-wider" style={{ color }}>
+          {label}
+          {spikes.length > 0 && (
+            <span className="ml-1.5 normal-case font-semibold text-rose-400/90">
+              · {spikes.length} spike{spikes.length === 1 ? '' : 's'}
+            </span>
+          )}
+        </span>
+        <span className="text-sm font-mono font-bold text-zinc-100 tabular-nums">
+          {stats ? fmt(stats.current) : '—'}
+        </span>
+      </div>
+      {legend && legend.length > 0 && (
+        <div className="flex gap-2.5 mb-1 text-[9px] font-mono text-zinc-400">
+          {legend.map((l) => (
+            <span key={l.text} className="flex items-center gap-1">
+              <i className="w-2 h-[3px] rounded-full inline-block" style={{ background: l.color }} />
+              {l.text}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="relative">
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto block" role="img" aria-label={`${label} timeline`}>
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity="0.28" />
+              <stop offset="100%" stopColor={color} stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {gridVals.map((g) => (
+            <g key={g}>
+              <line x1={padL} x2={W - padR} y1={y(g)} y2={y(g)} stroke="rgba(255,255,255,0.08)" strokeWidth="1" />
+              <text x={padL - 4} y={y(g) + 3} textAnchor="end" fontSize="8" fontFamily="ui-monospace, monospace" fill="#71717a">
+                {fmt(g)}
+              </text>
+            </g>
+          ))}
+          {tStart > 0 && tEnd > 0 && (
+            <g fontSize="8" fontFamily="ui-monospace, monospace" fill="#52525b">
+              <text x={padL} y={H - 4}>{fmtClock(tStart)}</text>
+              <text x={padL + plotW / 2} y={H - 4} textAnchor="middle">{fmtClock((tStart + tEnd) / 2)}</text>
+              <text x={W - padR} y={H - 4} textAnchor="end">now</text>
+            </g>
+          )}
+          {n === 0 ? (
+            <text x={padL + plotW / 2} y={padT + plotH / 2} textAnchor="middle" fontSize="9" fontFamily="ui-monospace, monospace" fill="#52525b">
+              waiting for samples…
+            </text>
+          ) : (
+            <>
+              <polygon points={area} fill={`url(#${gradId})`} />
+              {(overlay ?? []).map((o, k) => (
+                <polyline
+                  key={k}
+                  points={o.values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')}
+                  fill="none"
+                  stroke={o.color}
+                  strokeWidth={o.width ?? 1.25}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  opacity="0.9"
+                />
+              ))}
+              <polyline points={points} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+              {spikes.map((i) => (
+                <circle key={i} cx={x(i)} cy={y(values[i])} r="2.5" fill="#f87171" stroke="#09090b" strokeWidth="1" />
+              ))}
+              {hov != null && (
+                <g>
+                  <line x1={x(hov)} x2={x(hov)} y1={padT} y2={baseY} stroke="rgba(255,255,255,0.35)" strokeWidth="1" strokeDasharray="3 2" />
+                  <circle cx={x(hov)} cy={y(values[hov])} r="3.5" fill={color} stroke="#09090b" strokeWidth="1.5" />
+                </g>
+              )}
+              <rect
+                x={padL}
+                y={padT}
+                width={plotW}
+                height={plotH}
+                fill="transparent"
+                onMouseMove={(e) => {
+                  // rect IS the plot area (x=padL, width=plotW) — map within it directly.
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const i = Math.round(((e.clientX - rect.left) / rect.width) * (n - 1));
+                  setHover(Math.max(0, Math.min(n - 1, i)));
+                }}
+                onMouseLeave={() => setHover(null)}
+              />
+            </>
+          )}
+        </svg>
+        {hov != null && (
+          <div
+            className="absolute top-0 px-1.5 py-0.5 rounded-md bg-zinc-900 border border-white/15 text-[10px] font-mono text-zinc-100 whitespace-nowrap pointer-events-none shadow-lg"
+            style={{ left: `${(x(hov) / W) * 100}%`, transform: x(hov) > W - 70 ? 'translate(-100%, -110%)' : 'translate(-50%, -110%)' }}
+          >
+            {fmt(values[hov])}
+            {times.length === n && times[hov] > 0 && <span className="text-zinc-400"> · {fmtClock(times[hov] * 1000)}</span>}
+          </div>
+        )}
+      </div>
+      <div className="mt-1 flex gap-3 text-[10px] font-mono text-zinc-400 tabular-nums">
+        <span>min {stats ? fmt(stats.min) : '—'}</span>
+        <span>max {stats ? fmt(stats.max) : '—'}</span>
+        <span>avg {stats ? fmt(stats.avg) : '—'}</span>
+      </div>
+    </div>
+  );
 };
 
 /**
@@ -91,8 +271,11 @@ export const DevDashboard: React.FC = () => {
   const [qaTag, setQaTag] = useState('0000');
   const [qaFetching, setQaFetching] = useState(false);
   const [qaFetchOut, setQaFetchOut] = useState('');
+  const [qaBursting, setQaBursting] = useState(false);
+  const [qaBurstOut, setQaBurstOut] = useState('');
   const [qaJitterOut, setQaJitterOut] = useState('');
   const [qaCoolOut, setQaCoolOut] = useState(() => readQaCooldown());
+  const [qaProxyOut, setQaProxyOut] = useState('proxy: UNKNOWN');
   const [qaTrackerOn, setQaTrackerOn] = useState<boolean>(() => {
     try {
       return isTrackerEnabled();
@@ -105,6 +288,39 @@ export const DevDashboard: React.FC = () => {
   const [qaLogN, setQaLogN] = useState(200);
   const [qaLogOut, setQaLogOut] = useState('');
 
+  /* Proxy watchdog state (Rust-owned — never guessed here). Refreshes with
+   * the cooldown readout: on fetch/burst/reset, on demand, and once on mount. */
+  const refreshQaProxy = async (): Promise<void> => {
+    setQaProxyOut(`proxy: ${await trnProxyState()}`);
+  };
+  useEffect(() => {
+    void refreshQaProxy();
+  }, []);
+
+  /* Performance: own-process RAM/CPU timeline (dev-only backend ring: 5s
+   * cadence, 1h window, pauses while VALORANT owns the screen). The
+   * `import.meta.env.DEV` gate is static so prod dead-code-eliminates the
+   * poll entirely — same convention as trnLog call sites. */
+  const [perf, setPerf] = useState<PerfTimeline | null>(null);
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    let alive = true;
+    const tick = async (): Promise<void> => {
+      const tl = await fetchPerf();
+      if (alive && tl) setPerf(tl);
+    };
+    void tick();
+    const id = setInterval(() => void tick(), PERF_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+  /* Shared y-domain for the memory chart so total/backend/views compare 1:1. */
+  const perfSamples = perf?.samples ?? [];
+  const perfMemHi = Math.max(1, ...perfSamples.map((s) => s.total_mb));
+  const perfMemDom: [number, number] = [0, perfMemHi];
+
   const runQaFetch = async (): Promise<void> => {
     if (qaFetching) return;
     setQaFetching(true);
@@ -115,7 +331,7 @@ export const DevDashboard: React.FC = () => {
       const ms = Math.round(performance.now() - t0);
       const matches = stats.wins + stats.losses + stats.ties;
       setQaFetchOut(
-        `OK · ${ms}ms · UA Chrome ${TRN_UA_MAJOR} · ${stats.wins}W-${stats.losses}L (${matches} matches) · KD ${stats.kd.toFixed(2)}${ms < 50 ? ' · served fast (likely 6h cache, first fetch per identity is live)' : ''}`
+        `OK · ${ms}ms · UA Chrome ${TRN_UA_MAJOR} · ${stats.wins}W-${stats.losses}L (${matches} matches) · KD ${stats.kd.toFixed(2)}${ms < 50 ? ' · served fast (likely 24h cache, first fetch per identity is live)' : ''}`
       );
     } catch (e) {
       const ms = Math.round(performance.now() - t0);
@@ -127,14 +343,50 @@ export const DevDashboard: React.FC = () => {
       );
     } finally {
       setQaCoolOut(readQaCooldown());
+      void refreshQaProxy();
       setQaFetching(false);
     }
   };
-
   const flipQaTracker = (on: boolean): void => {
     setTrackerEnabled(on);
     setQaTrackerOn(on);
     if (import.meta.env.DEV) logger.log(`[tracker-qa] tracker ${on ? 'ON' : 'OFF'}`);
+  };
+
+  /* Burst QA: 12 concurrent raw profile fetches through trnGet (one each of
+   * the 12 real player IDs in vault/real-players-id.md). Raw trnGet = no 24h cache; serial gate + cooldown
+   * intact, so this mass-tests the app's own WebView (Edge-first) transport.
+   * drain:true: this explicit dev-only test measures TRANSPORT, never pause
+   * policy — production fills stay pause-gated, QA fires regardless. */
+  const runQaBurst = async (): Promise<void> => {
+    if (qaBursting) return;
+    setQaBursting(true);
+    setQaBurstOut('…');
+    const t0 = performance.now();
+    const lines = await Promise.all(
+      QA_BURST_TARGETS.map(async (p, i) => {
+        const t1 = performance.now();
+        // ponytail: default = would-be transport; trnGet overwrites with the serving one.
+        let transport: 'EDGE' | 'RUST' = 'EDGE';
+        try {
+          await trnGet(trnProfilePath(p.name, p.tag), { onTransport: (t) => { transport = t; }, drain: true });
+          return `#${i + 1} ${p.name}#${p.tag}: [${transport}] OK · ${Math.round(performance.now() - t1)}ms`;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          return `#${i + 1} ${p.name}#${p.tag}: [${transport}] ${msg.slice(0, 120)} · ${Math.round(performance.now() - t1)}ms`;
+        }
+      })
+    );
+    const total = Math.round(performance.now() - t0);
+    const edgeN = lines.filter((l) => l.includes('[EDGE]')).length;
+    const transportLine =
+      edgeN > 0
+        ? `transport: EDGE fired (${edgeN} EDGE / ${lines.length - edgeN} RUST)`
+        : 'transport: everything fell back to RUST';
+    setQaBurstOut([...lines, transportLine, `total ${total}ms`, `VERDICT: ${burstQaVerdict(lines)}`].join('\n'));
+    setQaCoolOut(readQaCooldown());
+    void refreshQaProxy();
+    setQaBursting(false);
   };
 
   const probeQaGate = async (): Promise<void> => {
@@ -282,6 +534,49 @@ export const DevDashboard: React.FC = () => {
           <p className="text-[11px] text-m3-outline">Dev builds only — test overlay + tracker with no Riot open. Live views pick up simulators on next poll.</p>
         </div>
       </div>
+
+      {/* Performance (dev-only own-process timeline) — first: the canary for every QA session */}
+      <section className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-4 shrink-0">
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <h4 className="font-display font-bold text-sm text-m3-on-surface flex items-center gap-1.5">
+            <Activity className="w-3.5 h-3.5 text-m3-primary" />
+            <span>Performance</span>
+          </h4>
+          <span className="text-[10px] font-mono text-m3-outline text-right">
+            {perf ? `${perf.samples.length}/${PERF_RING_CAP} samples · 5s cadence · 1h ring` : 'dev-only · open the desktop app for live samples'}
+            {perf?.paused ? ' · paused (game fullscreen)' : ''}
+          </span>
+        </div>
+        <p className="text-[11px] text-m3-outline mb-2.5">Recon&apos;s full footprint: backend + its own WebView2 renderers (tree-walked from our PID — other apps&apos; views excluded). Sampling pauses while VALORANT owns the screen (FPS-first).</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+          <PerfChart
+            label="MEM total"
+            values={perfSamples.map((s) => s.total_mb)}
+            times={perfSamples.map((s) => s.t)}
+            stats={perf?.total}
+            color="#34d399"
+            fmt={(v: number) => `${Math.round(v)} MiB`}
+            domain={perfMemDom}
+            overlay={[
+              { values: perfSamples.map((s) => s.rss_mb), color: '#7dd3fc', width: 1.25 },
+              { values: perfSamples.map((s) => s.webview_mb), color: '#fbbf24', width: 1 },
+            ]}
+            legend={[
+              { color: '#34d399', text: 'total' },
+              { color: '#7dd3fc', text: 'backend' },
+              { color: '#fbbf24', text: 'views' },
+            ]}
+          />
+          <PerfChart
+            label="CPU"
+            values={(perf?.samples ?? []).map((s) => s.cpu_pct)}
+            times={(perf?.samples ?? []).map((s) => s.t)}
+            stats={perf?.cpu}
+            color="#fbbf24"
+            fmt={(v: number) => `${v.toFixed(1)}%`}
+          />
+        </div>
+      </section>
 
       {/* Match simulator */}
       <section className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-4 shrink-0">
@@ -443,7 +738,7 @@ export const DevDashboard: React.FC = () => {
 
         <h5 className="text-xs font-bold text-m3-on-surface mt-3 mb-1.5">Fetch test</h5>
         <p className="text-[11px] text-m3-outline mb-2.5">
-          One live profile fetch through the serial gate. First fetch per identity hits the network; repeats may serve the 6h cache.
+          One live profile fetch through the serial gate. First fetch per identity hits the network; repeats may serve the 24h cache.
         </p>
         <div className="flex flex-wrap items-center gap-1.5">
           <input
@@ -488,12 +783,35 @@ export const DevDashboard: React.FC = () => {
           <div className="mt-2.5 rounded-xl bg-zinc-950/80 border border-white/10 p-2 text-[11px] font-mono text-zinc-300 whitespace-pre-wrap break-all">{qaJitterOut}</div>
         )}
 
-        <h5 className="text-xs font-bold text-m3-on-surface mt-3 mb-1.5">Cooldown controls</h5>
-        <p className="text-[11px] text-m3-outline mb-2.5">Readout refreshes on fetch/reset — no polling here.</p>
+        <h5 className="text-xs font-bold text-m3-on-surface mt-3 mb-1.5">Burst QA (WebView transport)</h5>
+        <p className="text-[11px] text-m3-outline mb-2.5">
+          12 concurrent profile fetches through trnGet (4× BOT#staff, بطيوس#Sora, lil ga7ed#zngr — same shape as the proven Brave burst,
+          expect 451/404/200 per-player pattern). Raw trnGet: no 24h cache, gate + cooldown intact.
+        </p>
         <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
-            onClick={() => setQaCoolOut(readQaCooldown())}
+            onClick={() => void runQaBurst()}
+            disabled={qaBursting}
+            className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-m3-surface-container-low border border-m3-outline-subtle text-m3-on-surface hover:border-m3-primary/50 flex items-center gap-1.5 cursor-pointer"
+          >
+            <Play className="w-3 h-3 text-m3-primary shrink-0" />
+            <span>{qaBursting ? 'Bursting…' : 'Burst QA (12×)'}</span>
+          </button>
+        </div>
+        {qaBurstOut && (
+          <div className="mt-2.5 rounded-xl bg-zinc-950/80 border border-white/10 p-2 text-[11px] font-mono text-zinc-300 whitespace-pre-wrap break-all">{qaBurstOut}</div>
+        )}
+
+        <h5 className="text-xs font-bold text-m3-on-surface mt-3 mb-1.5">Cooldown controls</h5>
+        <p className="text-[11px] text-m3-outline mb-2.5">Readouts refresh on fetch/reset — no polling here.</p>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              setQaCoolOut(readQaCooldown());
+              void refreshQaProxy();
+            }}
             className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-m3-surface-container-low border border-m3-outline-subtle text-m3-on-surface hover:border-m3-primary/50 cursor-pointer"
           >
             Refresh readout
@@ -514,6 +832,7 @@ export const DevDashboard: React.FC = () => {
         {qaCoolOut && (
           <div className="mt-2.5 rounded-xl bg-zinc-950/80 border border-white/10 p-2 text-[11px] font-mono text-zinc-300 whitespace-pre-wrap break-all">{qaCoolOut}</div>
         )}
+        <div className="mt-2.5 rounded-xl bg-zinc-950/80 border border-white/10 p-2 text-[11px] font-mono text-zinc-300 whitespace-pre-wrap break-all">{qaProxyOut}</div>
 
         <h5 className="text-xs font-bold text-m3-on-surface mt-3 mb-1.5">Tracker kill-switch (v1, local)</h5>
         <p className="text-[11px] text-m3-outline mb-2.5">

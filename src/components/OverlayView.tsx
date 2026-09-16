@@ -14,6 +14,7 @@ import {
   getPartyStyle,
   byAcsDesc,
   queueLabel,
+  TRN_PRIVATE_TOOLTIP,
 } from '../utils/playerDisplay';
 import { computeMapAgentStats, getRankTierLabel, type AgentStatSummary } from '../utils/mapMeta';
 import { fetchBlitzAgentStats, peekBlitzAgentStats, type BlitzAgentStat } from '../utils/blitzMeta';
@@ -1921,6 +1922,14 @@ const PregameTeamColumn: React.FC<{
           const peakIcon = tierIcons[p.peakTier];
           const kd = formatKd(p.kd);
           const locked = (p.selectionState || '').toLowerCase().includes('lock');
+          // Private TRN profile: TRN-fed cells show a lock, not dashes.
+          // (Name `privLocked`: `locked` above already means agent lock-in.)
+          const privLocked = p.isTrnPrivate === true;
+          const privLockCell = (
+            <span title={TRN_PRIVATE_TOOLTIP} className="inline-flex items-center justify-center text-zinc-500">
+              <LockIcon className="w-2.5 h-2.5" />
+            </span>
+          );
           const hasPick = !locked && !!p.agentName && p.agentName !== 'Selecting…';
           const party = getPartyStyle(p.partyIndex);
           const flagUrl = getFlagUrl(p.country);
@@ -1965,6 +1974,8 @@ const PregameTeamColumn: React.FC<{
               >
                 {p.trnScore != null ? (
                   <ScoreBadge tier={scoreTier(p.trnScore).tier} size={20} />
+                ) : privLocked ? (
+                  privLockCell
                 ) : (
                   <span className="w-5 h-5 rounded border border-m3-outline-subtle/55 bg-m3-surface-container-high/60 flex items-center justify-center text-[9px] font-mono text-m3-outline/70">
                     —
@@ -2035,6 +2046,14 @@ const PregameTeamColumn: React.FC<{
                         {p.nameResolved ? 'Unmasked' : 'Hidden'}
                       </span>
                     )}
+                    {p.isTrnPrivate && (
+                      <span
+                        className="flex items-center px-1 py-px rounded bg-white/5 text-zinc-400 border border-white/10 shrink-0"
+                        title={TRN_PRIVATE_TOOLTIP}
+                      >
+                        <LockIcon className="w-2.5 h-2.5" />
+                      </span>
+                    )}
                   </div>
                   <span className="text-[9.5px] font-mono font-semibold">
                     {locked ? (
@@ -2094,7 +2113,7 @@ const PregameTeamColumn: React.FC<{
 
               {/* K/D */}
               <div className="text-right font-mono text-[11px] font-bold tabular-nums whitespace-nowrap" title="K/D Ratio">
-                <span className={kd.color}>{kd.text}</span>
+                {privLocked ? privLockCell : <span className={kd.color}>{kd.text}</span>}
               </div>
 
               {/* Win % */}
@@ -2103,6 +2122,8 @@ const PregameTeamColumn: React.FC<{
                   <span className={p.winPct >= 50 ? 'text-m3-mint' : 'text-m3-on-surface-variant'}>
                     {p.winPct}%
                   </span>
+                ) : privLocked ? (
+                  privLockCell
                 ) : (
                   <span className="text-m3-outline/70">—</span>
                 )}
@@ -2112,6 +2133,8 @@ const PregameTeamColumn: React.FC<{
               <div className="text-right font-mono text-[11px] tabular-nums whitespace-nowrap" title="Headshot %">
                 {p.hsPct != null ? (
                   <span className="text-amber-200/90 font-medium">{p.hsPct}%</span>
+                ) : privLocked ? (
+                  privLockCell
                 ) : (
                   <span className="text-m3-outline/70">—</span>
                 )}
@@ -2142,6 +2165,13 @@ const VerticalSquadColumn: React.FC<{
       const icon = tierIcons[p.tier];
       const peakIcon = tierIcons[p.peakTier];
       const kd = formatKd(p.kd);
+      // Private TRN profile: stat cells show a lock, not dashes.
+      const privLocked = p.isTrnPrivate === true;
+      const privLockCell = (
+        <span title={TRN_PRIVATE_TOOLTIP} className="inline-flex items-center justify-center text-zinc-500">
+          <LockIcon className="w-2.5 h-2.5" />
+        </span>
+      );
       const party = getPartyStyle(p.partyIndex);
       const flagUrl = getFlagUrl(p.country);
       const countryName = getCountryName(p.country);
@@ -2181,11 +2211,17 @@ const VerticalSquadColumn: React.FC<{
             title={
               p.trnScore != null
                 ? `Tracker Score: ${p.trnScore} / 1000 — Tier ${scoreTier(p.trnScore).tier}`
+                : p.isTrnPrivate
+                ? TRN_PRIVATE_TOOLTIP
                 : 'Tracker Score unavailable'
             }
           >
             {p.trnScore != null ? (
               <ScoreBadge tier={scoreTier(p.trnScore).tier} size={15} />
+            ) : p.isTrnPrivate ? (
+              <span className="w-3.5 h-3.5 rounded border border-m3-outline-subtle/55 bg-m3-surface-container-high/60 flex items-center justify-center text-m3-outline/70">
+                <LockIcon className="w-2.5 h-2.5" />
+              </span>
             ) : (
               <span className="w-3.5 h-3.5 rounded border border-m3-outline-subtle/55 bg-m3-surface-container-high/60 flex items-center justify-center text-[7.5px] font-mono text-m3-outline/70">
                 —
@@ -2262,6 +2298,8 @@ const VerticalSquadColumn: React.FC<{
               <span className={p.acs >= 200 ? 'text-m3-primary' : p.acs >= 150 ? 'text-m3-on-surface' : 'text-m3-on-surface-variant'}>
                 {p.acs}
               </span>
+            ) : privLocked ? (
+              privLockCell
             ) : (
               <span className="text-m3-outline/70">—</span>
             )}
@@ -2269,7 +2307,7 @@ const VerticalSquadColumn: React.FC<{
 
           {/* KD */}
           <div className="text-right font-mono text-[10px] tabular-nums whitespace-nowrap" title="Act-wide K/D">
-            <span className={kd.color}>{kd.text}</span>
+            {privLocked ? privLockCell : <span className={kd.color}>{kd.text}</span>}
           </div>
 
           {/* Act-wide win rate */}
@@ -2278,6 +2316,8 @@ const VerticalSquadColumn: React.FC<{
               <span className={p.winPct >= 50 ? 'text-m3-mint font-semibold' : 'text-rose-400'}>
                 {p.winPct.toFixed(0)}%
               </span>
+            ) : privLocked ? (
+              privLockCell
             ) : (
               <span className="text-m3-outline/70">—</span>
             )}
@@ -2285,7 +2325,7 @@ const VerticalSquadColumn: React.FC<{
 
           {/* Act-wide headshot % */}
           <div className="text-right font-mono text-[10px] text-amber-200/90 tabular-nums whitespace-nowrap" title="Act-wide headshot %">
-            {p.hsPct != null && p.hsPct > 0 ? `${p.hsPct.toFixed(0)}%` : <span className="text-m3-outline/70">—</span>}
+            {p.hsPct != null && p.hsPct > 0 ? `${p.hsPct.toFixed(0)}%` : privLocked ? privLockCell : <span className="text-m3-outline/70">—</span>}
           </div>
         </div>
       );

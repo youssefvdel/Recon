@@ -29,7 +29,7 @@ export function getCountryName(code?: string): string | null {
   }
 }
 
-/** Canonical search & profile URLs across Tracker.gg (TRN), Blitz.gg, and OP.GG */
+/** Canonical search & profile URLs across Tracker.gg (TRN) and Blitz.gg */
 export function getTrackerUrls(name: string, tag?: string) {
   const cleanName = (name || '').trim();
   const cleanTag = (tag || '').trim();
@@ -42,9 +42,11 @@ export function getTrackerUrls(name: string, tag?: string) {
   return {
     trn: `https://tracker.gg/valorant/profile/riot/${riotIdEncoded}/overview`,
     blitz: `https://blitz.gg/valorant/profile/${blitzSlug}`,
-    opgg: `https://op.gg/valorant/profile/${riotIdEncoded}`,
   };
 }
+
+/** Tooltip for the private-tracker lock badge in player rows. */
+export const TRN_PRIVATE_TOOLTIP = 'Private tracker profile — sign in on tracker.gg to make it public';
 
 /** Full MMR picture for a lobby player, surfaced on hover. */
 export function rankTooltip(p: LiveMatchPlayer, actLabel?: string): string {

@@ -23,7 +23,7 @@ export const ConsentModal: React.FC<{ onDone: () => void }> = ({ onDone }) => {
       <div className="w-full max-w-md rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-5 shadow-m3-3">
         <h3 className="font-display font-black text-base text-m3-on-surface">How Recon uses your data</h3>
         <p className="text-xs text-m3-on-surface-variant mt-1 mb-3">
-          Local game data + public tracker.gg / OP.GG stats. Nothing leaves this PC.
+          Local game data + public tracker.gg stats. Nothing leaves this PC.
         </p>
         <div className="flex items-center justify-between rounded-xl bg-m3-surface-container-low border border-m3-outline-subtle px-3 py-2">
           <span className="text-xs font-semibold text-m3-on-surface">Crash reports (local only)</span>

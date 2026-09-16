@@ -31,3 +31,4 @@ tsconfig.tsbuildinfo
 .opencode/
 opencode.json
 ref200.err
+vault/

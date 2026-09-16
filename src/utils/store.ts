@@ -93,8 +93,11 @@ export interface WalletBalance {
   icon: string;
 }
 
-const STORE_KEY = 'recon_store_v2';
-const COSMETIC_KEY = 'recon_cosmetic_catalog_v2';
+// v3: names are baked at fetch time, so adding player titles to the cosmetic
+// catalog needs a key bump — otherwise cached rows keep saying "Unknown"
+// until the shop rotates (hours). ponytail: bump again if the catalog grows.
+const STORE_KEY = 'recon_store_v3';
+const COSMETIC_KEY = 'recon_cosmetic_catalog_v3';
 const COSMETIC_TTL = 7 * 24 * 3600 * 1000;
 
 let memStore: { at: number; data: AccountStore } | null = null;
@@ -201,6 +204,9 @@ async function cosmeticCatalog(): Promise<Record<string, CosmeticEntry>> {
   await Promise.all([
     load('sprays', 'spray'),
     load('buddies', 'buddy'),
+    // Player titles (accessory shop, 2500 KC): text-only, no art — without
+    // this they render as an initials tile reading "Unknown".
+    load('playertitles', 'cosmetic'),
     (async () => {
       try {
         const r = await fetch('https://valorant-api.com/v1/playercards');

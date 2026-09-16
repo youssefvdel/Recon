@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
 import type { LiveMatchPlayer, LiveMatchState, LocalRiotAccount, TrackerDuel, TrackerMatchDetail, TrackerMmrPoint, TrackerPlayer, TrackerProfile } from '../types';
 import { isTauri } from './ipc';
+import { setTrnMatchPhase, trnLog, trnProxyPaused, openTrnDrainJob, closeTrnDrainJob, isTrnPrivateError, trnNoteNegative } from './trn';
 import { getDevMockMatch, isDevNoClient } from './devTools';
 import { extractGamePodId, parseGamePodId } from './matchServer';
 import { assignPartyColors } from './playerDisplay';
@@ -1676,6 +1677,7 @@ export function isMatchStateEqual(a: LiveMatchState | null, b: LiveMatchState | 
       p1.streakIsWin === p2.streakIsWin &&
       p1.isIncognito === p2.isIncognito &&
       p1.nameResolved === p2.nameResolved &&
+      p1.isTrnPrivate === p2.isTrnPrivate &&
       p1.partyId === p2.partyId &&
       p1.partyIndex === p2.partyIndex
     );
@@ -1692,6 +1694,33 @@ export function isMatchStateEqual(a: LiveMatchState | null, b: LiveMatchState | 
   };
 
   return teamsEqual(a.blueTeam, b.blueTeam) && teamsEqual(a.redTeam, b.redTeam);
+}
+
+/**
+ * Sticky party latch: fill this poll's solo gaps from the same-match latch
+ * so a transient presence/history miss never dissolves an established
+ * cluster for a tick (the bow-arc outline + row tint would blink).
+ *
+ * Fresh evidence always wins — only puuids with no fresh cluster that are
+ * still in this lobby are restored, and a restored member keeps its latched
+ * color index instead of being re-hashed. Leavers (not in the lobby) are
+ * never restored. Pure apart from mutating the two fresh maps it is given —
+ * checked by scripts/party-color-check.ts.
+ */
+export function restoreLatchedParties(
+  clusterIdByPuuid: Map<string, string>,
+  playerPartyIndexMap: Map<string, number>,
+  latchedClusters: Map<string, string>,
+  latchedIndexes: Map<string, number>,
+  lobbyPuuids: Set<string>
+): void {
+  for (const [puuid, cid] of latchedClusters) {
+    if (!lobbyPuuids.has(puuid) || clusterIdByPuuid.has(puuid)) continue;
+    const idx = latchedIndexes.get(puuid);
+    if (!idx) continue;
+    clusterIdByPuuid.set(puuid, cid);
+    playerPartyIndexMap.set(puuid, idx);
+  }
 }
 
 /**
@@ -1801,6 +1830,13 @@ export interface LivePlayerStatsEntry {
   country?: string;
   fetchedAt: number;
   retryAfter?: number;
+  /** True when TRN answered HTTP 451 CollectorResultStatus::Private for this
+   *  player — dashes are expected, not breakage. */
+  isTrnPrivate?: boolean;
+  /** Deliberate long backoff marker: 'private' (451, retry in 7d) or
+   *  'missing' (404, retry in 24h). The self-heal below must NEVER clear
+   *  flagged entries — only unflagged poison from previous sessions. */
+  negative?: 'private' | 'missing';
   /** Last successful 24h-record refresh — decoupled from `fetchedAt`, which
    *  TRN updates also bump. Sharing one timestamp let each source suppress
    *  the other's refresh. */
@@ -1812,30 +1848,50 @@ const LIVE_STATS_CACHE_KEY = 'recon_live_player_stats_v2';
 const LIVE_STATS_TTL = 24 * 60 * 60 * 1000; // 24 hours — player act stats & country do not change every minute
 const trnInFlightLive = new Set<string>();
 
-/* ---- TRN lobby spread: ONE fetch per ~6s, own team first ---- *
- * A fresh 10-player lobby used to drain every uncached TRN lookup
- * back-to-back (2 requests per player behind the 1.5–3s serial gate) —
- * a burst Cloudflare answers with 1015. The spread queues uncached lobby
- * players and fetches ONE per TRN_SPREAD_MS, chained setTimeout so ticks
- * never overlap. The trn.ts serial gate + cooldown ladder + dedup +
- * caches stay the floor — this only spaces further, never adds volume.
- * Stops on match/phase change, hidden tab, or stale polls (phase idle /
- * views unmounted); the next visible live poll re-enqueues whoever is
- * still uncached. An explicit manual refresh (forceRefresh) bypasses the
- * spread and fires immediately, exactly as before. */
+/* ---- TRN lobby fill: ONE concurrent fetch of budgeted players, own team first ---- *
+ * A fresh 10-player lobby used to drain one player per ~6s (~60s a lobby).
+ * Proven-clean shape instead: one concurrent fill of all budgeted players —
+ * 12 concurrent from a real browser never tripped 1015 (twice). A hard
+ * per-lobby budget (TRN_SPREAD_MAX_PLAYERS) caps fired fetches per
+ * match — overflow waits for the next lobby. Each firing carries a
+ * small 200-400ms jitter so the fill isn't lockstep, NOT 6s. The trn.ts
+ * serial gate + cooldown ladder + dedup + caches stay the floor — this only
+ * fans out on top, never adds volume. A dispatched fill drains to completion
+ * across the pregame→coregame flip (drain:true, still ladder-guarded); only
+ * NEW fills gate on pause. The fill opens one drain job per lobby
+ * (openTrnDrainJob): every descendant detail call for those players inherits
+ * the token until the job settles (quiesced or next lobby). Skips on match change, hidden
+ * tab, or stale polls; the next visible live poll re-enqueues whoever is
+ * still uncached. An explicit manual refresh (forceRefresh) fires
+ * immediately while the budget lasts; overflow joins the fill. */
 
-/** Spacing between lobby TRN fetches. Own team drains first (~30s for 5),
- *  then enemies — a full lobby resolves in ~60s without ever bursting. */
-export const TRN_SPREAD_MS = 6000;
+/** De-sync per firing so a concurrent lobby fill isn't lockstep (NOT 6s). */
+export const TRN_FILL_JITTER_MIN_MS = 200;
+export const TRN_FILL_JITTER_MAX_MS = 400;
+/** Uniform 200-400ms jitter. Pure — checked by scripts/trn-spread-check.ts. */
+export function trnFillJitterMs(): number {
+  return TRN_FILL_JITTER_MIN_MS + Math.random() * (TRN_FILL_JITTER_MAX_MS - TRN_FILL_JITTER_MIN_MS);
+}
+/** Hard per-lobby budget: at most 10 players per match drain through
+ *  TRN (own-team-first order means enemies drop first when spent). Bounds the
+ *  worst case to 10 fetchTrnStatsNow; overflow waits for the next match
+ *  or a manual refresh instead of extending the firing window mid-game. */
+export const TRN_SPREAD_MAX_PLAYERS = 10;
+/** Deathmatch lobbies run 12 players — same one-fill rule, roomier cap. */
+export const TRN_SPREAD_MAX_PLAYERS_DM = 12;
+/** Budget for this lobby: 12 in deathmatch, 10 everywhere else. Pure. */
+export function trnSpreadBudget(isDeathmatch: boolean): number {
+  return isDeathmatch ? TRN_SPREAD_MAX_PLAYERS_DM : TRN_SPREAD_MAX_PLAYERS;
+}
 /** Views poll every 2.5–3s; no live poll for this long = phase went idle
- *  or the views unmounted → drop the queue, never fetch for a dead lobby. */
+ *  or the views unmounted → skip the firing, never fetch for a dead lobby. */
 const TRN_SPREAD_STALE_MS = 10_000;
 
 export interface SpreadPlayer {
   puuid: string;
   name: string;
   tag: string;
-  /** True for own-team players — they drain before enemies. */
+  /** True for own-team players — they fire before enemies. */
   mine: boolean;
 }
 
@@ -1844,8 +1900,8 @@ export function orderSpreadQueue(players: SpreadPlayer[]): SpreadPlayer[] {
   return players.slice().sort((a, b) => Number(b.mine) - Number(a.mine));
 }
 
-/** True when the lobby spread may fetch for this player now. Reads the
- *  same caches the poll loop reads, so enqueue and tick always agree. */
+/** True when the lobby fill may fetch for this player now. Reads the
+ *  same caches the poll loop reads, so enqueue and firing always agree. */
 export function playerNeedsTrnStats(puuid: string): boolean {
   const cached = getCachedLivePlayerStats(puuid);
   return (
@@ -1854,85 +1910,141 @@ export function playerNeedsTrnStats(puuid: string): boolean {
   );
 }
 
-let trnSpreadQueue: SpreadPlayer[] = [];
-let trnSpreadTimer: ReturnType<typeof setTimeout> | null = null;
 let trnSpreadKey = '';
 let trnSpreadLastPollAt = 0;
+/** TRN fetches fired for the current match key (fill + immediate).
+ *  Resets on match change — the budget is per lobby, not per session and
+ *  not per phase (a fill dispatched pre-flip drains across it). */
+let trnSpreadSpent = 0;
+/** Owning generation of the open drain job for this lobby (0 = none). Only
+ *  the owner settles it, so a stale settle can never kill a newer job. */
+let trnDrainGen = 0;
+/** Match the open job belongs to — a stale poll for another match settles nothing. */
+let trnDrainMatchId = '';
 
-function stopTrnSpread(): void {
-  trnSpreadQueue = [];
-  if (trnSpreadTimer) {
-    clearTimeout(trnSpreadTimer);
-    trnSpreadTimer = null;
-  }
+/** MMR row shape shared by the live map, the previous row, and the merge below. */
+export interface MmrRow {
+  tier: number;
+  rr: number;
+  peakTier: number;
+  peakSeasonId?: string;
+  actWins?: number;
+  actGames?: number;
+  leaderboardRank?: number;
+  isRankHidden?: boolean;
 }
 
-function scheduleTrnSpread(): void {
-  if (trnSpreadTimer || trnSpreadQueue.length === 0) return;
-  trnSpreadTimer = setTimeout(pumpTrnSpread, TRN_SPREAD_MS);
+/** Monotonic MMR merge: a present-but-empty fresh entry (unrevealed teammate,
+ *  degraded payload, failed refetch) must NEVER erase a rank we already show
+ *  — that erase/re-resolve cycle is the rank flicker (Unrated ↔ real) and it
+ *  reshuffles byAcsDesc rows every poll. Real fresh values win; placeholders
+ *  keep the previous row. RR is static within a lobby, and a new match
+ *  rebuilds rows from a fresh result object, so cross-match staleness can't
+ *  stick. Pure — checked by scripts/live-poll-check.ts. */
+export function mergeMmrRow(
+  fresh: MmrRow | null | undefined,
+  prev: MmrRow | null | undefined
+): MmrRow {
+  const takeNum = (f?: number, p?: number): number | undefined =>
+    f != null && f > 0 ? f : p;
+  return {
+    tier: takeNum(fresh?.tier, prev?.tier) ?? 0,
+    rr: takeNum(fresh?.rr, prev?.rr) ?? 0,
+    peakTier: takeNum(fresh?.peakTier, prev?.peakTier) ?? 0,
+    peakSeasonId:
+      (fresh && fresh.peakTier > 0 ? fresh.peakSeasonId : undefined) ??
+      prev?.peakSeasonId,
+    actWins: takeNum(fresh?.actWins, prev?.actWins),
+    actGames: takeNum(fresh?.actGames, prev?.actGames),
+    leaderboardRank: takeNum(fresh?.leaderboardRank, prev?.leaderboardRank),
+    isRankHidden:
+      fresh?.isRankHidden === true || prev?.isRankHidden === true
+        ? true
+        : (fresh?.isRankHidden ?? prev?.isRankHidden),
+  };
 }
 
-function pumpTrnSpread(): void {
-  trnSpreadTimer = null;
-  // Tab hidden, or live polls gone stale (phase idle / views unmounted) →
-  // stop; the next visible live poll re-enqueues whoever is still uncached.
-  if (typeof document !== 'undefined' && document.hidden) {
-    stopTrnSpread();
-    return;
-  }
-  if (Date.now() - trnSpreadLastPollAt > TRN_SPREAD_STALE_MS) {
-    stopTrnSpread();
-    return;
-  }
-  const head = trnSpreadQueue.shift();
-  if (!head) return;
-  const key = trnSpreadKey;
-  import('./trn')
-    .then(({ trnCooldownRemainingMs }) => {
-      // Match/phase moved on while queued, or a manual refresh already
-      // filled this player → skip without firing.
-      if (key !== trnSpreadKey || !playerNeedsTrnStats(head.puuid)) {
-        scheduleTrnSpread();
-        return;
-      }
-      if (trnCooldownRemainingMs() > 0) {
-        // Fail fast like trnGet: touch no network, retry at cooldown end.
-        trnSpreadQueue.unshift(head);
-        if (!trnSpreadTimer) {
-          trnSpreadTimer = setTimeout(pumpTrnSpread, trnCooldownRemainingMs() + 2000);
-        }
-        return;
-      }
-      fetchTrnStatsNow(head.puuid, head.name, head.tag);
-      scheduleTrnSpread();
-    })
-    .catch(() => {
-      scheduleTrnSpread();
-    });
-}
-
-function enqueueTrnSpread(matchId: string, phase: string, players: SpreadPlayer[]): void {
+async function enqueueTrnSpread(matchId: string, phase: string, players: SpreadPlayer[], isDeathmatch = false): Promise<void> {
   if (typeof document !== 'undefined' && document.hidden) return;
-  const key = `${matchId}:${phase}`;
-  if (key !== trnSpreadKey) {
-    // Match/phase change: a stale queue must never fetch for the old lobby.
-    stopTrnSpread();
+  const budget = trnSpreadBudget(isDeathmatch);
+  // Per-LOBBY key (match, not match+phase): a fill dispatched pre-flip keeps
+  // its budget and drains to completion across the phase flip.
+  const key = matchId;
+  const firstFill = key !== trnSpreadKey;
+  if (firstFill) {
+    // New match: stale firings must never fetch for the old lobby.
     trnSpreadKey = key;
+    trnSpreadSpent = 0;
+    // Warm the pause hint from Riot-local BEFORE dispatching (don't wait for
+    // the next poll): the full poll can arrive already in coregame while
+    // presences still show agent-select — that race missed whole lobbies.
+    await warmTrnPhaseFromPresence().catch(() => {});
   }
-  const queued = new Set(trnSpreadQueue.map((p) => p.puuid.toLowerCase()));
-  for (const p of orderSpreadQueue(players)) {
-    const k = p.puuid.toLowerCase();
-    if (queued.has(k) || trnInFlightLive.has(k) || !playerNeedsTrnStats(p.puuid)) continue;
-    queued.add(k);
-    trnSpreadQueue.push(p);
+  // Drain-vs-new split: only NEW fills gate here — nothing fresh enqueues
+  // while paused. Already-dispatched firings carry drain:true below and run
+  // to completion (bounded, ladder-guarded).
+  if (await trnProxyPaused()) {
+    if (import.meta.env.DEV) trnLog('fill paused', 'no fresh enqueue while paused (dispatched drains)');
+    return;
   }
-  scheduleTrnSpread();
+  // Own-team-first, budgeted, deduped — then ONE concurrent fill (each firing
+  // de-synced 200-400ms, NOT 6s). The trn.ts serial gate + cooldown ladder
+  // below still pace the wire; budget is spent only on fire.
+  if (import.meta.env.DEV) trnLog('fill start', `phase=${phase} candidates=${players.length} budget=${trnSpreadSpent}/${budget}`);
+  const budgeted = orderSpreadQueue(players)
+    .filter((p) => !trnInFlightLive.has(p.puuid.toLowerCase()) && playerNeedsTrnStats(p.puuid))
+    .slice(0, Math.max(0, budget - trnSpreadSpent));
+  // Atomic job: everything dispatched here — plus descendant detail calls
+  // those players fan out with no explicit token — inherits drain until the
+  // job settles. Opened only when actually dispatching.
+  if (budgeted.length > 0) {
+    trnDrainGen = openTrnDrainJob(players.map((p) => `${p.name}#${p.tag}`));
+    trnDrainMatchId = matchId;
+    if (import.meta.env.DEV) trnLog('job opened', `gen=${trnDrainGen} players=${players.length}`);
+  }
+  for (const p of budgeted) {
+    const { puuid, name, tag } = p;
+    const fireKey = key;
+    setTimeout(() => {
+      // Match moved on, tab hidden, polls stale, already filled/fetching,
+      // cooling, or budget spent → skip without firing. No paused check by
+      // design: dispatch-time budgeting already decided, and drain:true
+      // below exempts the run across the phase flip.
+      if (fireKey !== trnSpreadKey || !playerNeedsTrnStats(puuid)) return;
+      if (typeof document !== 'undefined' && document.hidden) return;
+      if (Date.now() - trnSpreadLastPollAt > TRN_SPREAD_STALE_MS) return;
+      if (trnInFlightLive.has(puuid.toLowerCase())) return;
+      if (trnSpreadSpent >= budget) return;
+      import('./trn')
+        .then(async ({ trnCooldownRemainingMs, isTrnDeadQuiet }) => {
+          // Fail fast like trnGet: touch no network during cooldown. Budget
+          // unspent, so the next visible poll re-enqueues whoever is stale.
+          // Same for the dead-quiet breaker: spend nothing while the page's
+          // network is down; the next poll retries after it reopens.
+          if (fireKey !== trnSpreadKey || trnCooldownRemainingMs() > 0 || isTrnDeadQuiet()) return;
+          if (!playerNeedsTrnStats(puuid) || trnInFlightLive.has(puuid.toLowerCase())) return;
+          if (trnSpreadSpent >= budget) return;
+          trnSpreadSpent++;
+          fetchTrnStatsNow(puuid, name, tag, true);
+        })
+        .catch(() => {});
+    }, trnFillJitterMs());
+  }
+  if (import.meta.env.DEV) trnLog('fill dispatched', `scheduled=${budgeted.length} budget=${trnSpreadSpent}/${budget}`);
 }
 
 /** Immediate single-player TRN fetch (deduped + cooldown fail-fast). The
- *  manual-refresh path calls this directly; the spread calls it one player
- *  per tick. Never throws into the poll loop. */
-function fetchTrnStatsNow(puuid: string, realName: string, realTag: string): void {
+ *  manual-refresh path calls this directly (gated); the fill passes
+ *  drain:true for already-budgeted players running across the phase flip.
+ *  Never throws into the poll loop. */
+/** Retry-after for a 451-private profile: it stays private until its owner
+ *  acts on tracker.gg, so refetching every lobby is pure rate-limit burn. */
+export const TRN_PRIVATE_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
+/** Retry-after for an HTTP 404 (no tracker page yet): the page may be
+ *  created later, so retry daily, not every lobby. */
+export const TRN_MISSING_RETRY_MS = 24 * 60 * 60 * 1000;
+
+function fetchTrnStatsNow(puuid: string, realName: string, realTag: string, drain = false): void {
   const inFlightKey = puuid.toLowerCase();
   if (trnInFlightLive.has(inFlightKey)) return;
   trnInFlightLive.add(inFlightKey);
@@ -1942,7 +2054,7 @@ function fetchTrnStatsNow(puuid: string, realName: string, realTag: string): voi
         trnInFlightLive.delete(inFlightKey);
         return;
       }
-      fetchTrnActStats(realName, realTag)
+      fetchTrnActStats(realName, realTag, '', 'competitive', drain ? { drain: true } : undefined)
         .then((res) => {
           const realCountry =
             res?.countryCode &&
@@ -1961,19 +2073,40 @@ function fetchTrnStatsNow(puuid: string, realName: string, realTag: string): voi
           if (res?.stats?.hsPct != null) update.hsPct = Math.round(res.stats.hsPct);
           if (res?.stats?.trnScore != null) update.trnScore = Math.round(res.stats.trnScore);
           if (res?.stats?.acs != null) update.acs = Math.round(res.stats.acs);
+          // Public profile with real stats clears a previously latched private flag.
+          if (res?.stats?.kd != null) update.isTrnPrivate = false;
           // If private or no stats found, set short backoff (5 min) so we can retry later
           if (!res || !res.stats || res.stats.kd == null) {
             update.retryAfter = Date.now() + 5 * 60 * 1000;
           }
           setCachedLivePlayerStats(puuid, update);
         })
-        .catch(() => {
+        .catch((e) => {
           // Align retry with the live cooldown expiry (+2s) so a player
           // never sleeps through availability; floor 30s for transient errors.
+          // A 451-private profile latches the flag so rows show a lock, not breakage.
+          // Permanent negatives: 451 stays private until its owner acts (7d),
+          // 404 may gain a page later (24h) — refetching either every lobby
+          // is pure rate-limit burn, so back them off hard.
           const cool = trnCooldownRemainingMs();
+          const backoff = isTrnPrivateError(e)
+            ? TRN_PRIVATE_RETRY_MS
+            : String(e).includes('HTTP 404')
+              ? TRN_MISSING_RETRY_MS
+              : Math.max(30 * 1000, cool + 2000);
           setCachedLivePlayerStats(puuid, {
-            retryAfter: Date.now() + Math.max(30 * 1000, cool + 2000),
+            retryAfter: Date.now() + backoff,
+            ...(isTrnPrivateError(e)
+              ? { isTrnPrivate: true, negative: 'private' as const }
+              : String(e).includes('HTTP 404')
+                ? { negative: 'missing' as const }
+                : {}),
           });
+          // Central registry (trn.ts): every fetch fn consults it first, so
+          // Overview/modals/maps/tabs/enrichment can never refire a proven
+          // private/missing account — not just the lobby fill.
+          if (isTrnPrivateError(e)) trnNoteNegative(realName, realTag, 'private');
+          else if (String(e).includes('HTTP 404')) trnNoteNegative(realName, realTag, 'missing');
         })
         .finally(() => {
           trnInFlightLive.delete(inFlightKey);
@@ -1997,8 +2130,10 @@ export function getCachedLivePlayerStats(puuid: string): LivePlayerStatsEntry | 
         const store = JSON.parse(raw) as Record<string, LivePlayerStatsEntry>;
         const entry = store[pU];
         if (entry) {
-          // Self-heal: clear poisoned multi-hour lockouts from previous sessions
-          if (entry.retryAfter && entry.retryAfter > Date.now() + 2 * 60 * 1000) {
+          // Self-heal: clear poisoned multi-hour lockouts from previous sessions —
+          // but NEVER deliberate negatives (flagged 451-private/404-missing carry
+          // intentional 7d/24h backoffs; wiping them re-fetches privates forever).
+          if (entry.retryAfter && !entry.negative && entry.retryAfter > Date.now() + 2 * 60 * 1000) {
             entry.retryAfter = undefined;
           }
           if (Date.now() - entry.fetchedAt < LIVE_STATS_TTL) {
@@ -2071,6 +2206,53 @@ export function setCachedLivePlayerStats(puuid: string, entry: Partial<LivePlaye
  * payload, so the payload alone cannot scope the stats correctly. Ignored while
  * in menus, where the blob keeps the queue id of the last match played.
  */
+/** Presence loop → proxy hint. Positive signals only — anything else yields
+ *  null so the caller leaves the hint alone (never downgrade on missing
+ *  data). Pure — checked by scripts/trn-spread-check.ts. */
+export function presenceLoopToPhase(loop: string): 'pregame' | 'coregame' | null {
+  const l = loop.trim().toUpperCase();
+  if (l === 'PREGAME') return 'pregame';
+  if (l === 'INGAME') return 'coregame';
+  return null;
+}
+
+/** Fast Riot-local loop state (free loopback read, no TRN). Null when
+ *  unreadable — callers keep the previous hint. */
+async function fetchLocalLoopState(): Promise<string | null> {
+  try {
+    if (!isTauri()) return null;
+    const ent = await getEntitlements();
+    const raw = await invoke<string>('local_presences');
+    const presences: { puuid?: string; private?: string }[] = JSON.parse(raw)?.presences ?? [];
+    const me = presences.find(
+      (p) => String(p?.puuid ?? '').toLowerCase() === ent.puuid.toLowerCase()
+    );
+    if (!me?.private) return null;
+    const blob = JSON.parse(decodeBase64Utf8(String(me.private)));
+    const loop = String(blob?.matchPresenceData?.sessionLoopState ?? blob?.sessionLoopState ?? '');
+    return loop || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Warm the proxy pause hint from Riot-local presences before the first fill
+ *  of a lobby. The full poll is slow (MMR + names per player) and can arrive
+ *  already in coregame; presences answer in ms, so pregame wins the race and
+ *  fetches start at lobby formation. Positive signals only — true
+ *  coregame-fullscreen still pauses. Never throws. */
+async function warmTrnPhaseFromPresence(): Promise<void> {
+  try {
+    const warmed = presenceLoopToPhase((await fetchLocalLoopState()) ?? '');
+    if (warmed) {
+      setTrnMatchPhase(warmed);
+      if (import.meta.env.DEV) trnLog('phase warmed', warmed);
+    }
+  } catch {
+    /* stale hint stands */
+  }
+}
+
 export async function fetchLiveQueueId(): Promise<string> {
   try {
     if (!isTauri()) return '';
@@ -2100,6 +2282,12 @@ const LAST_ACTIVE_MATCH_KEY = 'recon_last_active_match_v1';
 const LAST_ACTIVE_TTL_MS = 6 * 60 * 60 * 1000;
 /** Key of the match whose round sequence is tracked (old keys are deleted). */
 let lastRoundSeqMatchId = '';
+/** Match the sticky party latch below belongs to — reset on change. */
+let lastPartyMatchId = '';
+/** Established cluster id per puuid for the current match (outline latch). */
+const lastPartyClusterByPuuid = new Map<string, string>();
+/** Color index per puuid for the current match (restored, never re-hashed). */
+const lastPartyIndexByPuuid = new Map<string, number>();
 const isLastActiveFresh = (s: LiveMatchState | null): s is LiveMatchState =>
   !!s && Date.now() - (s.updatedAt ?? 0) < LAST_ACTIVE_TTL_MS;
 let lastLiveMatchFetchTime = 0;
@@ -2314,7 +2502,11 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
 
   try {
     const ent = await getEntitlements();
-    if (!ent.puuid) return idleState;
+    if (!ent.puuid) {
+      // No session = menus at best: the proxy must never pause on this.
+      setTrnMatchPhase('idle');
+      return idleState;
+    }
 
     const region = regionOverride || (await detectRegion());
     const glz = glzHostFor(region);
@@ -2409,6 +2601,9 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
         } catch {}
       }
 
+      // Menus/queue (no match): stamp idle so a stale coregame hint can never
+      // keep pausing menu fetches after a match ends.
+      setTrnMatchPhase('idle');
       return idleState;
     }
 
@@ -2859,6 +3054,24 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
       if (idx) playerPartyIndexMap.set(puuid, idx);
     }
 
+    // Sticky outline: a poll that misses a presence row or a history fetch
+    // must not dissolve that match's established clusters for a tick.
+    // Fresh evidence wins; the latch fills solo gaps; it resets per match.
+    if (lastPartyMatchId !== matchId) {
+      lastPartyMatchId = matchId;
+      lastPartyClusterByPuuid.clear();
+      lastPartyIndexByPuuid.clear();
+    }
+    restoreLatchedParties(
+      clusterIdByPuuid,
+      playerPartyIndexMap,
+      lastPartyClusterByPuuid,
+      lastPartyIndexByPuuid,
+      new Set(rawPlayers.map((rp) => rp.puuid.toLowerCase()))
+    );
+    for (const [puuid, cid] of clusterIdByPuuid) lastPartyClusterByPuuid.set(puuid, cid);
+    for (const [puuid, idx] of playerPartyIndexMap) lastPartyIndexByPuuid.set(puuid, idx);
+
     // In Deathmatch / FFA, keep all players in one unified list (blueTeam) without grouping into teams
     // Own team for the TRN spread (own-team players drain first). Deathmatch
     // lobbies are one team, so everyone keeps poll order there.
@@ -2896,21 +3109,24 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
       const tag = realName ? realTag : prevHasRealName ? prevPlayer!.tag : '';
       const nameResolved = !!realName || prevHasRealName;
 
-      const mmr =
+      const freshMmr =
         mmrMap.get(p.puuid) ||
         mmrMap.get(pU) ||
-        (prevPlayer
-          ? {
-              tier: prevPlayer.tier,
-              rr: prevPlayer.rr,
-              peakTier: prevPlayer.peakTier,
-              peakSeasonId: prevPlayer.peakSeasonId,
-              actWins: prevPlayer.actWins,
-              actGames: prevPlayer.actGames,
-              leaderboardRank: prevPlayer.leaderboardRank,
-              isRankHidden: prevPlayer.isRankHidden,
-            }
-          : { tier: 0, rr: 0, peakTier: 0 });
+        null;
+      // Monotonic rank latch (see mergeMmrRow): placeholders never erase.
+      const prevMmr = prevPlayer
+        ? {
+            tier: prevPlayer.tier,
+            rr: prevPlayer.rr,
+            peakTier: prevPlayer.peakTier,
+            peakSeasonId: prevPlayer.peakSeasonId,
+            actWins: prevPlayer.actWins,
+            actGames: prevPlayer.actGames,
+            leaderboardRank: prevPlayer.leaderboardRank,
+            isRankHidden: prevPlayer.isRankHidden,
+          }
+        : null;
+      const mmr = mergeMmrRow(freshMmr, prevMmr);
       const agentRawName = data.agents[p.characterId.toLowerCase()] || '';
       const agentMeta = Object.values(data.agentInfo).find(
         (a) => a.name.toLowerCase() === agentRawName.toLowerCase()
@@ -2918,9 +3134,11 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
 
       // TRN stats (KD & country) for any player with a resolved Riot ID,
       // including unmasked streamer-mode players. Manual refresh fires
-      // immediately (unchanged); every other poll joins the paced spread.
+      // immediately while the per-lobby budget lasts; overflow joins the
+      // concurrent fill instead of bursting past it.
       if (playerNeedsTrnStats(p.puuid) && realName && realTag && !realName.startsWith('Player ')) {
-        if (forceRefresh) {
+        if (forceRefresh && trnSpreadSpent < trnSpreadBudget(isDeathmatch)) {
+          trnSpreadSpent++;
           fetchTrnStatsNow(p.puuid, realName, realTag);
         } else {
           spreadCandidates.push({
@@ -2975,6 +3193,7 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
       const resolvedRecentLost = playerStats?.recentLost ?? prevPlayer?.recentLost;
       const resolvedStreak = playerStats?.streak ?? prevPlayer?.streak;
       const resolvedStreakIsWin = playerStats?.streakIsWin ?? prevPlayer?.streakIsWin;
+      const resolvedTrnPrivate = playerStats?.isTrnPrivate ?? prevPlayer?.isTrnPrivate ?? false;
 
       const playerObj: LiveMatchPlayer = {
         puuid: p.puuid,
@@ -3012,6 +3231,7 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
         streakIsWin: resolvedStreakIsWin,
         isIncognito: p.isIncognito ?? false,
         nameResolved,
+        isTrnPrivate: resolvedTrnPrivate,
         partyId: pPartyId,
         partyIndex: pPartyIndex,
       };
@@ -3023,10 +3243,21 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
       }
     });
 
-    // Paced TRN drain: one uncached player per ~6s while this lobby stays
-    // live. Also stamps the poll clock the spread's stale-stop reads.
+    // Concurrent TRN fill: all budgeted uncached players at once (200-400ms
+    // de-sync, NOT 6s) while this lobby stays live. Also stamps the poll
+    // clock the fill's stale-stop reads — plus the proxy pause hint, so
+    // pregame/agent-select never pauses and only true in-match fullscreen does.
+    setTrnMatchPhase(phase);
     trnSpreadLastPollAt = Date.now();
-    if (spreadCandidates.length > 0) enqueueTrnSpread(matchId, phase, spreadCandidates);
+    if (spreadCandidates.length > 0) void enqueueTrnSpread(matchId, phase, spreadCandidates, isDeathmatch);
+    else if (trnDrainGen !== 0 && matchId === trnDrainMatchId) {
+      // Quiesced: nobody left to fetch — settle this lobby's drain job so
+      // pause re-engages for anything new.
+      closeTrnDrainJob(trnDrainGen);
+      trnDrainGen = 0;
+      trnDrainMatchId = '';
+      if (import.meta.env.DEV) trnLog('job settled', 'quiesced');
+    }
 
     const startingSide = matchData.AllyTeam?.TeamID === 'Red'
       ? 'Attack'

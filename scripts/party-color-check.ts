@@ -22,6 +22,8 @@ const {
   partyColorIndex,
 } = await import('../src/utils/playerDisplay.ts');
 
+const { restoreLatchedParties } = await import('../src/utils/tracker.ts');
+
 // --- Core: same ID → same color, forever ---
 const id = 'riot:7f3a2b1c-9d4e-5f6a-8b7c-1d2e3f4a5b6c';
 const first = partyColorIndex(id);
@@ -77,6 +79,50 @@ check(
   [1, 2, 3, 4, 5, 6].every((i) => PARTY_STYLES[i]?.name === `Party ${i}`)
 );
 
+// --- Sticky outline: a missed poll must not dissolve a party ---
+// Poll 1 establishes {a,b} as riot:X (index 2); poll 2 misses b's presence
+// row so the fresh maps are empty — the outline must survive via the latch.
+{
+  const latchedClusters = new Map([['a', 'riot:X'], ['b', 'riot:X']]);
+  const latchedIndexes = new Map([['a', 2], ['b', 2]]);
+  const freshClusters = new Map<string, string>();
+  const freshIndexes = new Map<string, number>();
+  restoreLatchedParties(freshClusters, freshIndexes, latchedClusters, latchedIndexes, new Set(['a', 'b', 'c']));
+  check('missed poll restores both members', freshClusters.get('a') === 'riot:X' && freshClusters.get('b') === 'riot:X', {
+    got: [...freshClusters.entries()],
+  });
+  check('restored index keeps latched color (no re-hash)', freshIndexes.get('a') === 2 && freshIndexes.get('b') === 2);
+  check('restored index still renders an outline', getPartyStyle(freshIndexes.get('a')) !== null);
+  check('solo stranger stays solo', !freshClusters.has('c'));
+}
+{
+  // Fresh evidence wins: a re-formed cluster keeps its new id + index.
+  const latchedClusters = new Map([['a', 'riot:X']]);
+  const latchedIndexes = new Map([['a', 2]]);
+  const freshClusters = new Map([['a', 'riot:Y']]);
+  const freshIndexes = new Map([['a', 4]]);
+  restoreLatchedParties(freshClusters, freshIndexes, latchedClusters, latchedIndexes, new Set(['a']));
+  check('fresh cluster id wins over latch', freshClusters.get('a') === 'riot:Y');
+  check('fresh index wins over latch', freshIndexes.get('a') === 4);
+}
+{
+  // Leavers are never restored into the new lobby.
+  const latchedClusters = new Map([['gone', 'riot:X']]);
+  const latchedIndexes = new Map([['gone', 2]]);
+  const freshClusters = new Map<string, string>();
+  const freshIndexes = new Map<string, number>();
+  restoreLatchedParties(freshClusters, freshIndexes, latchedClusters, latchedIndexes, new Set(['a']));
+  check('leaver not restored', freshClusters.size === 0 && freshIndexes.size === 0);
+}
+{
+  // Latched entry without an index restores nothing (no phantom outline).
+  const latchedClusters = new Map([['a', 'riot:X']]);
+  const freshClusters = new Map<string, string>();
+  const freshIndexes = new Map<string, number>();
+  restoreLatchedParties(freshClusters, freshIndexes, latchedClusters, new Map(), new Set(['a']));
+  check('index-less latch restores nothing', freshClusters.size === 0);
+}
+
 // --- Sibling-cause regressions (source text) ---
 const tracker = await Bun.file('src/utils/tracker.ts').text();
 const live = await Bun.file('src/components/LiveMatchView.tsx').text();
@@ -90,6 +136,10 @@ check('solo partyId fallback removed', !tracker.includes('|| p.partyId || presen
 check('union shares the validity predicate', tracker.includes('validRiotPartyId(rp.partyId'));
 check('lobby rows keyed by puuid (live view)', live.includes('key={p.puuid}'));
 check('lobby rows keyed by puuid (overlay)', overlay.includes('key={p.puuid}'));
+check('sticky latch fills solo gaps', tracker.includes('restoreLatchedParties('));
+check('latch resets per match', tracker.includes('lastPartyClusterByPuuid.clear()'));
+check('latch stores fresh clusters', tracker.includes('lastPartyClusterByPuuid.set(puuid, cid)'));
+check('outline never gated on loading', !overlay.includes('party && !') && !live.includes('party && !'));
 
 if (failures > 0) {
   console.error(`${failures} failure(s)`);

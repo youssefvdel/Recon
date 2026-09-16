@@ -1,7 +1,7 @@
 use std::fs;
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
-use std::os::windows::process::CommandExt;
 use windows::Win32::Graphics::Gdi::{EnumDisplayDevicesW, DISPLAY_DEVICEW};
 use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_SET_VALUE};
 use winreg::RegKey;
@@ -9,18 +9,92 @@ use winreg::RegKey;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /* Windows display scaling is stored per display path as a DWORD at
-   HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Configuration\<monitor>\00\00
-   and is the only scaling value Windows itself honours. Documented values
-   (Intel's own guidance, corroborated by the CRU forum and StackOverflow —
-   see ROADMAP.md):
-       1 = maintain display scaling
-       2 = centre image
-       3 = scale full screen  (stretch — fills the panel)
-       4 = maintain aspect ratio (pillar/letterbox bars)
-   This module previously wrote 4 while labelling the row
-   "Full-Screen Hardware Scaling (0 Black Bars)", i.e. it requested the exact
-   opposite of what it claimed. Stretched must be 3. */
+HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Configuration\<monitor>\00\00
+and is the only scaling value Windows itself honours. Documented values
+(Intel's own guidance, corroborated by the CRU forum and StackOverflow —
+see ROADMAP.md):
+    1 = maintain display scaling
+    2 = centre image
+    3 = scale full screen  (stretch — fills the panel)
+    4 = maintain aspect ratio (pillar/letterbox bars)
+This module previously wrote 4 while labelling the row
+"Full-Screen Hardware Scaling (0 Black Bars)", i.e. it requested the exact
+opposite of what it claimed. Stretched must be 3. */
 const WDDM_SCALING_FULLSCREEN: u32 = 3;
+
+/* ------------------------------------------------------------------ *
+ * LEGACY VENDOR KEYS — NEVER WRITE THESE AGAIN.
+ *
+ * Older Recon builds wrote `Dal*` (AMD), `ScaleOption` (Intel) and
+ * `DxgkUsePhysicalMode` (WDDM) straight into the display adapter class key.
+ * Measured reality on user machines:
+ *   • No effect — the GPU scaling value Windows/Adrenalin actually honours
+ *     is the per-display-path WDDM `Scaling` DWORD, applied through
+ *     SetDisplayConfig (CCD). AMD Software drives its own settings through
+ *     the ADL runtime API, not by reading these keys; the driver caches
+ *     display state, so a key written behind its back changes nothing.
+ *   • Actively harmful on AMD — the persisted garbage is re-read on the
+ *     next driver start, which leaves scale/HDMI-audio endpoints in a bad
+ *     state (users reported the HDMI audio device and the Radeon driver
+ *     "disappearing" until the values were removed).
+ * Vendor scaling is NOT the app's to own. We apply the documented,
+ * verifiable path only: Win32 CCD + the WDDM `Scaling` value.
+ * ------------------------------------------------------------------ */
+const LEGACY_VENDOR_VALUES: &[&str] = &[
+    "DalGpuScaling",
+    "DalKeepAspectRatio",
+    "DalScaleRule",
+    "DalIntegerScaling",
+    "DalEnableModeBypass",
+    "ScaleOption",
+    "ReadEDIDFromRegistry",
+    "CustomModeAllowed",
+    "EnableCustomResolutions",
+    "MaintainAspectRatio",
+    "DisableLetterboxing",
+];
+
+/// Heal machines that ran an older Recon: delete the vendor/driver keys we
+/// used to write. Idempotent and cheap (registry-only, no reboot). Left in
+/// `DalNonStandardModesBCD` on purpose — it is inert on current drivers and
+/// the user may hold legitimate Adrenaline custom modes in it.
+pub fn purge_legacy_vendor_overrides() -> usize {
+    let mut removed = 0;
+    apply_to_all_gpu_adapters(|_desc, _prov, sub_key| {
+        for name in LEGACY_VENDOR_VALUES {
+            if sub_key.get_raw_value(name).is_ok() && sub_key.delete_value(name).is_ok() {
+                removed += 1;
+            }
+        }
+    });
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    if let Ok(gd) = hklm.open_subkey_with_flags(
+        r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers",
+        KEY_SET_VALUE,
+    ) {
+        if gd.delete_value("DxgkUsePhysicalMode").is_ok() {
+            removed += 1;
+        }
+    }
+    if removed > 0 {
+        log::info!(
+            "[gpu] purged {} legacy vendor override value(s) — scaling is CCD/WDDM-owned now",
+            removed
+        );
+    }
+    removed
+}
+
+/// WDDM `Scaling` value for the documented modes (see the table above).
+/// Stretched must be 3: writing 4 was the old "aspect ratio" value and is
+/// exactly why the toggle looked like it did nothing.
+pub fn wddm_scaling_value(stretched: bool) -> u32 {
+    if stretched {
+        WDDM_SCALING_FULLSCREEN
+    } else {
+        4 // maintain aspect ratio (pillar/letterbox)
+    }
+}
 
 /// Human label for a WDDM `Scaling` value.
 fn scaling_label(v: u32) -> &'static str {
@@ -183,7 +257,11 @@ pub fn detect_gpu() -> GpuInfo {
         while EnumDisplayDevicesW(None, idx, &mut dd, 0).as_bool() {
             let str_val = String::from_utf16_lossy(&dd.DeviceString);
             let cleaned = str_val.trim_matches(char::from(0)).trim().to_string();
-            if !cleaned.is_empty() && !cleaned.contains("Basic Display") && !cleaned.contains("Basic Render") && !names.contains(&cleaned) {
+            if !cleaned.is_empty()
+                && !cleaned.contains("Basic Display")
+                && !cleaned.contains("Basic Render")
+                && !names.contains(&cleaned)
+            {
                 names.push(cleaned);
             }
             idx += 1;
@@ -192,14 +270,19 @@ pub fn detect_gpu() -> GpuInfo {
 
     // Also inspect registry Class\{4d36e968-e325-11ce-bfc1-08002be10318} to ensure hybrid/all GPUs are found
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-    let class_path = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
+    let class_path =
+        r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
     if let Ok(class_key) = hklm.open_subkey_with_flags(class_path, KEY_READ) {
         for i in 0..16 {
             let sub_name = format!("{:04}", i);
             if let Ok(sub_key) = class_key.open_subkey_with_flags(&sub_name, KEY_READ) {
                 if let Ok(desc) = sub_key.get_value::<String, _>("DriverDesc") {
                     let cleaned = desc.trim().to_string();
-                    if !cleaned.is_empty() && !cleaned.contains("Basic Display") && !cleaned.contains("Basic Render") && !names.contains(&cleaned) {
+                    if !cleaned.is_empty()
+                        && !cleaned.contains("Basic Display")
+                        && !cleaned.contains("Basic Render")
+                        && !names.contains(&cleaned)
+                    {
                         names.push(cleaned);
                     }
                 }
@@ -209,11 +292,24 @@ pub fn detect_gpu() -> GpuInfo {
 
     let classify = |s: &str| -> GpuVendor {
         let lower = s.to_lowercase();
-        if lower.contains("nvidia") || lower.contains("geforce") || lower.contains("rtx") || lower.contains("gtx") || lower.contains("quadro") {
+        if lower.contains("nvidia")
+            || lower.contains("geforce")
+            || lower.contains("rtx")
+            || lower.contains("gtx")
+            || lower.contains("quadro")
+        {
             GpuVendor::Nvidia
-        } else if lower.contains("amd") || lower.contains("radeon") || lower.contains("advanced micro devices") || lower.contains("ati") {
+        } else if lower.contains("amd")
+            || lower.contains("radeon")
+            || lower.contains("advanced micro devices")
+            || lower.contains("ati")
+        {
             GpuVendor::Amd
-        } else if lower.contains("intel") || lower.contains("arc") || lower.contains("iris") || lower.contains("uhd") {
+        } else if lower.contains("intel")
+            || lower.contains("arc")
+            || lower.contains("iris")
+            || lower.contains("uhd")
+        {
             GpuVendor::Intel
         } else {
             GpuVendor::Unknown
@@ -221,16 +317,33 @@ pub fn detect_gpu() -> GpuInfo {
     };
 
     // Prioritize discrete GPUs (RTX/GTX/Radeon RX/Arc) over integrated GPUs for the main badge
-    let primary_idx = names.iter().position(|n| {
-        let l = n.to_lowercase();
-        (l.contains("geforce") || l.contains("rtx") || l.contains("gtx") || (l.contains("radeon") && (l.contains("rx") || l.contains("xt") || l.contains("pro")))) && !l.contains("graphics")
-    }).unwrap_or(0);
+    let primary_idx = names
+        .iter()
+        .position(|n| {
+            let l = n.to_lowercase();
+            (l.contains("geforce")
+                || l.contains("rtx")
+                || l.contains("gtx")
+                || (l.contains("radeon")
+                    && (l.contains("rx") || l.contains("xt") || l.contains("pro"))))
+                && !l.contains("graphics")
+        })
+        .unwrap_or(0);
 
-    let primary_name = if !names.is_empty() { names[primary_idx].clone() } else { "Generic Display Adapter".to_string() };
+    let primary_name = if !names.is_empty() {
+        names[primary_idx].clone()
+    } else {
+        "Generic Display Adapter".to_string()
+    };
     let vendor = classify(&primary_name);
 
     let display_name = if names.len() > 1 {
-        let others: Vec<_> = names.iter().enumerate().filter(|(i, _)| *i != primary_idx).map(|(_, n)| n.as_str()).collect();
+        let others: Vec<_> = names
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != primary_idx)
+            .map(|(_, n)| n.as_str())
+            .collect();
         format!("{} (+ {})", primary_name, others.join(", "))
     } else {
         primary_name
@@ -238,25 +351,18 @@ pub fn detect_gpu() -> GpuInfo {
 
     let mut instructions: Vec<String> = match vendor {
         GpuVendor::Nvidia => vec![
-            "Set Scaling mode to: 'Full-screen'.".into(),
-            "Set 'Perform scaling on:' to: 'GPU'.".into(),
-            "Check 'Override the scaling mode set by games and programs'.".into(),
-            "Bypass DWM desktop letterbox buffers.".into(),
-            "Enable DirectFlip ultra-low latency hardware scanout.".into(),
+            "Recon sets Windows full-screen (stretched) scaling via the display API.".into(),
+            "In NVIDIA Control Panel → Adjust desktop size and position: Scaling mode 'Full-screen', 'Perform scaling on: GPU'.".into(),
+            "DirectFlip low-latency scanout is applied by Recon.".into(),
         ],
         GpuVendor::Amd => vec![
-            "Set 'Scaling Mode' to: 'Full Panel'.".into(),
-            "Toggle 'GPU Scaling' to: ENABLED (DalGpuScaling).".into(),
-            "Override application-level aspect ratio constraints (DalEnableModeBypass).".into(),
-            "DalKeepAspectRatio set to 0 (Full Panel stretched).".into(),
-            "Automatic custom mode injection active via DalNonStandardModesBCD.".into(),
+            "Recon sets Windows full-screen (stretched) scaling via the display API.".into(),
+            "In AMD Software → Display: turn GPU Scaling on and pick 'Full panel'.".into(),
+            "AMD owns those driver settings — Recon deliberately does not write driver keys (they broke scaling and HDMI audio on AMD systems).".into(),
         ],
         GpuVendor::Intel => vec![
-            "Set Scale to: 'Scale Full Screen / Stretched' (ScaleOption=3).".into(),
-            "Route scaling through Intel Xe / Arc hardware engine.".into(),
-            "ReadEDIDFromRegistry enabled for custom resolution recognition.".into(),
-            "Bypass in-game resolution letterboxing (bShouldLetterbox=False).".into(),
-            "MaintainAspectRatio set to 0 (0 black bars).".into(),
+            "Recon sets Windows full-screen (stretched) scaling via the display API.".into(),
+            "In Intel Graphics Command Center → Display: set Scale to 'Stretch' if you need driver-level scaling.".into(),
         ],
         GpuVendor::Unknown => vec![
             "Enable GPU hardware scaling.".into(),
@@ -266,7 +372,10 @@ pub fn detect_gpu() -> GpuInfo {
     };
 
     if names.len() > 1 {
-        instructions.push("Multi-GPU system detected: Scaling and custom modes configured across all adapters.".into());
+        instructions.push(
+            "Multi-GPU system detected: Scaling and custom modes configured across all adapters."
+                .into(),
+        );
     }
 
     GpuInfo {
@@ -275,7 +384,6 @@ pub fn detect_gpu() -> GpuInfo {
         instructions,
     }
 }
-
 
 fn read_hklm_dword(path: &str, name: &str) -> Option<u32> {
     RegKey::predef(HKEY_LOCAL_MACHINE)
@@ -297,7 +405,8 @@ fn read_hkcu_dword(path: &str, name: &str) -> Option<u32> {
 /// Returns (value name, value) so the caller can name its own evidence.
 fn read_vendor_dword(candidates: &[&str]) -> Option<(String, u32)> {
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-    let class_path = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
+    let class_path =
+        r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
     let class_key = hklm.open_subkey_with_flags(class_path, KEY_READ).ok()?;
     for i in 0..16 {
         let sub_name = format!("{:04}", i);
@@ -341,7 +450,12 @@ fn eval_setting(
             Some((v, path)) => (
                 *v == WDDM_SCALING_FULLSCREEN,
                 true,
-                format!("Windows reports \"{}\" ({}) on {}", scaling_label(*v), v, short_path(path)),
+                format!(
+                    "Windows reports \"{}\" ({}) on {}",
+                    scaling_label(*v),
+                    v,
+                    short_path(path)
+                ),
             ),
             None => (
                 false,
@@ -363,37 +477,63 @@ fn eval_setting(
                     "NVIDIA manages scaling internally (nvlddmkm DisplayDatabase); not readable as a toggle".into(),
                 )
             } else {
-                (false, false, "No vendor GPU-scaling value present on this machine".into())
+                // No driver key (the normal state since we stopped writing
+                // them, and after the purge). Reflect what the user asked for
+                // so the toggle stays where they put it — the honest part is
+                // `verified: false`, plus a detail saying who owns the setting.
+                (
+                    saved.gpu_scaling_engine,
+                    false,
+                    "Driver-level GPU scaling is vendor-owned (AMD Software / NVIDIA Control Panel). Recon applies Windows full-screen scaling; it no longer writes driver keys.".into(),
+                )
             }
         }
         "override_game_scaling" => {
-            if let Some((name, v)) = read_vendor_dword(&["DalEnableModeBypass", "DisableLetterboxing"]) {
+            if let Some((name, v)) =
+                read_vendor_dword(&["DalEnableModeBypass", "DisableLetterboxing"])
+            {
                 (v != 0, false, format!("Driver key {}={}", name, v))
             } else {
                 (
                     saved.override_game_scaling,
                     false,
-                    "No vendor override key present — game config letterbox flags are set directly".into(),
+                    "No vendor override key present — game config letterbox flags are set directly"
+                        .into(),
                 )
             }
         }
         "low_latency_scanout" => {
             let v = read_hklm_dword(r"SOFTWARE\Microsoft\Windows\DWM", "DirectFlipEnabled")
-                .or_else(|| read_hkcu_dword(r"Software\Microsoft\Windows\DWM", "DirectFlipEnabled"));
+                .or_else(|| {
+                    read_hkcu_dword(r"Software\Microsoft\Windows\DWM", "DirectFlipEnabled")
+                });
             match v {
                 Some(v) => (v != 0, true, format!(r"DWM\DirectFlipEnabled={}", v)),
-                None => (false, true, "DirectFlipEnabled is not set (DWM default)".into()),
+                None => (
+                    false,
+                    true,
+                    "DirectFlipEnabled is not set (DWM default)".into(),
+                ),
             }
         }
         "integer_scaling_bypass" => {
-            if let Some((name, v)) = read_vendor_dword(&["DalIntegerScaling", "MaintainAspectRatio"]) {
+            if let Some((name, v)) =
+                read_vendor_dword(&["DalIntegerScaling", "MaintainAspectRatio"])
+            {
                 (
                     v == 0,
                     false,
-                    format!("Driver key {}={} (0 = integer scaling off / stretch allowed)", name, v),
+                    format!(
+                        "Driver key {}={} (0 = integer scaling off / stretch allowed)",
+                        name, v
+                    ),
                 )
             } else {
-                (false, false, "No vendor integer-scaling value present".into())
+                (
+                    saved.integer_scaling_bypass,
+                    false,
+                    "Integer scaling is vendor-owned; Recon removes the bars via Windows full-screen scaling instead".into(),
+                )
             }
         }
         _ => (false, false, "Unknown setting".into()),
@@ -430,7 +570,8 @@ pub fn get_gpu_settings_report() -> GpuSettingsReport {
         "low_latency_scanout",
         "integer_scaling_bypass",
     ];
-    let mut ev: std::collections::HashMap<&str, (bool, bool, String)> = std::collections::HashMap::new();
+    let mut ev: std::collections::HashMap<&str, (bool, bool, String)> =
+        std::collections::HashMap::new();
     for id in ids {
         ev.insert(id, eval_setting(id, &saved, &wddm));
     }
@@ -666,11 +807,14 @@ where
     F: FnMut(&str, &str, &RegKey),
 {
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-    let class_path = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
+    let class_path =
+        r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
     if let Ok(class_key) = hklm.open_subkey_with_flags(class_path, KEY_READ) {
         for i in 0..16 {
             let sub_name = format!("{:04}", i);
-            if let Ok(sub_key) = class_key.open_subkey_with_flags(&sub_name, KEY_READ | KEY_SET_VALUE) {
+            if let Ok(sub_key) =
+                class_key.open_subkey_with_flags(&sub_name, KEY_READ | KEY_SET_VALUE)
+            {
                 let desc: String = sub_key.get_value("DriverDesc").unwrap_or_default();
                 let prov: String = sub_key.get_value("ProviderName").unwrap_or_default();
                 f(&desc, &prov, &sub_key);
@@ -687,20 +831,14 @@ pub fn apply_single_gpu_setting(id: &str, value: bool) -> Result<GpuSettingsRepo
             saved.full_screen_scaling = value;
             let _ = crate::display::set_display_scaling_mode(value);
 
-            apply_to_all_gpu_adapters(|desc, prov, sub_key| {
-                let lower = format!("{} {}", prov, desc).to_lowercase();
-                if lower.contains("amd") || lower.contains("radeon") || lower.contains("advanced micro devices") || lower.contains("ati") {
-                    let _ = sub_key.set_value("DalKeepAspectRatio", &if value { 0u32 } else { 1u32 });
-                    let _ = sub_key.set_value("DalScaleRule", &0u32);
-                } else if lower.contains("intel") || lower.contains("arc") || lower.contains("iris") || lower.contains("uhd") {
-                    let _ = sub_key.set_value("ScaleOption", &if value { 3u32 } else { 2u32 });
-                }
-            });
-
-            // Set global WDDM scaling in GraphicsDrivers\Configuration
+            // Global WDDM scaling in GraphicsDrivers\Configuration — the value
+            // Windows itself honours. No vendor keys (see LEGACY_VENDOR_VALUES).
             let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(config_root) = hklm.open_subkey_with_flags(r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Configuration", KEY_READ | KEY_SET_VALUE) {
-                apply_scaling_recursive(&config_root, if value { WDDM_SCALING_FULLSCREEN } else { 2 });
+            if let Ok(config_root) = hklm.open_subkey_with_flags(
+                r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Configuration",
+                KEY_READ | KEY_SET_VALUE,
+            ) {
+                apply_scaling_recursive(&config_root, wddm_scaling_value(value));
             }
         }
         "gpu_scaling_engine" => {
@@ -708,56 +846,44 @@ pub fn apply_single_gpu_setting(id: &str, value: bool) -> Result<GpuSettingsRepo
             if value {
                 let _ = crate::display::apply_gpu_scaling_stretched();
             }
-
-            set_hklm_dword(r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers", "DxgkUsePhysicalMode", if value { 0 } else { 1 });
-
-            apply_to_all_gpu_adapters(|desc, prov, sub_key| {
-                let lower = format!("{} {}", prov, desc).to_lowercase();
-                if lower.contains("amd") || lower.contains("radeon") || lower.contains("advanced micro devices") || lower.contains("ati") {
-                    let _ = sub_key.set_value("DalGpuScaling", &if value { 1u32 } else { 0u32 });
-                    let _ = sub_key.set_value("DalScaleRule", &0u32);
-                } else if lower.contains("intel") || lower.contains("arc") || lower.contains("iris") || lower.contains("uhd") {
-                    let _ = sub_key.set_value("ScaleOption", &if value { 3u32 } else { 1u32 });
-                    let _ = sub_key.set_value("ReadEDIDFromRegistry", &1u32);
-                }
-            });
+            // "Perform scaling on: GPU" is a driver mode owned by the GPU
+            // vendor's own API (ADL / NVAPI / IGCL) — never a registry DWORD.
+            // The CCD stretched mode above is what we can actually apply.
         }
         "override_game_scaling" => {
             saved.override_game_scaling = value;
             let _ = crate::game_config::set_letterbox_all(!value);
-            set_hkcu_dword(r"Software\Microsoft\DirectX\UserGpuPreferences", "DisableDXGIWindowedStereo", if value { 1 } else { 0 });
-
-            apply_to_all_gpu_adapters(|desc, prov, sub_key| {
-                let lower = format!("{} {}", prov, desc).to_lowercase();
-                if lower.contains("amd") || lower.contains("radeon") || lower.contains("advanced micro devices") || lower.contains("ati") {
-                    let _ = sub_key.set_value("DalEnableModeBypass", &if value { 1u32 } else { 0u32 });
-                } else if lower.contains("intel") || lower.contains("arc") || lower.contains("iris") || lower.contains("uhd") {
-                    let _ = sub_key.set_value("DisableLetterboxing", &if value { 1u32 } else { 0u32 });
-                    let _ = sub_key.set_value("MaintainAspectRatio", &0u32);
-                }
-            });
+            set_hkcu_dword(
+                r"Software\Microsoft\DirectX\UserGpuPreferences",
+                "DisableDXGIWindowedStereo",
+                if value { 1 } else { 0 },
+            );
         }
         "low_latency_scanout" => {
             saved.low_latency_scanout = value;
             let reg_val = if value { 1 } else { 0 };
-            set_hkcu_dword(r"Software\Microsoft\Windows\DWM", "DirectFlipEnabled", reg_val);
-            set_hklm_dword(r"SOFTWARE\Microsoft\Windows\DWM", "DirectFlipEnabled", reg_val);
+            set_hkcu_dword(
+                r"Software\Microsoft\Windows\DWM",
+                "DirectFlipEnabled",
+                reg_val,
+            );
+            set_hklm_dword(
+                r"SOFTWARE\Microsoft\Windows\DWM",
+                "DirectFlipEnabled",
+                reg_val,
+            );
         }
         "integer_scaling_bypass" => {
             saved.integer_scaling_bypass = value;
             let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(config_root) = hklm.open_subkey_with_flags(r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Configuration", KEY_READ | KEY_SET_VALUE) {
+            if let Ok(config_root) = hklm.open_subkey_with_flags(
+                r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Configuration",
+                KEY_READ | KEY_SET_VALUE,
+            ) {
                 apply_scaling_recursive(&config_root, WDDM_SCALING_FULLSCREEN);
             }
-
-            apply_to_all_gpu_adapters(|desc, prov, sub_key| {
-                let lower = format!("{} {}", prov, desc).to_lowercase();
-                if lower.contains("amd") || lower.contains("radeon") || lower.contains("advanced micro devices") || lower.contains("ati") {
-                    let _ = sub_key.set_value("DalIntegerScaling", &if value { 0u32 } else { 1u32 });
-                } else if lower.contains("intel") || lower.contains("arc") || lower.contains("iris") || lower.contains("uhd") {
-                    let _ = sub_key.set_value("MaintainAspectRatio", &if value { 0u32 } else { 1u32 });
-                }
-            });
+            // Integer scaling is an Adrenalin / NVIDIA-CP feature; the WDDM
+            // stretch above is what removes the bars for us.
         }
         _ => return Err(format!("Unknown setting ID: {}", id)),
     }
@@ -766,64 +892,16 @@ pub fn apply_single_gpu_setting(id: &str, value: bool) -> Result<GpuSettingsRepo
     Ok(get_gpu_settings_report())
 }
 
-/// Applies vendor-tailored GPU scaling ONLY for the active GPU vendor:
-/// - NVIDIA: nvlddmkm DisplayDatabase ScalingConfig (Full-screen + GPU scaling)
-/// - AMD: DalKeepAspectRatio=0 (Full Panel), DalGpuScaling=1, DalScaleRule=0, DalIntegerScaling=0
-/// - Intel: ScaleOption=3 (Scale Full Screen), MaintainAspectRatio=0
-/// - Win32: SetDisplayConfig CCD stretched mode
+/// Applies GPU scaling through the documented, verifiable path only:
+/// Win32 CCD (`SetDisplayConfig`, `DISPLAYCONFIG_SCALING_STRETCHED`) plus the
+/// per-path WDDM `Scaling` value.
+///
+/// It deliberately does NOT touch vendor keys: the old NVIDIA DisplayDatabase
+/// binary patch and AMD `Dal*` writes had no effect on current drivers and
+/// left AMD machines with a broken scale/audio state (see LEGACY_VENDOR_VALUES).
 pub fn apply_gpu_scaling_for_active_vendor(stretched: bool) {
-    let gpu_info = detect_gpu();
-
-    // 1. Win32 CCD (Universal OS display scaling)
     let _ = crate::display::set_display_scaling_mode(stretched);
-
-    // 2. Vendor-specific driver adjustment ONLY for the detected active vendor
-    match gpu_info.vendor {
-        GpuVendor::Nvidia => {
-            let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-            let nv_base = r"SYSTEM\CurrentControlSet\Services\nvlddmkm\State\DisplayDatabase";
-            if let Ok(nv_key) = hklm.open_subkey_with_flags(nv_base, KEY_READ | KEY_SET_VALUE) {
-                for sub in nv_key.enum_keys().filter_map(|k| k.ok()) {
-                    if let Ok(sub_key) = nv_key.open_subkey_with_flags(&sub, KEY_READ | KEY_SET_VALUE) {
-                        if let Ok(mut val) = sub_key.get_raw_value("ScalingConfig") {
-                            if val.bytes.len() >= 16 {
-                                val.bytes[8] = if stretched { 0x02 } else { 0x01 };
-                                val.bytes[9] = 0x01;
-                                val.bytes[10] = 0x01;
-                                val.bytes[12] = 0xf1;
-                                let _ = sub_key.set_raw_value("ScalingConfig", &val);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        GpuVendor::Amd => {
-            apply_to_all_gpu_adapters(|desc, prov, sub_key| {
-                let lower = format!("{} {}", prov, desc).to_lowercase();
-                if lower.contains("amd") || lower.contains("radeon") || lower.contains("advanced micro devices") || lower.contains("ati") {
-                    let _ = sub_key.set_value("DalKeepAspectRatio", &if stretched { 0u32 } else { 1u32 });
-                    let _ = sub_key.set_value("DalGpuScaling", &1u32);
-                    let _ = sub_key.set_value("DalScaleRule", &0u32);
-                    let _ = sub_key.set_value("DalIntegerScaling", &0u32);
-                    let _ = sub_key.set_value("DalEnableModeBypass", &1u32);
-                }
-            });
-        }
-        GpuVendor::Intel => {
-            apply_to_all_gpu_adapters(|desc, prov, sub_key| {
-                let lower = format!("{} {}", prov, desc).to_lowercase();
-                if lower.contains("intel") || lower.contains("arc") || lower.contains("iris") || lower.contains("uhd") {
-                    let _ = sub_key.set_value("ScaleOption", &if stretched { 3u32 } else { 2u32 });
-                    let _ = sub_key.set_value("MaintainAspectRatio", &if stretched { 0u32 } else { 1u32 });
-                }
-            });
-        }
-        GpuVendor::Unknown => {}
-    }
 }
-
-/// Enforces Full-Screen Stretched scaling across Win32 CCD, WDDM, NVIDIA driver database, and AMD/Intel keys.
 pub fn enforce_all_gpu_scaling() {
     apply_gpu_scaling_for_active_vendor(true);
 }
@@ -839,47 +917,45 @@ pub fn auto_configure_all_gpu_settings() -> Result<(String, GpuSettingsReport), 
     save_gpu_settings(&saved);
 
     // 1. Win32 CCD Stretched
-    let ccd_res = crate::display::apply_gpu_scaling_stretched().unwrap_or_else(|_| "Full-Screen scaling applied".into());
+    let ccd_res = crate::display::apply_gpu_scaling_stretched()
+        .unwrap_or_else(|_| "Full-Screen scaling applied".into());
 
     // 2. Disable letterboxing across all configs
     let config_count = crate::game_config::set_letterbox_all(false).unwrap_or(0);
 
-    // 3. Set DirectFlip + DXGI stereo disable via pure native winreg
+    // 3. DWM DirectFlip + revocable per-user D3D preference
     set_hkcu_dword(r"Software\Microsoft\Windows\DWM", "DirectFlipEnabled", 1);
     set_hklm_dword(r"SOFTWARE\Microsoft\Windows\DWM", "DirectFlipEnabled", 1);
-    set_hkcu_dword(r"Software\Microsoft\DirectX\UserGpuPreferences", "DisableDXGIWindowedStereo", 1);
-    set_hklm_dword(r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers", "DxgkUsePhysicalMode", 0);
+    set_hkcu_dword(
+        r"Software\Microsoft\DirectX\UserGpuPreferences",
+        "DisableDXGIWindowedStereo",
+        1,
+    );
 
     // 4. Set global WDDM scaling in GraphicsDrivers\Configuration
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-    if let Ok(config_root) = hklm.open_subkey_with_flags(r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Configuration", KEY_READ | KEY_SET_VALUE) {
+    if let Ok(config_root) = hklm.open_subkey_with_flags(
+        r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Configuration",
+        KEY_READ | KEY_SET_VALUE,
+    ) {
         apply_scaling_recursive(&config_root, WDDM_SCALING_FULLSCREEN);
     }
 
-    // 5. Configure all GPU adapter keys (NVIDIA, AMD, Intel)
-    apply_to_all_gpu_adapters(|desc, prov, sub_key| {
-        let lower = format!("{} {}", prov, desc).to_lowercase();
-        if lower.contains("amd") || lower.contains("radeon") || lower.contains("advanced micro devices") || lower.contains("ati") {
-            let _ = sub_key.set_value("DalKeepAspectRatio", &0u32);
-            let _ = sub_key.set_value("DalGpuScaling", &1u32);
-            let _ = sub_key.set_value("DalEnableModeBypass", &1u32);
-            let _ = sub_key.set_value("DalScaleRule", &0u32);
-            let _ = sub_key.set_value("DalIntegerScaling", &0u32);
-        } else if lower.contains("intel") || lower.contains("arc") || lower.contains("iris") || lower.contains("uhd") {
-            let _ = sub_key.set_value("ScaleOption", &3u32);
-            let _ = sub_key.set_value("ReadEDIDFromRegistry", &1u32);
-            let _ = sub_key.set_value("CustomModeAllowed", &1u32);
-            let _ = sub_key.set_value("EnableCustomResolutions", &1u32);
-            let _ = sub_key.set_value("MaintainAspectRatio", &0u32);
-            let _ = sub_key.set_value("DisableLetterboxing", &1u32);
-        }
-    });
+    // 5. Heal any vendor garbage an older build left behind.
+    let purged = purge_legacy_vendor_overrides();
 
     let report = get_gpu_settings_report();
 
     let msg = format!(
-        "Auto-applied recommended GPU settings: {} active display paths set to Full-Screen Stretched across all GPU adapters (NVIDIA/AMD/Intel), letterboxing bypassed in {} game config(s), and DirectFlip low-latency scanout activated.",
-        ccd_res, config_count
+        "Auto-applied GPU settings: {} active display path(s) set to Full-Screen Stretched (Windows CCD + WDDM scaling), letterboxing bypassed in {} game config(s), DirectFlip low-latency scanout on{}. Vendor driver keys are left to the GPU vendor — Recon no longer writes them{}.",
+        ccd_res,
+        config_count,
+        if purged > 0 {
+            format!(" ({} legacy value(s) cleaned up)", purged)
+        } else {
+            String::new()
+        },
+        if purged > 0 { "" } else { "" }
     );
 
     Ok((msg, report))
@@ -894,9 +970,7 @@ pub fn launch_control_panel(vendor: &GpuVendor) -> Result<(), String> {
             ];
             for path in &paths {
                 if std::path::Path::new(path).exists() {
-                    let _ = Command::new(path)
-                        .creation_flags(CREATE_NO_WINDOW)
-                        .spawn();
+                    let _ = Command::new(path).creation_flags(CREATE_NO_WINDOW).spawn();
                     return Ok(());
                 }
             }
@@ -915,9 +989,7 @@ pub fn launch_control_panel(vendor: &GpuVendor) -> Result<(), String> {
             ];
             for path in &paths {
                 if std::path::Path::new(path).exists() {
-                    let _ = Command::new(path)
-                        .creation_flags(CREATE_NO_WINDOW)
-                        .spawn();
+                    let _ = Command::new(path).creation_flags(CREATE_NO_WINDOW).spawn();
                     return Ok(());
                 }
             }
@@ -929,14 +1001,10 @@ pub fn launch_control_panel(vendor: &GpuVendor) -> Result<(), String> {
             Ok(())
         }
         GpuVendor::Intel => {
-            let paths = [
-                r"C:\Program Files\Intel\Intel Graphics Command Center\IGCC.exe",
-            ];
+            let paths = [r"C:\Program Files\Intel\Intel Graphics Command Center\IGCC.exe"];
             for path in &paths {
                 if std::path::Path::new(path).exists() {
-                    let _ = Command::new(path)
-                        .creation_flags(CREATE_NO_WINDOW)
-                        .spawn();
+                    let _ = Command::new(path).creation_flags(CREATE_NO_WINDOW).spawn();
                     return Ok(());
                 }
             }
@@ -958,3 +1026,50 @@ pub fn launch_control_panel(vendor: &GpuVendor) -> Result<(), String> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The bug that made the GPU scaling tab look dead: "stretched" was written
+    /// as 4 (maintain aspect = bars) instead of 3 (scale full screen).
+    #[test]
+    fn stretch_is_wddm_3_and_aspect_is_4() {
+        assert_eq!(wddm_scaling_value(true), 3);
+        assert_eq!(wddm_scaling_value(true), WDDM_SCALING_FULLSCREEN);
+        assert_eq!(wddm_scaling_value(false), 4);
+        assert_eq!(scaling_label(wddm_scaling_value(true)), "scale full screen");
+        assert_eq!(
+            scaling_label(wddm_scaling_value(false)),
+            "maintain aspect ratio"
+        );
+    }
+
+    /// The purge list is the guard rail: no vendor key may be written back.
+    /// If someone reintroduces `Dal*`/`ScaleOption`/`DxgkUsePhysicalMode`
+    /// writes, this fails and points at the reason.
+    #[test]
+    fn purge_list_covers_every_legacy_vendor_key() {
+        for key in [
+            "DalGpuScaling",
+            "DalKeepAspectRatio",
+            "DalScaleRule",
+            "DalIntegerScaling",
+            "DalEnableModeBypass",
+            "ScaleOption",
+            "ReadEDIDFromRegistry",
+            "CustomModeAllowed",
+            "EnableCustomResolutions",
+            "MaintainAspectRatio",
+            "DisableLetterboxing",
+        ] {
+            assert!(
+                LEGACY_VENDOR_VALUES.contains(&key),
+                "purge list is missing {}",
+                key
+            );
+        }
+        // Inert on current drivers + may hold legitimate Adrenaline modes:
+        // heal must NOT delete it.
+        assert!(!LEGACY_VENDOR_VALUES.contains(&"DalNonStandardModesBCD"));
+    }
+}

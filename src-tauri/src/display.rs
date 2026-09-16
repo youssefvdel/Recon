@@ -8,13 +8,14 @@ use std::thread;
 use std::time::Duration;
 
 use windows::core::PCWSTR;
-use windows::Win32::Graphics::Gdi::{
-    ChangeDisplaySettingsExW, ChangeDisplaySettingsW, EnumDisplayDevicesW, EnumDisplaySettingsW,
-    CDS_NORESET, CDS_SET_PRIMARY, CDS_TEST, CDS_TYPE, CDS_UPDATEREGISTRY, DEVMODEW, DISPLAY_DEVICEW,
-    DISPLAY_DEVICE_PRIMARY_DEVICE,
-    DM_BITSPERPEL, DM_DISPLAYFLAGS, DM_DISPLAYFREQUENCY, DM_DISPLAYORIENTATION,
-    DM_PELSHEIGHT, DM_PELSWIDTH, DM_POSITION, ENUM_CURRENT_SETTINGS,
-    ENUM_DISPLAY_SETTINGS_MODE,
+use windows::Win32::Devices::DeviceAndDriverInstallation::{
+    SetupDiCallClassInstaller, SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInfo,
+    SetupDiGetClassDevsW, SetupDiGetDeviceInstallParamsW, SetupDiGetDeviceInstanceIdW,
+    SetupDiGetDeviceRegistryPropertyW, SetupDiSetClassInstallParamsW, CONFIGFLAG_DISABLED,
+    DICS_DISABLE, DICS_ENABLE, DICS_FLAG_CONFIGSPECIFIC, DIF_PROPERTYCHANGE, DIGCF_ALLCLASSES,
+    DIGCF_PRESENT, DI_NEEDREBOOT, GUID_DEVCLASS_MONITOR, SETUP_DI_GET_CLASS_DEVS_FLAGS,
+    SPDRP_CONFIGFLAGS, SPDRP_DEVICEDESC, SPDRP_FRIENDLYNAME, SPDRP_HARDWAREID,
+    SP_CLASSINSTALL_HEADER, SP_DEVINFO_DATA, SP_DEVINSTALL_PARAMS_W, SP_PROPCHANGE_PARAMS,
 };
 use windows::Win32::Devices::Display::{
     DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QueryDisplayConfig, SetDisplayConfig,
@@ -25,14 +26,12 @@ use windows::Win32::Devices::Display::{
     QDC_DATABASE_CURRENT, QDC_ONLY_ACTIVE_PATHS, SDC_ALLOW_CHANGES, SDC_APPLY,
     SDC_SAVE_TO_DATABASE, SDC_USE_SUPPLIED_DISPLAY_CONFIG,
 };
-use windows::Win32::Devices::DeviceAndDriverInstallation::{
-    SetupDiCallClassInstaller, SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInfo,
-    SetupDiGetClassDevsW, SetupDiGetDeviceInstallParamsW, SetupDiGetDeviceInstanceIdW,
-    SetupDiGetDeviceRegistryPropertyW, SetupDiSetClassInstallParamsW, CONFIGFLAG_DISABLED,
-    DICS_DISABLE, DICS_ENABLE, DICS_FLAG_CONFIGSPECIFIC, DI_NEEDREBOOT, DIF_PROPERTYCHANGE,
-    DIGCF_ALLCLASSES, DIGCF_PRESENT, GUID_DEVCLASS_MONITOR, SETUP_DI_GET_CLASS_DEVS_FLAGS,
-    SP_CLASSINSTALL_HEADER, SP_DEVINFO_DATA, SP_DEVINSTALL_PARAMS_W, SP_PROPCHANGE_PARAMS,
-    SPDRP_CONFIGFLAGS, SPDRP_DEVICEDESC, SPDRP_FRIENDLYNAME, SPDRP_HARDWAREID,
+use windows::Win32::Graphics::Gdi::{
+    ChangeDisplaySettingsExW, ChangeDisplaySettingsW, EnumDisplayDevicesW, EnumDisplaySettingsW,
+    CDS_NORESET, CDS_SET_PRIMARY, CDS_TEST, CDS_TYPE, CDS_UPDATEREGISTRY, DEVMODEW,
+    DISPLAY_DEVICEW, DISPLAY_DEVICE_PRIMARY_DEVICE, DM_BITSPERPEL, DM_DISPLAYFLAGS,
+    DM_DISPLAYFREQUENCY, DM_DISPLAYORIENTATION, DM_PELSHEIGHT, DM_PELSWIDTH, DM_POSITION,
+    ENUM_CURRENT_SETTINGS, ENUM_DISPLAY_SETTINGS_MODE,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 use windows::Win32::UI::Shell::IsUserAnAdmin;
@@ -48,16 +47,34 @@ pub struct ShortcutBinding {
 
 impl ShortcutBinding {
     pub const fn new(ctrl: bool, shift: bool, alt: bool, win: bool, vk: u16) -> Self {
-        Self { ctrl, shift, alt, win, vk }
+        Self {
+            ctrl,
+            shift,
+            alt,
+            win,
+            vk,
+        }
     }
 
     pub const fn f4() -> Self {
-        Self { ctrl: true, shift: false, alt: false, win: false, vk: 0x73 }
+        Self {
+            ctrl: true,
+            shift: false,
+            alt: false,
+            win: false,
+            vk: 0x73,
+        }
     }
 
     #[allow(dead_code)]
     pub const fn f11() -> Self {
-        Self { ctrl: false, shift: false, alt: false, win: false, vk: 0x7A }
+        Self {
+            ctrl: false,
+            shift: false,
+            alt: false,
+            win: false,
+            vk: 0x7A,
+        }
     }
 
     #[allow(dead_code)]
@@ -105,7 +122,10 @@ impl ShortcutBinding {
     }
 
     pub fn serialize(&self) -> String {
-        format!("{}:{}:{}:{}:{}", self.ctrl, self.shift, self.alt, self.win, self.vk)
+        format!(
+            "{}:{}:{}:{}:{}",
+            self.ctrl, self.shift, self.alt, self.win, self.vk
+        )
     }
 
     pub fn deserialize(s: &str) -> Option<Self> {
@@ -116,7 +136,13 @@ impl ShortcutBinding {
             let alt = parts[2].parse().ok()?;
             let win = parts[3].parse().ok()?;
             let vk = parts[4].parse().ok()?;
-            Some(Self { ctrl, shift, alt, win, vk })
+            Some(Self {
+                ctrl,
+                shift,
+                alt,
+                win,
+                vk,
+            })
         } else {
             None
         }
@@ -586,7 +612,12 @@ pub fn disp_code_to_str(code: i32) -> &'static str {
 /// No desktop change. Returns `(exists, raw_code)`; `exists` is true for
 /// `SUCCESSFUL` (0) only, `RESTART_REQUIRED` (1) is treated as "proceed and
 /// try for real" by the caller.
-fn cds_test_preflight(dev_name_u16: &[u16], width: u32, height: u32, refresh_rate: u32) -> (bool, i32) {
+fn cds_test_preflight(
+    dev_name_u16: &[u16],
+    width: u32,
+    height: u32,
+    refresh_rate: u32,
+) -> (bool, i32) {
     unsafe {
         let mut dm = DEVMODEW {
             dmSize: std::mem::size_of::<DEVMODEW>() as u16,
@@ -628,13 +659,19 @@ fn badmode_friendly_message(width: u32, height: u32, refresh_rate: u32, test_cod
     unique_rates.dedup();
 
     let hint = if unique_rates.is_empty() {
-        format!(
-            " No {}x{} mode at any refresh rate yet.",
-            width, height
-        )
+        format!(" No {}x{} mode at any refresh rate yet.", width, height)
     } else if unique_rates.contains(&refresh_rate) {
         // Should not happen when preflight just failed, but keep it sane.
-        format!(" Driver lists {}x{} at: {}Hz.", width, height, unique_rates.iter().map(|r| r.to_string()).collect::<Vec<_>>().join(", "))
+        format!(
+            " Driver lists {}x{} at: {}Hz.",
+            width,
+            height,
+            unique_rates
+                .iter()
+                .map(|r| r.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     } else {
         let nearest = unique_rates
             .iter()
@@ -685,7 +722,12 @@ pub fn apply_display_mode(width: u32, height: u32, refresh_rate: u32) -> Result<
                 "[display] preflight BADMODE -2 for {}x{}@{}Hz — mode missing, guiding to Custom Res Add",
                 width, height, refresh_rate
             );
-            return Err(badmode_friendly_message(width, height, refresh_rate, test_code));
+            return Err(badmode_friendly_message(
+                width,
+                height,
+                refresh_rate,
+                test_code,
+            ));
         }
         // Any other CDS_TEST rejection: still fail fast with symbolic text
         // rather than attempting 3 mutating methods that will all fail.
@@ -794,7 +836,8 @@ pub fn is_scaling_stretched() -> Option<bool> {
     unsafe {
         let mut path_count = 0u32;
         let mut mode_count = 0u32;
-        let buf_err = GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut path_count, &mut mode_count);
+        let buf_err =
+            GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut path_count, &mut mode_count);
         if buf_err.0 == 0 && path_count > 0 {
             let mut paths = vec![DISPLAYCONFIG_PATH_INFO::default(); path_count as usize];
             let mut modes = vec![DISPLAYCONFIG_MODE_INFO::default(); mode_count as usize];
@@ -821,7 +864,8 @@ pub fn set_display_scaling_mode(stretched: bool) -> Result<String, String> {
     unsafe {
         let mut path_count = 0u32;
         let mut mode_count = 0u32;
-        let buf_err = GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut path_count, &mut mode_count);
+        let buf_err =
+            GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut path_count, &mut mode_count);
         if buf_err.0 == 0 && path_count > 0 {
             let mut paths = vec![DISPLAYCONFIG_PATH_INFO::default(); path_count as usize];
             let mut modes = vec![DISPLAYCONFIG_MODE_INFO::default(); mode_count as usize];
@@ -851,14 +895,18 @@ pub fn set_display_scaling_mode(stretched: bool) -> Result<String, String> {
                     updated += 1;
                 }
 
-                let flags = SDC_APPLY | SDC_SAVE_TO_DATABASE | SDC_ALLOW_CHANGES | SDC_USE_SUPPLIED_DISPLAY_CONFIG;
-                let set_err = SetDisplayConfig(
-                    Some(&paths),
-                    Some(&modes),
-                    flags,
-                );
+                let flags = SDC_APPLY
+                    | SDC_SAVE_TO_DATABASE
+                    | SDC_ALLOW_CHANGES
+                    | SDC_USE_SUPPLIED_DISPLAY_CONFIG;
+                let set_err = SetDisplayConfig(Some(&paths), Some(&modes), flags);
 
-                let reg_val = if stretched { 4 } else { 2 };
+                // WDDM `Scaling` values (Microsoft/Intel doc, CRU forum):
+                //   2 = centre image, 3 = scale full screen, 4 = maintain aspect.
+                // Stretched MUST be 3 — this used to write 4, i.e. it asked for
+                // pillar/letterbox bars while labelling itself "0 Black Bars",
+                // which is why the toggle looked like it did nothing.
+                let reg_val = crate::gpu::wddm_scaling_value(stretched);
                 // Pure in-process native winreg update (zero powershell / console flash, instant < 1ms)
                 let hklm = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE);
                 if let Ok(config_root) = hklm.open_subkey_with_flags(
@@ -868,7 +916,10 @@ pub fn set_display_scaling_mode(stretched: bool) -> Result<String, String> {
                     fn set_scaling_subkeys(key: &winreg::RegKey, val: u32) {
                         let _ = key.set_value("Scaling", &val);
                         for sub in key.enum_keys().filter_map(|k| k.ok()) {
-                            if let Ok(sub_key) = key.open_subkey_with_flags(&sub, winreg::enums::KEY_READ | winreg::enums::KEY_SET_VALUE) {
+                            if let Ok(sub_key) = key.open_subkey_with_flags(
+                                &sub,
+                                winreg::enums::KEY_READ | winreg::enums::KEY_SET_VALUE,
+                            ) {
                                 set_scaling_subkeys(&sub_key, val);
                             }
                         }
@@ -879,7 +930,11 @@ pub fn set_display_scaling_mode(stretched: bool) -> Result<String, String> {
                 if set_err == 0 {
                     return Ok(format!(
                         "{} applied to {} display path(s)",
-                        if stretched { "Full-Screen Stretched (0 Black Bars)" } else { "Aspect Ratio (Pillarboxes)" },
+                        if stretched {
+                            "Full-Screen Stretched (0 Black Bars)"
+                        } else {
+                            "Aspect Ratio (Pillarboxes)"
+                        },
                         updated
                     ));
                 }
@@ -907,7 +962,9 @@ impl HotkeyController {
     }
 }
 
-pub fn start_hotkey_listener(initial_shortcut: ShortcutBinding) -> (HotkeyController, Receiver<()>) {
+pub fn start_hotkey_listener(
+    initial_shortcut: ShortcutBinding,
+) -> (HotkeyController, Receiver<()>) {
     let (tx, rx) = channel();
     let hotkey_code = Arc::new(AtomicU32::new(initial_shortcut.to_code()));
     let running = Arc::new(AtomicBool::new(true));
@@ -924,7 +981,8 @@ pub fn start_hotkey_listener(initial_shortcut: ShortcutBinding) -> (HotkeyContro
             let is_down = if binding.vk == 0 {
                 false
             } else {
-                let key_down = unsafe { (GetAsyncKeyState(binding.vk as i32) as u16 & 0x8000) != 0 };
+                let key_down =
+                    unsafe { (GetAsyncKeyState(binding.vk as i32) as u16 & 0x8000) != 0 };
                 if !key_down {
                     false
                 } else {
@@ -1002,7 +1060,10 @@ pub fn get_tool_path(name: &str) -> PathBuf {
         }
     }
     if let Ok(app_data) = std::env::var("LOCALAPPDATA") {
-        let p = PathBuf::from(app_data).join("TrueStretchStudio").join("tools").join(name);
+        let p = PathBuf::from(app_data)
+            .join("TrueStretchStudio")
+            .join("tools")
+            .join(name);
         if p.exists() {
             return p;
         }
@@ -1011,7 +1072,10 @@ pub fn get_tool_path(name: &str) -> PathBuf {
     if p_desk.exists() {
         return p_desk;
     }
-    let p_proj = PathBuf::from(r"C:\Users\Administrator\.gemini\antigravity\scratch\truestretch_tauri\tools").join(name);
+    let p_proj = PathBuf::from(
+        r"C:\Users\Administrator\.gemini\antigravity\scratch\truestretch_tauri\tools",
+    )
+    .join(name);
     if p_proj.exists() {
         return p_proj;
     }
@@ -1221,7 +1285,10 @@ fn pnp_instance_from_monitor_device_path(device_path: &str) -> String {
     if s.starts_with(r"\\?\") {
         s = s[4..].to_string();
     } else if s.starts_with(r"\\?") {
-        s = s.trim_start_matches(r"\\?").trim_start_matches('\\').to_string();
+        s = s
+            .trim_start_matches(r"\\?")
+            .trim_start_matches('\\')
+            .to_string();
     }
     if let Some(idx) = s.find("#{") {
         s.truncate(idx);
@@ -1266,8 +1333,7 @@ fn resolve_display_gdi_to_pnp(display_name: &str) -> Option<String> {
                 modes.as_mut_ptr(),
                 None,
             )
-            .0
-                != 0
+            .0 != 0
             {
                 continue;
             }
@@ -1387,13 +1453,9 @@ struct MonitorCandidate {
 fn collect_monitor_candidates() -> Vec<MonitorCandidate> {
     let mut map: std::collections::HashMap<String, MonitorCandidate> =
         std::collections::HashMap::new();
-    for flags in [
-        DIGCF_PRESENT,
-        SETUP_DI_GET_CLASS_DEVS_FLAGS(0),
-    ] {
+    for flags in [DIGCF_PRESENT, SETUP_DI_GET_CLASS_DEVS_FLAGS(0)] {
         unsafe {
-            let hdev = match SetupDiGetClassDevsW(Some(&GUID_DEVCLASS_MONITOR), None, None, flags)
-            {
+            let hdev = match SetupDiGetClassDevsW(Some(&GUID_DEVCLASS_MONITOR), None, None, flags) {
                 Ok(h) => h,
                 Err(e) => {
                     log::warn!(
@@ -1539,8 +1601,7 @@ fn candidates_matching_model<'a>(
                 if let Some(m) = model_from_instance_path(h) {
                     m == model_upper
                 } else {
-                    h.eq_ignore_ascii_case(model_upper)
-                        || h.to_uppercase().contains(model_upper)
+                    h.eq_ignore_ascii_case(model_upper) || h.to_uppercase().contains(model_upper)
                 }
             })
         })
@@ -1836,10 +1897,7 @@ fn save_monitor_res_cache(cache: &std::collections::HashMap<String, (u32, u32, u
     };
     let mut obj = serde_json::Map::new();
     for (k, (w, h, r)) in cache {
-        obj.insert(
-            k.clone(),
-            serde_json::json!({ "w": w, "h": h, "r": r }),
-        );
+        obj.insert(k.clone(), serde_json::json!({ "w": w, "h": h, "r": r }));
     }
     let _ = fs::write(&path, serde_json::Value::Object(obj).to_string());
 }
@@ -1855,8 +1913,12 @@ where
             cbSize: std::mem::size_of::<SP_DEVINSTALL_PARAMS_W>() as u32,
             ..Default::default()
         };
-        if SetupDiGetDeviceInstallParamsW(hdev, Some(devinfo as *const SP_DEVINFO_DATA), &mut params)
-            .is_ok()
+        if SetupDiGetDeviceInstallParamsW(
+            hdev,
+            Some(devinfo as *const SP_DEVINFO_DATA),
+            &mut params,
+        )
+        .is_ok()
         {
             return (params.Flags.0 & DI_NEEDREBOOT.0) != 0;
         }
@@ -1918,10 +1980,8 @@ pub fn get_all_monitors() -> Vec<MonitorDevice> {
     // re-enumerate SetupDi.
     let candidates = collect_monitor_candidates();
     // Lowercase PnP -> candidate index for O(1) bridge lookups.
-    let candidate_by_lower: std::collections::HashMap<&str, &MonitorCandidate> = candidates
-        .iter()
-        .map(|c| (c.lower.as_str(), c))
-        .collect();
+    let candidate_by_lower: std::collections::HashMap<&str, &MonitorCandidate> =
+        candidates.iter().map(|c| (c.lower.as_str(), c)).collect();
     let mut seen_instance_ids = std::collections::HashSet::new();
     // Last-known resolutions so disabled monitors keep real w/h for aspect ratio.
     let mut res_cache = load_monitor_res_cache();
@@ -1985,8 +2045,7 @@ pub fn get_all_monitors() -> Vec<MonitorDevice> {
         // on the raw GDI id (never guess the wrong duplicate panel).
         let (device_id, is_device_disabled) = if raw_device_id.is_empty() {
             (String::new(), false)
-        } else if let Some((canonical, disabled)) =
-            disabled_map.get(&raw_device_id.to_lowercase())
+        } else if let Some((canonical, disabled)) = disabled_map.get(&raw_device_id.to_lowercase())
         {
             seen_instance_ids.insert(canonical.to_lowercase());
             monitor_name = friendly_name_from_instance_id(canonical, &monitor_name);
@@ -2003,8 +2062,7 @@ pub fn get_all_monitors() -> Vec<MonitorDevice> {
                     {
                         monitor_name = cand.friendly.clone();
                     } else {
-                        monitor_name =
-                            friendly_name_from_instance_id(canonical, &monitor_name);
+                        monitor_name = friendly_name_from_instance_id(canonical, &monitor_name);
                     }
                 } else {
                     monitor_name = friendly_name_from_instance_id(canonical, &monitor_name);
@@ -2045,8 +2103,7 @@ pub fn get_all_monitors() -> Vec<MonitorDevice> {
                 if monitor_name.starts_with("Monitor (") && !cand.friendly.is_empty() {
                     monitor_name = cand.friendly.clone();
                 } else {
-                    monitor_name =
-                        friendly_name_from_instance_id(&cand.instance_id, &monitor_name);
+                    monitor_name = friendly_name_from_instance_id(&cand.instance_id, &monitor_name);
                 }
                 log::info!(
                     "[display] GDI '{}' ({}) model-matched singleton PnP '{}'",
@@ -2087,9 +2144,17 @@ pub fn get_all_monitors() -> Vec<MonitorDevice> {
 
         unsafe {
             let ok_mode = if is_attached {
-                EnumDisplaySettingsW(PCWSTR(dev_name_u16.as_ptr()), ENUM_CURRENT_SETTINGS, &mut dm)
+                EnumDisplaySettingsW(
+                    PCWSTR(dev_name_u16.as_ptr()),
+                    ENUM_CURRENT_SETTINGS,
+                    &mut dm,
+                )
             } else {
-                EnumDisplaySettingsW(PCWSTR(dev_name_u16.as_ptr()), ENUM_REGISTRY_SETTINGS, &mut dm)
+                EnumDisplaySettingsW(
+                    PCWSTR(dev_name_u16.as_ptr()),
+                    ENUM_REGISTRY_SETTINGS,
+                    &mut dm,
+                )
             };
 
             if ok_mode.as_bool() {
@@ -2104,7 +2169,8 @@ pub fn get_all_monitors() -> Vec<MonitorDevice> {
                     2 => "Landscape (Flipped)",
                     3 => "Portrait (270°)",
                     _ => "Landscape",
-                }.to_string();
+                }
+                .to_string();
             }
         }
 
@@ -2212,12 +2278,26 @@ pub fn set_monitor_topology_attached(
     };
     if attached {
         unsafe {
-            let _ = EnumDisplaySettingsW(PCWSTR(dev_name_u16.as_ptr()), ENUM_REGISTRY_SETTINGS, &mut dm);
+            let _ = EnumDisplaySettingsW(
+                PCWSTR(dev_name_u16.as_ptr()),
+                ENUM_REGISTRY_SETTINGS,
+                &mut dm,
+            );
             if dm.dmPelsWidth == 0 {
-                let _ = EnumDisplaySettingsW(PCWSTR(dev_name_u16.as_ptr()), ENUM_DISPLAY_SETTINGS_MODE(0), &mut dm);
+                let _ = EnumDisplaySettingsW(
+                    PCWSTR(dev_name_u16.as_ptr()),
+                    ENUM_DISPLAY_SETTINGS_MODE(0),
+                    &mut dm,
+                );
             }
             dm.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_POSITION | DM_DISPLAYFREQUENCY;
-            let _ = ChangeDisplaySettingsExW(PCWSTR(dev_name_u16.as_ptr()), Some(&dm), None, CDS_UPDATEREGISTRY | CDS_NORESET, None);
+            let _ = ChangeDisplaySettingsExW(
+                PCWSTR(dev_name_u16.as_ptr()),
+                Some(&dm),
+                None,
+                CDS_UPDATEREGISTRY | CDS_NORESET,
+                None,
+            );
             let _ = ChangeDisplaySettingsExW(PCWSTR::null(), None, None, CDS_TYPE(0), None);
         }
     } else {
@@ -2225,7 +2305,13 @@ pub fn set_monitor_topology_attached(
             dm.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_POSITION;
             dm.dmPelsWidth = 0;
             dm.dmPelsHeight = 0;
-            let _ = ChangeDisplaySettingsExW(PCWSTR(dev_name_u16.as_ptr()), Some(&dm), None, CDS_UPDATEREGISTRY | CDS_NORESET, None);
+            let _ = ChangeDisplaySettingsExW(
+                PCWSTR(dev_name_u16.as_ptr()),
+                Some(&dm),
+                None,
+                CDS_UPDATEREGISTRY | CDS_NORESET,
+                None,
+            );
             let _ = ChangeDisplaySettingsExW(PCWSTR::null(), None, None, CDS_TYPE(0), None);
         }
     }
@@ -2237,7 +2323,10 @@ pub fn set_monitor_topology_attached(
 /// Back-compat alias: historic CCD detach path. New code should call
 /// `set_monitor_topology_attached` for temporary detach or
 /// `set_monitor_device_enabled` for a true Device Manager disable.
-pub fn set_monitor_attached(device_name: &str, attached: bool) -> Result<Vec<MonitorDevice>, String> {
+pub fn set_monitor_attached(
+    device_name: &str,
+    attached: bool,
+) -> Result<Vec<MonitorDevice>, String> {
     set_monitor_topology_attached(device_name, attached)
 }
 
@@ -2313,7 +2402,11 @@ pub fn set_monitor_device_enabled(
                 })
                 .map(|m| {
                     let hits = candidates_matching_model(&candidates, &m);
-                    format!(" Model '{}' matched {} MONITOR-class candidate(s).", m, hits.len())
+                    format!(
+                        " Model '{}' matched {} MONITOR-class candidate(s).",
+                        m,
+                        hits.len()
+                    )
                 })
                 .unwrap_or_default();
             format!(
@@ -2321,10 +2414,7 @@ pub fn set_monitor_device_enabled(
                 target, model_note
             )
         } else {
-            format!(
-                "Identifier '{}' matched no MONITOR-class devnode.",
-                target
-            )
+            format!("Identifier '{}' matched no MONITOR-class devnode.", target)
         };
         return Err(format!(
             "Device Manager change failed: {}. Available MONITOR devnodes (never GPU adapters): {}",
@@ -2450,7 +2540,11 @@ pub fn set_monitor_device_enabled(
                 if is_target {
                     log::info!(
                         "[display] DIF_PROPERTYCHANGE {} (CONFIGSPECIFIC) on '{}'",
-                        if enabled { "DICS_ENABLE" } else { "DICS_DISABLE" },
+                        if enabled {
+                            "DICS_ENABLE"
+                        } else {
+                            "DICS_DISABLE"
+                        },
                         instance_id
                     );
                     let mut params = SP_PROPCHANGE_PARAMS {
@@ -2465,9 +2559,7 @@ pub fn set_monitor_device_enabled(
                     let set_res = SetupDiSetClassInstallParamsW(
                         hdev,
                         Some(&devinfo as *const SP_DEVINFO_DATA),
-                        Some(
-                            &params.ClassInstallHeader as *const SP_CLASSINSTALL_HEADER,
-                        ),
+                        Some(&params.ClassInstallHeader as *const SP_CLASSINSTALL_HEADER),
                         std::mem::size_of::<SP_PROPCHANGE_PARAMS>() as u32,
                     );
                     if let Err(e) = set_res {
@@ -2580,7 +2672,9 @@ pub fn set_monitor_device_enabled(
 
     // PnP state change is async; give the display stack a beat to re-enumerate
     // before re-querying topology so the UI doesn't show stale state.
-    thread::sleep(Duration::from_millis(needs_reboot.then_some(800).unwrap_or(500)));
+    thread::sleep(Duration::from_millis(
+        needs_reboot.then_some(800).unwrap_or(500),
+    ));
     let monitors = get_all_monitors();
     if needs_reboot {
         log::warn!(
@@ -2593,7 +2687,10 @@ pub fn set_monitor_device_enabled(
 }
 
 pub fn set_monitor_primary(device_name: &str) -> Result<Vec<MonitorDevice>, String> {
-    log::info!("[display] setting primary monitor to '{}' via native Win32", device_name);
+    log::info!(
+        "[display] setting primary monitor to '{}' via native Win32",
+        device_name
+    );
     unsafe {
         let mut dev_names = Vec::new();
         let mut i = 0u32;
@@ -2606,7 +2703,8 @@ pub fn set_monitor_primary(device_name: &str) -> Result<Vec<MonitorDevice>, Stri
                 break;
             }
             i += 1;
-            if (dd.StateFlags & 0x00000001) != 0 { // DISPLAY_DEVICE_ATTACHED_TO_DESKTOP
+            if (dd.StateFlags & 0x00000001) != 0 {
+                // DISPLAY_DEVICE_ATTACHED_TO_DESKTOP
                 let name = String::from_utf16_lossy(&dd.DeviceName)
                     .trim_matches(char::from(0))
                     .to_string();
@@ -2625,7 +2723,9 @@ pub fn set_monitor_primary(device_name: &str) -> Result<Vec<MonitorDevice>, Stri
                 dmSize: std::mem::size_of::<DEVMODEW>() as u16,
                 ..Default::default()
             };
-            if EnumDisplaySettingsW(PCWSTR(name_u16.as_ptr()), ENUM_CURRENT_SETTINGS, &mut dm).as_bool() {
+            if EnumDisplaySettingsW(PCWSTR(name_u16.as_ptr()), ENUM_CURRENT_SETTINGS, &mut dm)
+                .as_bool()
+            {
                 if name.eq_ignore_ascii_case(device_name) {
                     target_offset_x = dm.Anonymous1.Anonymous2.dmPosition.x;
                     target_offset_y = dm.Anonymous1.Anonymous2.dmPosition.y;
@@ -2673,5 +2773,3 @@ pub fn restart_graphics_driver() -> Result<String, String> {
 pub fn reset_all_cru_overrides() -> Result<String, String> {
     crate::custom_res::reset_all_edid_overrides()
 }
-
-

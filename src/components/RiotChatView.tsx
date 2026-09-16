@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   Users,
   RefreshCw,
@@ -524,11 +524,11 @@ export const RiotChatView: React.FC = () => {
                             : f.note || 'Offline'}
                         </span>
                       </button>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <div className="flex items-center gap-1 shrink-0">
                         <button
                           type="button"
                           onClick={() => {
-                            setNoting(noting === f.puuid ? null : f.puuid);
+                            setNoting(noting?.toLowerCase() === (f.puuid ?? '').toLowerCase() ? null : f.puuid);
                             setNoteDraft(f.note || '');
                           }}
                           className="w-6 h-6 rounded-lg bg-m3-surface-container border border-m3-outline-subtle text-m3-on-surface-variant hover:text-m3-on-surface flex items-center justify-center cursor-pointer"
@@ -540,10 +540,10 @@ export const RiotChatView: React.FC = () => {
                           type="button"
                           disabled={busy}
                           onClick={() => confirmRemove(f, () => loadAll(true))}
-                          className={`h-6 rounded-lg border flex items-center justify-center cursor-pointer disabled:opacity-40 transition-colors ${
+                          className={`h-6 rounded-lg border flex items-center justify-center cursor-pointer disabled:opacity-40 transition-colors transition-opacity ${
                             armRemove === f.puuid
-                              ? 'px-1.5 bg-rose-500 text-white border-rose-400 text-[9px] font-bold'
-                              : 'w-6 bg-rose-500/20 border-rose-400/40 text-rose-300 hover:bg-rose-500/35'
+                              ? 'px-1.5 bg-rose-500 text-white border-rose-400 text-[9px] font-bold opacity-100'
+                              : 'w-6 bg-rose-500/20 border-rose-400/40 text-rose-300 hover:bg-rose-500/35 opacity-0 group-hover:opacity-100'
                           }`}
                           title={armRemove === f.puuid ? 'Click again to remove this friend' : 'Remove friend'}
                         >
@@ -551,19 +551,22 @@ export const RiotChatView: React.FC = () => {
                         </button>
                       </div>
                     </motion.div>
-              <AnimatePresence initial={false}>
-              {noting === f.puuid && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0, marginTop: 0 }}
-                  animate={{ opacity: 1, height: 'auto', marginTop: 4 }}
-                  exit={{ opacity: 0, height: 0, marginTop: 0 }}
-                  transition={{ duration: 0.2, ease: 'easeOut' }}
-                  className="overflow-hidden"
-                >
-                <div className="rounded-xl border border-m3-outline-subtle bg-m3-surface-container-high/60 p-2 flex items-center gap-1.5">
+              {/* Plain mount, no height animation: the motion variant got stuck
+                  clipped at height 0 (input in layout, invisible on screen). */}
+              {noting?.toLowerCase() === (f.puuid ?? '').toLowerCase() && (
+                <div className="mt-1 rounded-xl border border-m3-outline-subtle bg-m3-surface-container-high/60 p-2 flex items-center gap-1.5">
                   <input
                     value={noteDraft}
+                    autoFocus
                     onChange={(e) => setNoteDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        run(() => updateFriend(noting, { note: noteDraft }), () => {
+                          setNoting(null);
+                          loadAll(true);
+                        });
+                      }
+                    }}
                     placeholder="Note (only you see this)"
                     className="flex-1 min-w-0 h-8 px-2.5 rounded-lg bg-m3-surface-container-lowest/60 border border-m3-outline-subtle text-xs text-m3-on-surface outline-none placeholder:text-m3-outline"
                   />
@@ -589,9 +592,7 @@ export const RiotChatView: React.FC = () => {
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
-                </motion.div>
               )}
-              </AnimatePresence>
                     </React.Fragment>
                   );
                 })}

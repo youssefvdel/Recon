@@ -4,9 +4,10 @@ mod custom_res;
 mod display;
 mod game_config;
 mod gpu;
+mod perf;
 mod shortcuts;
 mod tracker;
-mod trn_client;
+mod trn_proxy;
 mod window_manager;
 mod updater;
 
@@ -815,6 +816,14 @@ pub fn run() {
     };
     AUTO_BORDERLESS_ENABLED.store(initial_auto_bl, Ordering::Relaxed);
 
+    // Self-heal: earlier builds wrote vendor display keys (AMD Dal*, Intel
+    // ScaleOption*, DxgkUsePhysicalMode) that do nothing on current drivers and
+    // left AMD machines with a broken scale/HDMI-audio state. Purge them once
+    // per launch — idempotent and registry-only, so it is safe to always run.
+    std::thread::spawn(|| {
+        let _ = gpu::purge_legacy_vendor_overrides();
+    });
+
     let app_state = AppState {
         hotkey_controller,
         preferred_stretched,
@@ -1095,7 +1104,10 @@ pub fn run() {
             accounts::account_launch_client,
             tracker::riot_resolve_names,
             tracker::riot_local_namesets,
-            tracker::trn_get,
+            trn_proxy::trn_proxy_fetch,
+            trn_proxy::trn_proxy_paused,
+            trn_proxy::trn_proxy_state,
+            perf::perf_poll,
             get_quick_shortcuts,
             check_requested_tab,
             trim_memory,

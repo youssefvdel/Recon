@@ -10,7 +10,6 @@ import {
   type TrnActStats,
   type TrnAgentStat,
 } from '../utils/trn';
-import { isOpggFallbackActive, OPGG_ATTRIBUTION } from '../utils/opgg';
 import killsIcon from '../assets/icons/kills.png';
 import firstbloodsIcon from '../assets/icons/firstbloods.png';
 import acesIcon from '../assets/icons/aces.png';
@@ -337,17 +336,6 @@ export const Overview: React.FC = () => {
           >
             Retry
           </button>
-        </div>
-      )}
-
-      {/* TRN can't serve history right now — the Matches tab supplements from OP.GG. */}
-      {isOpggFallbackActive() && (
-        <div
-          className="px-1 text-[11px] font-mono text-amber-200/90 shrink-0"
-          title={OPGG_ATTRIBUTION}
-        >
-          TRN cooling — Matches tab may supplement from OP.GG
-          <span className="opacity-70"> · {OPGG_ATTRIBUTION}</span>
         </div>
       )}
 

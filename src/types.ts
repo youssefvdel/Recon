@@ -300,6 +300,9 @@ export interface LiveMatchPlayer {
   /** True when name holds the real Riot ID. False = Riot hides this player
    *  live (strict-hide) and name falls back to "Player N" until post-game. */
   nameResolved?: boolean;
+  /** True when TRN answered HTTP 451 CollectorResultStatus::Private for this
+   *  Riot ID — dashes are expected, not breakage. */
+  isTrnPrivate?: boolean;
 }
 
 export interface LiveMatchState {

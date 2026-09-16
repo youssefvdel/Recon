@@ -5,7 +5,8 @@
   "windows": [
     "main",
     "overlay",
-    "dev"
+    "dev",
+    "trn-proxy"
   ],
   "permissions": [
     "core:default",

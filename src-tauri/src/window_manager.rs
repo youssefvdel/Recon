@@ -5,13 +5,12 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetForegroundWindow, GetSystemMetrics,
-    GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, IsWindow,
-    IsWindowVisible, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-    GWL_EXSTYLE, GWL_STYLE, HWND_TOP, HWND_TOPMOST, SM_CXSCREEN, SM_CYSCREEN, SWP_FRAMECHANGED,
-    SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOW, WINDOW_STYLE,
-    WS_BORDER, WS_CAPTION, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
-    WS_OVERLAPPEDWINDOW, WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
+    EnumWindows, GetClassNameW, GetForegroundWindow, GetSystemMetrics, GetWindowLongPtrW,
+    GetWindowRect, GetWindowTextLengthW, GetWindowTextW, IsWindow, IsWindowVisible,
+    SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_EXSTYLE, GWL_STYLE,
+    HWND_TOP, HWND_TOPMOST, SM_CXSCREEN, SM_CYSCREEN, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+    SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOW, WINDOW_STYLE, WS_BORDER, WS_CAPTION, WS_EX_TOOLWINDOW,
+    WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
 };
 
 #[link(name = "comctl32")]
@@ -19,25 +18,13 @@ extern "system" {
     fn SetWindowSubclass(
         hwnd: HWND,
         pfn_subclass: Option<
-            unsafe extern "system" fn(
-                HWND,
-                u32,
-                WPARAM,
-                LPARAM,
-                usize,
-                usize,
-            ) -> LRESULT,
+            unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM, usize, usize) -> LRESULT,
         >,
         u_id_subclass: usize,
         dw_ref_data: usize,
     ) -> BOOL;
 
-    fn DefSubclassProc(
-        hwnd: HWND,
-        msg: u32,
-        wparam: WPARAM,
-        lparam: LPARAM,
-    ) -> LRESULT;
+    fn DefSubclassProc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT;
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -143,7 +130,10 @@ pub fn is_valorant_game_window(_hwnd: HWND, title: &str, class_name: &str) -> bo
 
     // 2. Valorant's real game client is an Unreal Engine 4 window ("UnrealWindow" or "VALORANTUnrealWindow").
     // Third-party trackers and Electron wrappers are NEVER "UnrealWindow".
-    if class_name == "UnrealWindow" || class_name == "VALORANTUnrealWindow" || class_name.contains("UnrealWindow") {
+    if class_name == "UnrealWindow"
+        || class_name == "VALORANTUnrealWindow"
+        || class_name.contains("UnrealWindow")
+    {
         return lower == "valorant" || lower.starts_with("valorant");
     }
 
@@ -251,7 +241,12 @@ pub fn make_borderless(hwnd_val: isize) -> Result<String, String> {
         let mut style = WINDOW_STYLE(current_style);
 
         // Strip decorations
-        style &= !(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_BORDER);
+        style &= !(WS_CAPTION
+            | WS_THICKFRAME
+            | WS_MINIMIZEBOX
+            | WS_MAXIMIZEBOX
+            | WS_SYSMENU
+            | WS_BORDER);
         style |= WS_POPUP;
 
         SetWindowLongPtrW(hwnd, GWL_STYLE, style.0 as isize);
@@ -275,6 +270,11 @@ pub fn make_borderless(hwnd_val: isize) -> Result<String, String> {
         // Borderless FULLSCREEN = strip the frame AND cover the whole monitor.
         // Applied twice: games often re-assert their own size on the first
         // style change — the second pass wins.
+        //
+        // SWP_NOACTIVATE | SWP_NOZORDER are load-bearing: without them this
+        // raises AND activates the game, so every auto-apply buried Recon
+        // behind Valorant and forced an alt-tab. The game does not need
+        // z-order or activation to be borderless — only style + geometry.
         for _ in 0..2 {
             SetWindowPos(
                 hwnd,
@@ -283,7 +283,7 @@ pub fn make_borderless(hwnd_val: isize) -> Result<String, String> {
                 y,
                 width,
                 height,
-                SWP_FRAMECHANGED | SWP_SHOWWINDOW,
+                SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOZORDER,
             )
             .map_err(|e| format!("SetWindowPos failed: {}", e))?;
         }
@@ -306,7 +306,7 @@ pub fn make_borderless(hwnd_val: isize) -> Result<String, String> {
                     y,
                     width,
                     height,
-                    SWP_FRAMECHANGED | SWP_SHOWWINDOW,
+                    SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOZORDER,
                 );
             }
         });
@@ -351,8 +351,9 @@ pub fn restore_window(hwnd_val: isize) -> Result<String, String> {
             100,
             1280,
             720,
-            SWP_FRAMECHANGED | SWP_SHOWWINDOW,
-        ).map_err(|e| format!("SetWindowPos failed: {}", e))?;
+            SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOZORDER,
+        )
+        .map_err(|e| format!("SetWindowPos failed: {}", e))?;
 
         Ok("Window restored to standard framed mode.".to_string())
     }
@@ -401,7 +402,12 @@ pub fn set_overlay_windowed(hwnd_val: isize, windowed: bool) -> Result<(), Strin
                 let rc = mi.rcMonitor;
                 (rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top)
             } else {
-                (0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
+                (
+                    0,
+                    0,
+                    GetSystemMetrics(SM_CXSCREEN),
+                    GetSystemMetrics(SM_CYSCREEN),
+                )
             };
             let _ = SetWindowPos(
                 hwnd,
@@ -492,9 +498,7 @@ pub fn restore_blur_behind(_hwnd: HWND) {
 fn overlay_monitor_file() -> std::path::PathBuf {
     std::env::var("LOCALAPPDATA")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| {
-            std::path::PathBuf::from(r"C:\Users\Administrator\AppData\Local")
-        })
+        .unwrap_or_else(|_| std::path::PathBuf::from(r"C:\Users\Administrator\AppData\Local"))
         .join("Recon")
         .join("overlay_monitor.txt")
 }
@@ -531,13 +535,15 @@ pub fn overlay_monitor_rect() -> Option<(i32, i32, i32, i32)> {
     if want.eq_ignore_ascii_case("auto") {
         return None;
     }
-    crate::display::get_all_monitors().into_iter().find_map(|m| {
-        if m.device_name == want && m.is_attached && !m.is_device_disabled {
-            Some((m.position_x, m.position_y, m.width as i32, m.height as i32))
-        } else {
-            None
-        }
-    })
+    crate::display::get_all_monitors()
+        .into_iter()
+        .find_map(|m| {
+            if m.device_name == want && m.is_attached && !m.is_device_disabled {
+                Some((m.position_x, m.position_y, m.width as i32, m.height as i32))
+            } else {
+                None
+            }
+        })
 }
 
 /// Single source of truth for where the overlay belongs: pinned monitor >

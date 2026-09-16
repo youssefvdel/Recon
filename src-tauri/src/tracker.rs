@@ -450,38 +450,6 @@ pub async fn local_presences() -> Result<String, String> {
     .map_err(|e| format!("Task failed: {}", e))?
 }
 
-/// Chrome-impersonated GET for tracker.gg's Cloudflare wall, via the bundled
-/// trn_get: read-only TRN profile/segment calls through the in-process
-/// BoringSSL client (Chrome fingerprint — pure-Rust TLS spoofing has no
-/// Windows-ready crate; BoringSSL won't compile under MSVC toolchains).
-/// Read-only profile/segment calls, no key, no browser session. If TRN ever
-/// gates them, callers fall back to Riot-direct data.
-#[tauri::command]
-pub async fn trn_get(path: String) -> Result<String, String> {
-    // 20s: the same budget the sidecar got via `--max-time 20`.
-    trn_get_with_timeout(path, 20).await
-}
-
-async fn trn_get_with_timeout(path: String, timeout_secs: u64) -> Result<String, String> {
-    if path.contains([' ', '\n', '\r']) || !path.starts_with("/api/") {
-        return Err("Invalid path.".to_string());
-    }
-    if path.len() > 300 {
-        return Err("Path too long.".to_string());
-    }
-    let url = format!("https://api.tracker.gg{}", path);
-    // Same TRN_ surface the sidecar path produced: Go's stderr line,
-    // trimmed to 140 chars. Runs on Tauri's runtime — no child process,
-    // no new threads.
-    match crate::trn_client::fetch(&url, timeout_secs).await {
-        Ok(body) => Ok(body),
-        Err(err) => Err(format!(
-            "TRN_{}",
-            err.trim().chars().take(140).collect::<String>()
-        )),
-    }
-}
-
 /// Generic authed GET against Riot's servers. Tokens stay in arguments;
 /// the raw body returns so the frontend parses defensively.
 ///

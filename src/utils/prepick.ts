@@ -198,6 +198,7 @@ const KNOWN_MAP_NAMES = [
   'Pearl',
   'Fracture',
   'Breeze',
+  'Summit',
 ];
 
 /** Fetch the active competitive map roster with splashes. */

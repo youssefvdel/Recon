@@ -43,6 +43,7 @@ import {
   getPartyStyle,
   splitTeams,
   byAcsDesc,
+  TRN_PRIVATE_TOOLTIP,
 } from '../utils/playerDisplay';
 import { isTauri, openExternalUrl } from '../utils/ipc';
 import { listen } from '@tauri-apps/api/event';
@@ -548,6 +549,14 @@ const PlayerRow: React.FC<{
   const rankIcon = tierIcons[p.tier];
   const peakIcon = tierIcons[p.peakTier];
   const kd = formatKd(p.kd);
+  // Private profiles: every TRN-fed cell shows a lock instead of a dash so
+  // users read "locked", not "broken". Rank/peak/level are Riot-local and stay.
+  const locked = p.isTrnPrivate === true;
+  const lockCell = (
+    <span title={TRN_PRIVATE_TOOLTIP} className="inline-flex items-center justify-center text-zinc-500">
+      <Lock className="w-2.5 h-2.5" />
+    </span>
+  );
   const party = getPartyStyle(p.partyIndex);
   const flagUrl = getFlagUrl(p.country);
   const countryName = getCountryName(p.country);
@@ -666,17 +675,6 @@ const PlayerRow: React.FC<{
                 >
                   Blitz
                 </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openExternalUrl(trackerUrls.opgg);
-                  }}
-                  className="px-1 py-px rounded text-[7px] font-mono font-bold bg-white/5 hover:bg-blue-500/25 hover:text-blue-300 border border-white/10 text-zinc-400 cursor-pointer transition-colors"
-                  title={`Search ${p.name}#${p.tag} on OP.GG`}
-                >
-                  OP.GG
-                </button>
               </div>
             )}
             {p.isMe && (
@@ -695,6 +693,14 @@ const PlayerRow: React.FC<{
               >
                 <EyeOff className="w-2.5 h-2.5" />
                 {p.nameResolved ? 'Unmasked' : 'Hidden'}
+              </span>
+            )}
+            {p.isTrnPrivate && (
+              <span
+                className="flex items-center px-1 py-px rounded bg-white/5 text-zinc-400 border border-white/10 shrink-0"
+                title={TRN_PRIVATE_TOOLTIP}
+              >
+                <Lock className="w-2.5 h-2.5" />
               </span>
             )}
           </div>
@@ -741,6 +747,8 @@ const PlayerRow: React.FC<{
       >
         {p.trnScore != null ? (
           <ScoreBadge tier={scoreTier(p.trnScore).tier} size={20} />
+        ) : locked ? (
+          lockCell
         ) : (
           <span className="w-5 h-5 rounded border border-m3-outline-subtle bg-m3-surface-container flex items-center justify-center text-[8px] font-mono text-m3-outline">
             —
@@ -797,6 +805,8 @@ const PlayerRow: React.FC<{
           <span className={p.acs >= 200 ? 'text-m3-primary' : p.acs >= 150 ? 'text-m3-on-surface' : 'text-m3-outline'}>
             {p.acs}
           </span>
+        ) : locked ? (
+          lockCell
         ) : (
           <span className="text-m3-outline">—</span>
         )}
@@ -804,7 +814,7 @@ const PlayerRow: React.FC<{
 
       {/* 7. K/D */}
       <div className="text-right font-mono text-[10.5px] font-bold" title="Act-wide K/D">
-        <span className={kd.color}>{kd.text}</span>
+        {locked ? lockCell : <span className={kd.color}>{kd.text}</span>}
       </div>
 
       {/* 8. Win % */}
@@ -813,6 +823,8 @@ const PlayerRow: React.FC<{
           <span className={p.winPct >= 50 ? 'text-m3-mint font-semibold' : 'text-rose-400'}>
             {p.winPct.toFixed(0)}%
           </span>
+        ) : locked ? (
+          lockCell
         ) : (
           <span className="text-m3-outline">—</span>
         )}
@@ -820,7 +832,7 @@ const PlayerRow: React.FC<{
 
       {/* 9. HS % */}
       <div className="text-right font-mono text-[10.5px] text-amber-500" title="Act-wide headshot %">
-        {p.hsPct != null && p.hsPct > 0 ? `${p.hsPct.toFixed(0)}%` : <span className="text-m3-outline">—</span>}
+        {p.hsPct != null && p.hsPct > 0 ? `${p.hsPct.toFixed(0)}%` : locked ? lockCell : <span className="text-m3-outline">—</span>}
       </div>
 
       {/* 10. Account level */}
