@@ -125,7 +125,7 @@ const TAB_METADATA: Record<
   },
   prepick: {
     title: 'Agent Pre-Picker',
-    description: 'Instant hover + timed lock-in, per map or a global default',
+    description: 'Instant hover, per map or a global default — never locks in',
     icon: UserCheck,
   },
   chat: {

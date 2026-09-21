@@ -20,7 +20,7 @@ import { computeMapAgentStats, getRankTierLabel, type AgentStatSummary } from '.
 import { fetchBlitzAgentStats, peekBlitzAgentStats, type BlitzAgentStat } from '../utils/blitzMeta';
 import { getOverlayEditMode, setOverlayEditMode, isTabDown, isTauri } from '../utils/ipc';
 import { listen } from '@tauri-apps/api/event';
-import { getPrepickConfig, PREPICK_MAX_DELAY } from '../utils/prepick';
+import { getPrepickConfig } from '../utils/prepick';
 
 export interface WidgetPos {
   x: number;
@@ -1879,11 +1879,7 @@ export const OverlayView: React.FC = () => {
               </span>
               <span className="font-mono text-[11px] text-m3-on-surface font-bold truncate">
                 {prepickAgent}
-                {prepickCfg.pickDelaySec < PREPICK_MAX_DELAY ? (
-                  <span className="text-m3-outline font-normal"> • locks in {prepickCfg.pickDelaySec}s</span>
-                ) : (
-                  <span className="text-m3-outline font-normal"> • hover only</span>
-                )}
+                <span className="text-m3-outline font-normal"> • hover only</span>
               </span>
             </div>
             <span className="ml-1 w-1.5 h-1.5 rounded-full bg-m3-mint animate-pulse shrink-0" />
