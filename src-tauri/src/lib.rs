@@ -6,6 +6,7 @@ mod game_config;
 mod gpu;
 mod perf;
 mod shortcuts;
+mod space_spam;
 mod tracker;
 mod trn_proxy;
 mod window_manager;
@@ -847,6 +848,7 @@ pub fn run() {
     builder
         .manage(app_state)
         .setup(move |app| {
+            space_spam::start(app.handle());
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 while let Ok(()) = rx.recv() {
@@ -1108,6 +1110,7 @@ pub fn run() {
             trn_proxy::trn_proxy_paused,
             trn_proxy::trn_proxy_state,
             perf::perf_poll,
+            space_spam::set_space_spam,
             get_quick_shortcuts,
             check_requested_tab,
             trim_memory,

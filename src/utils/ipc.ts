@@ -226,6 +226,11 @@ export async function setAutoBorderless(enabled: boolean): Promise<void> {
   await invoke('set_auto_borderless', { enabled });
 }
 
+export async function setSpaceSpam(enabled: boolean): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('set_space_spam', { enabled });
+}
+
 export async function getAutoBorderless(): Promise<boolean> {
   if (!isTauri()) return false;
   return await invoke<boolean>('get_auto_borderless');

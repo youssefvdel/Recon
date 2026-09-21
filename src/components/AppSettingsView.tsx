@@ -32,6 +32,7 @@ import {
   openExternalUrl,
   getAutostartEnabled,
   setAutostartEnabled,
+  setSpaceSpam as ipcSetSpaceSpam,
   fetchAllMonitors,
   fetchOverlayMonitor,
   setOverlayMonitor,
@@ -72,6 +73,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
   const [inGameToasts, setInGameToasts] = useState(() => {
     return localStorage.getItem('aspect_ingame_toasts') !== 'false';
   });
+  const [spaceSpam, setSpaceSpam] = useState(false);
 
   // In-game overlay monitor picker
   const [monitors, setMonitors] = useState<MonitorDevice[]>([]);
@@ -188,10 +190,38 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
     };
   }, []);
 
+  // F3 flips the macro in the backend. Without a listener the toggle keeps
+  // showing the stale state after a hotkey press while the window is open.
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    try {
+      listen<boolean>('recon:space-spam', (event) => {
+        setSpaceSpam(Boolean(event.payload));
+      }).then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      });
+    } catch {
+      /* Event bridge unavailable (dev browser) — initial fetch stands. */
+    }
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   const handleToggleAutostart = async () => {
     const next = !autostart;
     setAutostart(next);
     await setAutostartEnabled(next);
+  };
+
+  const handleToggleSpaceSpam = async () => {
+    const next = !spaceSpam;
+    setSpaceSpam(next);
+    try { await ipcSetSpaceSpam(next); } catch { setSpaceSpam(!next); }
   };
 
   const handleToggleStartMinimized = () => {
@@ -658,6 +688,31 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
                 <div
                   className={`w-4 h-4 rounded-full bg-white transition-transform ${
                     inGameToasts ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Space Re-Press (Hold) */}
+            <div className="p-3.5 sm:p-4 flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <div className="text-xs sm:text-sm font-semibold text-m3-on-surface">
+                  Space Re-Press (Hold)
+                </div>
+                <div className="text-[11px] text-m3-outline">
+                  While on, holding Space re-presses it rapidly — replaces a separate AutoHotkey script. Toggle with F3. Global while enabled, and resets to off on restart.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleSpaceSpam}
+                className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
+                  spaceSpam ? 'bg-m3-primary' : 'bg-m3-surface-container-high'
+                }`}
+              >
+                <div
+                  className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                    spaceSpam ? 'translate-x-5' : 'translate-x-0'
                   }`}
                 />
               </button>
