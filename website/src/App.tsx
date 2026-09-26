@@ -529,8 +529,8 @@ export default function App() {
             <a href="https://ko-fi.com/youssefvdel" target="_blank" rel="noreferrer" className="hover:text-amber-300 transition-colors">
               KO-FI
             </a>
-            <a href="https://recon.qd.je" className="hover:text-[#b6abf7] transition-colors">
-              RECON.QD.JE
+            <a href="https://reconlab.app" className="hover:text-[#b6abf7] transition-colors">
+              RECONLAB.APP
             </a>
           </div>
         </div>

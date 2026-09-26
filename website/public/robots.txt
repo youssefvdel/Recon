@@ -1,6 +1,6 @@
 # ==============================================================================
 #  RECON — VALORANT TRACKER, STRETCHED RESOLUTION & IN-GAME SCOUT
-#  Official Site: https://www.recon.qd.je | GitHub: https://github.com/youssefvdel/Recon
+#  Official Site: https://reconlab.app | GitHub: https://github.com/youssefvdel/Recon
 # ==============================================================================
 #
 #  Recon is a lightweight Valorant tracker + competitive utility for Windows.
@@ -24,4 +24,4 @@ User-agent: *
 Allow: /
 
 # Canonical Sitemap
-Sitemap: https://www.recon.qd.je/sitemap.xml
+Sitemap: https://reconlab.app/sitemap.xml

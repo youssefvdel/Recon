@@ -5,7 +5,7 @@
   <h3>VALORANT esports companion &amp; competitive display toolkit</h3>
   <p>Live lobby scouting, in-game HUD widgets and true stretched resolution — read-only, zero injection.</p>
 
-  [![Website](https://img.shields.io/badge/website-recon.qd.je-a8f5cc?style=flat-square)](https://recon.qd.je)
+  [![Website](https://img.shields.io/badge/website-reconlab.app-a8f5cc?style=flat-square)](https://reconlab.app)
   [![GitHub Release](https://img.shields.io/github/v/release/youssefvdel/Recon?style=flat-square&color=d0bcff)](https://github.com/youssefvdel/Recon/releases)
   [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-blue?style=flat-square)](https://github.com/youssefvdel/Recon)
   [![Tauri](https://img.shields.io/badge/tauri-v2-orange?style=flat-square)](https://tauri.app)
