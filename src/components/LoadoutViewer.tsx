@@ -378,7 +378,7 @@ export const LoadoutViewer: React.FC<{
         {/* Notice banners */}
         {ambiguous && (
           <div className="mb-2 px-3 py-1.5 rounded-xl bg-m3-tertiary-container/30 border border-m3-tertiary/40 text-m3-on-tertiary-container text-xs font-medium flex items-center gap-2 shadow-sm shrink-0">
-            <div className="w-1.5 h-1.5 rounded-full bg-m3-tertiary shrink-0 animate-pulse" />
+            <div className="w-1.5 h-1.5 rounded-full bg-m3-tertiary shrink-0" />
             <span>Multiple players picked {player.agentName} in this match — displaying the first matching loadout.</span>
           </div>
         )}

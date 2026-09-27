@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { AlertTriangle, Check, Gamepad2, Lock, RefreshCw } from 'lucide-react';
 import { tierName } from '../utils/tracker';
-import { ScoreBadge, gradeFor, scoreTier } from './ScoreBadge';
+import { ScoreBadge, gradeFor, scoreTier, tierColor } from './ScoreBadge';
 import {
   fetchTrnActStats,
   fetchTrnAgents,
@@ -251,7 +251,7 @@ export const Overview: React.FC = () => {
   if (!profile) {
     if (clientClosed) {
       return (
-        <div className="h-full min-h-0 max-w-6xl mx-auto w-full overflow-y-auto custom-scrollbar px-4 sm:px-6 py-3.5 pb-8 flex items-center justify-center">
+        <div className="h-full min-h-0 max-w-6xl mx-auto w-full px-4 sm:px-6 py-3.5 pb-8 flex items-center justify-center">
           <div className="rounded-3xl bg-m3-surface-container border border-m3-outline-subtle p-8 flex flex-col items-center text-center gap-3 max-w-sm shadow-m3-1">
             <span className="w-14 h-14 rounded-3xl bg-m3-primary-container/50 border border-m3-primary/30 flex items-center justify-center">
               <Gamepad2 className="w-7 h-7 text-m3-primary" />
@@ -280,7 +280,7 @@ export const Overview: React.FC = () => {
   }
 
   return (
-    <motion.div initial="hidden" animate="show" className="h-full min-h-0 flex flex-col justify-start gap-2.5 max-w-6xl mx-auto w-full overflow-y-auto custom-scrollbar px-6 pt-3 pb-6">
+    <motion.div initial="hidden" animate="show" className="h-full min-h-0 flex flex-col justify-start gap-2 max-w-6xl mx-auto w-full px-6 pt-3 pb-3">
       {clientClosed && (
         <div className="p-2.5 rounded-xl bg-m3-surface-container-high border border-m3-outline-subtle text-m3-on-surface-variant text-xs font-medium flex items-center justify-between shrink-0">
           <div className="flex items-center space-x-2">
@@ -593,18 +593,19 @@ export const Overview: React.FC = () => {
 
                 <div className="flex items-center justify-between gap-1 mt-3 pt-2">
                   {[
-                    { label: 'Round Win %', v: trn.roundWinPct.toFixed(1) + '%', p: trn.roundWinPctile, color: '#2cd5f6' },
-                    { label: 'KAST', v: trn.kast.toFixed(1) + '%', p: trn.kastPctile, color: '#3ae374' },
-                    { label: 'ACS', v: trn.acs.toFixed(1), p: trn.acsPctile, color: '#ff7675' },
-                    { label: 'DDΔ/Round', v: String(Math.round(trn.damageDelta / Math.max(1, trn.rounds))), p: trn.ddPctile, color: '#f5b041' },
+                    { label: 'Round Win %', v: trn.roundWinPct.toFixed(1) + '%', p: trn.roundWinPctile },
+                    { label: 'KAST', v: trn.kast.toFixed(1) + '%', p: trn.kastPctile },
+                    { label: 'ACS', v: trn.acs.toFixed(1), p: trn.acsPctile },
+                    { label: 'DDΔ/Round', v: String(Math.round(trn.damageDelta / Math.max(1, trn.rounds))), p: trn.ddPctile },
                   ].map((s, i) => {
                     const g = gradeFor(s.p);
+                    const tone = tierColor(g);
                     return (
                       <React.Fragment key={s.label}>
                         {i > 0 && <span className="text-m3-outline-subtle font-bold text-xs px-0.5 select-none">+</span>}
                         <div
                           className="flex-1 text-center pb-1.5 border-b-2"
-                          style={{ borderBottomColor: s.color }}
+                          style={{ borderBottomColor: tone }}
                         >
                           <div className="text-[10px] font-bold uppercase tracking-wider text-m3-outline truncate">
                             {s.label}
@@ -612,7 +613,7 @@ export const Overview: React.FC = () => {
                           <div className="text-[15px] font-mono font-bold text-m3-on-surface mt-0.5 tabular-nums">
                             {s.v}
                           </div>
-                          <div className="text-[10px] font-mono font-bold truncate mt-0.5" style={{ color: s.color }}>
+                          <div className="text-[10px] font-mono font-bold truncate mt-0.5" style={{ color: tone }}>
                             <span>{g}</span> <span className="text-m3-outline font-normal">· {pctLabel(s.p)}</span>
                           </div>
                         </div>

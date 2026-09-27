@@ -153,7 +153,7 @@ old flow is verification, a real manifest, progress and an automatic restart.
 
 ## Legacy
 
-`src-tauri/src/updater.rs` (`check_app_updates` / `install_app_update`) is the old
-GitHub-API flow: it guessed an asset by file extension, downloaded it to `%TEMP%`
-and shell-executed it, with no signature check. It is no longer wired into the UI
-and should be deleted once no build still calls it.
+The old GitHub-API flow (`check_app_updates` / `install_app_update`) has been
+removed: it guessed an asset by file extension, downloaded it to `%TEMP%` and
+shell-executed it, with no signature check. `plugin-updater` is the only update
+path now.

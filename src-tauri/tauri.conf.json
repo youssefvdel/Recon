@@ -36,18 +36,6 @@
         "skipTaskbar": true,
         "visible": false,
         "shadow": false
-      },
-      {
-        "label": "dev",
-        "title": "Recon \u2022 Dev Dashboard",
-        "url": "index.html#dev",
-        "width": 1080,
-        "height": 780,
-        "minWidth": 720,
-        "minHeight": 500,
-        "resizable": true,
-        "fullscreen": false,
-        "visible": false
       }
     ],
     "security": {

@@ -93,9 +93,65 @@ const cargo = await Bun.file('src-tauri/Cargo.toml').text();
 const libRs = await Bun.file('src-tauri/src/lib.rs').text();
 const dashboard = await Bun.file('src/components/DevDashboard.tsx').text();
 
+// --- the metric itself: private working set = Task Manager's Memory column ---
 check('rss via GetProcessMemoryInfo', perfRs.includes('GetProcessMemoryInfo'), true);
+check(
+  'fallback reads WorkingSetSize (resident), never PrivateUsage (commit)',
+  perfRs.includes('counters.WorkingSetSize as u64') && !perfRs.includes('counters.PrivateUsage as u64'),
+  true,
+);
+check('private working set from the PDH counter Task Manager uses', perfRs.includes('Working Set - Private') && perfRs.includes('fn private_ws_by_pid'), true);
+check('PDH pids paired by instance index with a name guard', perfRs.includes('\\Process(*)\\ID Process') && perfRs.includes('pname != iname'), true);
+check('pdh.dll linked directly, no new crate', perfRs.includes('#[link(name = "pdh")]') && !cargo.includes('Win32_Performance') && !cargo.includes('pdh ='), true);
+check('no Wdk/extra feature needed for NtQueryInformationProcess', !cargo.includes('Wdk'), true);
+check('metric arithmetic is unit-tested', perfRs.includes('pub fn rss_mb_from_bytes') && perfRs.includes('fn bytes_to_mib_at_task_manager_scale'), true);
+
+// --- the dead per-page route is recorded so it is not re-attempted ---
+check('QueryWorkingSetEx dead end documented in rust', perfRs.includes('QueryWorkingSetEx') && perfRs.includes('DEAD END'), true);
+check('dead-end claim is the measured one', perfRs.includes('STATUS_INFO_LENGTH_MISMATCH') && perfRs.includes('writes NOTHING'), true);
+
+// --- cost control: the PDH pass must not ride the 5s poll path ---
+check('private pass has its own cadence const', perfRs.includes('const PRIV_WS_MIN_INTERVAL: std::time::Duration'), true);
+check('cadence const is justified in a comment', /22 ms[\s\S]{0,200}5s\s+[\s\S]{0,200}poll path[\s\S]{0,400}const PRIV_WS_MIN_INTERVAL/.test(perfRs), true);
+check('cheap resident pass still runs every poll', perfRs.includes('fn resident_tree_mem') && perfRs.includes('fn sample_tree_mem'), true);
+check('PDH buffer allocated once, grow-only', perfRs.includes('static PDH_BUF: Mutex<Vec<u8>>') && perfRs.includes('buf.resize(want, 0)') && perfRs.includes('buf[..want].fill(0)'), true);
+check('unreadable counter degrades, never reports zero bytes', perfRs.includes('fn try_private_ws_all') && perfRs.includes('cache.last.unwrap_or(resident)'), true);
+
+// --- honest basis reporting: a wrong number must never be shown as a right one ---
+check('basis enum serialized per sample', perfRs.includes('pub basis: MemBasis') && perfRs.includes('pub omitted: u32'), true);
+check('basis names all three states', perfRs.includes('PrivateWorkingSet') && perfRs.includes('ResidentWorkingSet') && perfRs.includes('Mixed'), true);
+check('rollup is a pure injectable fn', perfRs.includes('pub fn rollup(own: ProcMem, webviews: &[ProcMem])'), true);
+check('fallback is explicit, never a silent zero', perfRs.includes('fn fallback_is_explicit_never_silent_zero') && perfRs.includes('fn mem_basis_derivation'), true);
+check('unreadable processes are counted, not swallowed', perfRs.includes('ProcMem::Unavailable') && perfRs.includes('pub omitted: u32'), true);
+check('per-process basis choice is one small helper', perfRs.includes('fn mem_for_pid'), true);
+
+// --- cpu via GetProcessTimes deltas, over the WHOLE tree (not the backend) ---
 check('cpu via GetProcessTimes deltas', perfRs.includes('GetProcessTimes'), true);
-check('own process only (backend counters)', perfRs.includes('GetCurrentProcess'), true);
+check(
+  'cpu covers the tree, not the backend handle alone',
+  perfRs.includes('fn cpu_tree_times') && perfRs.includes('fn cpu_100ns_of_pid') && !perfRs.includes('GetCurrentProcess()'),
+  true,
+);
+check(
+  'per-process times are summed, never averaged',
+  perfRs.includes('fn cpu_covers_the_same_set_as_memory') && perfRs.includes('fn rollup_cpu'),
+  true,
+);
+check(
+  'unreadable processes counted, not zeroed',
+  perfRs.includes('cpu_omitted: u32') && perfRs.includes('pub omitted: u32') && perfRs.includes('fn cpu_unreadable_is_counted_not_zeroed'),
+  true,
+);
+check(
+  'process churn cannot wrap the delta',
+  perfRs.includes('fn cpu_delta_100ns') && perfRs.includes('saturating_add(cur.saturating_sub(*before))') && perfRs.includes('fn cpu_delta_ignores_processes_without_a_baseline'),
+  true,
+);
+check(
+  'one tree walk feeds both metrics',
+  perfRs.includes('let webviews = recon_webview_pids(&snapshot_entries(), own);') && perfRs.includes('let (cpu_times, census) = cpu_tree_times(own, &webviews);') && perfRs.includes('sample_tree_mem(own, &webviews)'),
+  true,
+);
 check('tree walk scoped to own PID', perfRs.includes('GetCurrentProcessId') && perfRs.includes('recon_webview_pids(&snapshot_entries(), own)'), true);
 check('windows features only, no new crates', !cargo.includes('perf =') && cargo.includes('Win32_System_ProcessStatus') && cargo.includes('Win32_System_Threading'), true);
 check('1h ring const', perfRs.includes('PERF_RING_CAP: usize = 720'), true);
@@ -104,6 +160,19 @@ check('release stub returns Err', perfRs.includes('#[cfg(not(debug_assertions))]
 check('release carries no buffer', (perfRs.match(/cfg\(debug_assertions\)/g) || []).length >= 4, true);
 check('pause reads foreground focus', perfRs.includes('is_valorant_foreground'), true);
 check('pause skips sampling (no push)', perfRs.includes('if !paused'), true);
+
+// --- the CPU panel must NAME what it measures, like the memory one does ---
+check('names the CPU metric', dashboard.includes('CPU %'), true);
+check('cpu chart label carries its census', dashboard.includes('CPU % (${perfCpuBasisLabel})'), true);
+check('says the same tree as memory', dashboard.includes('every msedgewebview2.exe child') && dashboard.includes('backend plus every'), true);
+check('says summed, not averaged', dashboard.includes('kernel+user time summed') && dashboard.includes('not averaged'), true);
+check('states the normalisation', dashboard.includes('share of all cores') && dashboard.includes('directly comparable'), true);
+check('names the residual difference honestly', dashboard.includes('averaging window'), true);
+check('records what the metric used to be', dashboard.includes('backend handle alone'), true);
+// The copy wraps across JSX lines, so assert the halves rather than a span
+// that no longer exists in the file.
+check('the "used to be" claim names the measured gap', dashboard.includes('~0.1% here and ~10% in Task'), true);
+check('cpu unreadable gap is surfaced', perfRs.includes('cpu_omitted: u32') && dashboard.includes('cpu_omitted?: number') && dashboard.includes('could not be read, so this percentage is LOW'), true);
 
 // --- full footprint: own WebView2 tree only, never system-wide ---
 check('tree walk via Toolhelp32Snapshot', perfRs.includes('CreateToolhelp32Snapshot'), true);
@@ -128,6 +197,28 @@ check('shared y-domain (1:1 compare)', dashboard.includes('domain={perfMemDom}')
 check('series color key', dashboard.includes('legend={'), true);
 check('paused readout', dashboard.includes('paused (game fullscreen)'), true);
 check('min/max/avg readouts', dashboard.includes('min {') && dashboard.includes('max {') && dashboard.includes('avg {'), true);
+
+// --- honest labelling: the total is private working set (Task Manager's Memory)
+// summed over the whole tree. If PDH cannot be read the dashboard must say it
+// fell back, and must never present the fallback as a private total. Regressing
+// these strings is exactly how the 750-vs-105 confusion comes back.
+check('names the metric (private working set)', dashboard.includes('private working set'), true);
+check('no longer labels the metric as commit', !dashboard.includes('MEM total (private commit)') && !dashboard.includes("'total (private commit)'"), true);
+check('records what the metric used to be', dashboard.includes('used to be private commit'), true);
+check('says it sums the whole webview tree', dashboard.includes('every WebView2 process in our own tree'), true);
+check('spells out what the tree covers', dashboard.includes('browser') && dashboard.includes('GPU') && dashboard.includes('crashpad') && dashboard.includes('utility services'), true);
+check('distinguishes resident from commit', dashboard.includes('pagefile commit'), true);
+check('stale 880-vs-179 claim is gone', !dashboard.includes('880 MiB'), true);
+check('names the fallback basis when degraded', dashboard.includes('full working set') && dashboard.includes('Degraded'), true);
+check('degraded marker is a visible banner', dashboard.includes('border-amber-400/40'), true);
+check('says the fallback over-counts shared pages', dashboard.includes('reads HIGH'), true);
+check('compares against Task Manager by name', dashboard.includes('Task Manager'), true);
+check('surfaces omitted process count', dashboard.includes('omitted ${perfOmitted}'), true);
+check('chart label carries the live basis', dashboard.includes('MEM total (${perfBasisLabel})'), true);
+check('legend carries the live basis', dashboard.includes('total (${perfBasisLabel})'), true);
+check('rust doc does not claim Task Manager parity', !perfRs.includes('matches Task Manager'), true);
+check('rust doc does not call the tree renderers-only', !perfRs.includes('own WebView2 renderers private bytes'), true);
+check('scope test pins helpers + foreign exclusion', perfRs.includes('fn tree_counts_helpers_not_just_renderers'), true);
 
 if (failures > 0) {
   console.error(`${failures} failure(s)`);

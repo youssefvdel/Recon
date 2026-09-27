@@ -162,7 +162,12 @@ async function edgeGet(path: string, drain = false): Promise<string> {
     // pregame/menus always fetch (lobby pre-fetch window). Unknown ('')
     // keeps the Rust fullscreen-facts fallback. drain exempts an
     // already-budgeted fill draining across the phase flip.
-    return await invoke<string>('trn_proxy_fetch', { path, phase: trnMatchPhase, drain });
+    return await invoke<string>('trn_proxy_fetch', {
+      path,
+      phase: trnMatchPhase,
+      drain,
+      lobby: trnLobbyKey,
+    });
   } catch (e) {
     throw new Error(typeof e === 'string' ? e : e instanceof Error ? e.message : String(e));
   }
@@ -174,9 +179,22 @@ async function edgeGet(path: string, drain = false): Promise<string> {
  * budgeted ladder-guarded fetch, never over-pauses the lobby. */
 let trnMatchPhase = '';
 
+/* Best-known lobby (matchId) for the Rust-side shared per-lobby request
+ * ceiling. Every TRN request carries it so the ceiling in trn_proxy.rs can
+ * count a lobby ONCE across BOTH WebView realms (see the comment there) —
+ * a per-realm counter cannot bound anything. Module state, not persisted;
+ * '' means "no lobby" (menus, Tracker tab) and is billed only to the
+ * per-hour ceiling, never to a lobby's. */
+let trnLobbyKey = '';
+
 /** Stamp the proxy pause hint (pregame/agent-select must never pause). */
 export function setTrnMatchPhase(phase: string): void {
   trnMatchPhase = phase;
+}
+
+/** Stamp the current lobby key for the shared per-lobby request ceiling. */
+export function setTrnLobbyKey(matchId: string): void {
+  trnLobbyKey = matchId;
 }
 
 /** Test seam: read the hint back. */
@@ -362,6 +380,30 @@ export function isTrnDeadQuiet(): boolean {
   return Date.now() < trnDeadQuietUntil;
 }
 
+/* ------------------------------------------------------------------ *
+ * Per-player cache bounds
+ *
+ * The maps below are keyed by `name#tag` (+ playlist/season), so their key
+ * space is "every player this install has ever looked up" — unbounded over
+ * a session. All of them carry their own timestamp, so oldest-first
+ * eviction is age-ordered (there is no LRU helper in this codebase to
+ * reuse and none is warranted for three maps).
+ * ------------------------------------------------------------------ */
+
+/** Oldest-first eviction down to `cap`; `at` reads the entry's own age. */
+function evictOldest<K, V>(map: Map<K, V>, cap: number, at: (v: V) => number): void {
+  if (map.size <= cap) return;
+  for (const [k] of [...map.entries()].sort((a, b) => at(a[1]) - at(b[1]))) {
+    if (map.size <= cap) break;
+    map.delete(k);
+  }
+}
+
+/** Dead-path stamps: 30s cooldown each, keyed by a full request path. Only
+ *  the failures of the last few minutes can ever be read again, so 64 keys
+ *  (~6 players x profile+season paths, several over) is generous. */
+const TRN_PATH_STAMPS_MAX = 64;
+
 /* ---- Per-path failure backoff: one dead URL burns once per 30s ---- *
  * Five views chase one player (Overview, Mini, modal, enrichment, fill) and
  * gate/budget/cooldown don't stop DIFFERENT callers re-firing one dead path
@@ -374,6 +416,7 @@ const trnPathFailedAt = new Map<string, number>();
 /** Stamp a failed attempt for this exact path. */
 export function noteTrnPathFailed(path: string): void {
   trnPathFailedAt.set(path, Date.now());
+  evictOldest(trnPathFailedAt, TRN_PATH_STAMPS_MAX, (at) => at);
 }
 
 /** True while this exact path is cooling after a failure. Pure read. */
@@ -402,6 +445,9 @@ export function isTrnPrivateError(msg: unknown): boolean {
  *  construction too — zero prod output. `logger` timestamps + buffers every
  *  line, so the DevDashboard log export carries them with no new UI. */
 export function trnLog(event: string, detail = ''): void {
+  // Belt-and-braces alongside the call-site `if (import.meta.env.DEV)` gates:
+  // a future ungated caller still compiles to a bare return in prod.
+  if (!import.meta.env.DEV) return;
   logger.log(`[TRN ${new Date().toISOString().slice(11, 23)}] ${event}${detail ? ` ${detail}` : ''}`);
 }
 
@@ -435,9 +481,115 @@ export async function trnProxyPaused(): Promise<boolean> {
   }
 }
 
+/* ---------- file-backed response cache (trn_cache.rs) ------------ *
+ * The bodies are megabyte-scale — the root profile measured 1.27 MB and a
+ * competitive season segment 1.72 MB (largest observed 2,176,778 chars) —
+ * and they were persisted into localStorage, whose whole origin budget on
+ * this install measured 4.76 MB of a ~5 MB quota: a 256 KiB write succeeded,
+ * a 512 KiB write threw QuotaExceededError. So `writePersisted` threw for
+ * every real payload, the error was swallowed, and the persistence layer was
+ * silently dead: after 40+ successful season fetches
+ * `recon_trn_cache_v1:profile:*` and `season:*` were ABSENT from localStorage
+ * while only the small `matches:*` entry persisted. Every cold start therefore
+ * re-fetched everything and re-tripped the rate limit. Four season segments
+ * plus a profile plus matches is ~9 MB against a ~5 MB ceiling, so no amount
+ * of eviction makes localStorage the right store for the bodies. Files can.
+ *
+ * The bodies moved; nothing else did. The NEGATIVE registry and the COOLDOWN
+ * state stay in localStorage on purpose: they are a few hundred bytes per
+ * install, they are read on the hot path of every player fetch (a synchronous
+ * read, where an IPC round trip would be a new cost on every view open), and
+ * they are the two things that stop a rate-limited or private profile from
+ * being re-requested in a loop. Moving them would add a failure mode to the
+ * one mechanism that must never fail. The small derived maps
+ * (`fetchTrnMatches` / `fetchTrnMatchDetails`) stay there too, for the same
+ * reason: KB-scale, and the sync read is what makes a repeat poll free.
+ *
+ * TTL POLICY STAYS HERE. Rust stores a body and returns `fetched_at`;
+ * `trnCacheVerdict` below is the entire freshness decision. A `trnGet` with
+ * no `ttlMs` neither reads nor writes the cache, which is what keeps the Dev
+ * QA burst hammer's deliberately-raw `trnGet` uncached. */
+export interface TrnCacheEntry {
+  /** Echoed from the stored header; Rust verified it against the request. */
+  path: string;
+  /** The raw response text, byte-identical to what the wire returned. */
+  body: string;
+  /** Epoch ms the body was fetched, written by Rust. The only clock fact. */
+  fetched_at: number;
+}
+
+export interface TrnCachePut {
+  stored: boolean;
+  bytes: number;
+  cap: number;
+  /** Empty on success; on a refusal this is the line the user sees. */
+  reason: string;
+}
+
+/** Pure: an entry is fresh while its OWN age is inside the caller's TTL. A
+ *  missing/zero/non-finite stamp is never fresh — an entry whose age cannot
+ *  be established must not be served as if it were current. */
+export function trnCacheFresh(fetchedAt: number, ttlMs: number, now = Date.now()): boolean {
+  return Number.isFinite(fetchedAt) && fetchedAt > 0 && now - fetchedAt < ttlMs;
+}
+
+/** Pure: the lookup verdict. `null`/`undefined` = nothing on disk = miss.
+ *  Checked by scripts/trn-cache-check.ts. */
+export function trnCacheVerdict(
+  entry: TrnCacheEntry | null | undefined,
+  ttlMs: number,
+  now = Date.now()
+): 'hit' | 'miss' {
+  return entry && trnCacheFresh(entry.fetched_at, ttlMs, now) ? 'hit' : 'miss';
+}
+
+/** Disk lookup. `undefined` = miss (absent, stale, corrupt, or a backend
+ *  without the command) and the caller falls through to the wire — a
+ *  degradation, not a failure, which is why it is reported and not thrown. */
+async function trnCacheLookup(path: string, ttlMs: number): Promise<unknown | undefined> {
+  try {
+    const e = await invoke<TrnCacheEntry | null>('trn_cache_get', { path });
+    if (trnCacheVerdict(e, ttlMs) !== 'hit' || !e) return undefined;
+    // Rust already proved this parses (it validates the body on read), so a
+    // throw here would mean the two sides disagree — fall through to the wire.
+    return JSON.parse(e.body) as unknown;
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      trnLog('cache read failed', `${path.slice(0, 60)} ${String(err).slice(0, 80)}`);
+    }
+    return undefined;
+  }
+}
+
+/** Fire-and-forget store: the caller already has its data, so a disk write
+ *  must never hold up a lobby fill. A refusal is REPORTED — Rust traces it
+ *  into the dev ring and the DEV log carries it too — because the failure
+ *  mode being replaced was an exception nobody could see. */
+function trnCacheStore(path: string, body: string, ttlMs: number): void {
+  if (!Number.isFinite(ttlMs) || ttlMs <= 0) return;
+  void invoke<TrnCachePut>('trn_cache_put', { path, body })
+    .then((r) => {
+      if (r && r.stored === false && import.meta.env.DEV) {
+        trnLog('cache write refused', `${path.slice(0, 60)} ${r.reason}`);
+      }
+    })
+    .catch((err) => {
+      if (import.meta.env.DEV) {
+        trnLog('cache write failed', `${path.slice(0, 60)} ${String(err).slice(0, 80)}`);
+      }
+    });
+}
+
 export async function trnGet(
   path: string,
-  opts?: { immediate?: boolean; onTransport?: (t: TrnTransport) => void; drain?: boolean }
+  opts?: {
+    immediate?: boolean;
+    onTransport?: (t: TrnTransport) => void;
+    drain?: boolean;
+    /** Opt in to the file cache with THIS caller's freshness policy (ms).
+     *  Omit it and the call is neither read from nor written to disk. */
+    ttlMs?: number;
+  }
 ): Promise<unknown> {
   // Kill-switch first: cheapest possible branch (one cached boolean), no
   // network, no gate, no timers touched. Same TRN_* throw shape as cooldown
@@ -451,6 +603,17 @@ export async function trnGet(
   if (!isTauri()) {
     report('EDGE');
     throw new Error('TRN needs the desktop app.');
+  }
+
+  // File cache FIRST, ahead of every gate below it. A warm start has to be
+  // silent even when the previous session ended mid-cooldown, mid-pause or
+  // mid-dead-network, so none of those may turn a body we already hold into a
+  // network request. Every caller consults the negative registry before it
+  // gets here, so a proven private/missing still never reads. No `report()`:
+  // no transport ran, and the tag exists to name one.
+  if (opts?.ttlMs) {
+    const cached = await trnCacheLookup(path, opts.ttlMs);
+    if (cached !== undefined) return cached;
   }
 
   // Per-path backoff BEFORE anything with a cost (even before pause/dead-quiet
@@ -525,6 +688,7 @@ export async function trnGet(
     // the shared ladder below unchanged; transport failures propagate to
     // the caller (Riot-direct fallback) with no pin and no retry here.
     raw = await edgeGet(path, opts?.drain === true);
+    if (opts?.ttlMs) trnCacheStore(path, raw, opts.ttlMs);
     if (import.meta.env.DEV) trnLog('outcome', `transport=EDGE status=ok elapsed=${Date.now() - t0}ms`);
     // An answered request proves the path is alive — reset the dead breaker.
     trnDeadStreak = 0;
@@ -588,11 +752,12 @@ export async function trnGet(
   }
 }
 
-/* ---------- persistent caches -------------------------------------- *
- * TRN act/agent/map data only changes when a match ends, so it is worth
- * surviving a reload. Persisting also means a restart no longer re-fetches
- * everything and re-trips the rate limit. */
-
+/* ---------- small persisted caches (localStorage) -------------------- *
+ * ONLY for the two KB-scale DERIVED maps below: the matchId -> TRS table and
+ * the match -> player/agent TRS table. The megabyte response bodies moved to
+ * `trn_cache.rs` (see the file-cache note above) because localStorage cannot
+ * hold them; these fit, and a synchronous read is what makes a repeat poll
+ * free. */
 const TRN_CACHE_PREFIX = 'recon_trn_cache_v1';
 
 function readPersisted<T>(key: string, ttlMs: number): T | null {
@@ -607,9 +772,14 @@ function readPersisted<T>(key: string, ttlMs: number): T | null {
   }
 }
 
-function writePersisted<T>(key: string, data: T): void {
+/** Returns false when the entry could NOT be persisted (quota, private
+ *  mode). The caller logs it in DEV: this exact call used to swallow the
+ *  failure, and a cache that silently stops persisting is the bug this whole
+ *  change exists to end. */
+function writePersisted<T>(key: string, data: T): boolean {
   try {
     localStorage.setItem(`${TRN_CACHE_PREFIX}:${key}`, JSON.stringify({ at: Date.now(), data }));
+    return true;
   } catch {
     // Quota: evict the oldest TRN entries, then retry once. Without this the
     // cache silently stops persisting and every restart re-fetches everything,
@@ -631,8 +801,10 @@ function writePersisted<T>(key: string, data: T): void {
         .slice(0, Math.max(10, victims.length - 40))
         .forEach((v) => localStorage.removeItem(v.k));
       localStorage.setItem(`${TRN_CACHE_PREFIX}:${key}`, JSON.stringify({ at: Date.now(), data }));
+      return true;
     } catch {
       /* private mode — memory caches still cover this session */
+      return false;
     }
   }
 }
@@ -715,29 +887,57 @@ export interface TrnActStats {
   avatarUrl: string;
 }
 
-// In-memory cache for root profiles (10 min TTL)
+// Session memo for root profiles; the file cache (trn_cache.rs) is what
+// survives a restart.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const profileCache = new Map<string, { at: number; data: any }>();
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 /* Root profiles barely change; 24h keeps restarts from re-fetching everything. */
 const PROFILE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/* In-memory caps. A VALORANT lobby is at most 12 players and a night is a
+ * few dozen matches, so 200 keys is ~16 lobbies of slack. Over cap the
+ * oldest is dropped; the file cache survives the eviction, so a player who
+ * comes back is still served from disk. */
+const PROFILE_CACHE_MAX = 200;
+const SEASON_SEG_CACHE_MAX = 200;
+
+/* In-flight dedup for the root profile. One refresh fires FOUR of these at
+ * once for the SAME account: the current act (useTrackerData.ts:504) plus the
+ * three previous acts (:540), all pushed into `enrichment` in one tick. Every
+ * one of them read the empty map before any had stored, so all four went to
+ * the wire — the live trace showed this one path fetched three times and
+ * memo-hit twice inside 61s, because the Rust memo is only 10s and the serial
+ * gate spaces the four 6-8s apart. `seasonInFlight` below is the same
+ * mechanism for season segments; the root profile was simply missing it. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const profileInFlight = new Map<string, Promise<any>>();
 
 async function getRootProfile(name: string, tag: string, drain = false): Promise<any> {
   if (trnNegativeBlocked(name, tag)) throw new Error(TRN_NEGATIVE_BACKOFF);
   const key = `${name.toLowerCase()}#${tag.toLowerCase()}`;
   const hit = profileCache.get(key);
   if (hit && Date.now() - hit.at < PROFILE_TTL_MS) return hit.data;
-  const persisted = readPersisted<any>(`profile:${key}`, PROFILE_TTL_MS);
-  if (persisted) {
-    profileCache.set(key, { at: Date.now(), data: persisted });
-    return persisted;
+  const running = profileInFlight.get(key);
+  if (running) return running;
+
+  const task = (async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const j: any = await trnGet(riotId(name, tag), {
+      ...(trnDrainFor(name, tag, drain) ? { drain: true } : {}),
+      // Disk-backed across restarts; the TTL rides along as the policy.
+      ttlMs: PROFILE_TTL_MS,
+    });
+    profileCache.set(key, { at: Date.now(), data: j });
+    evictOldest(profileCache, PROFILE_CACHE_MAX, (v) => v.at);
+    return j;
+  })();
+  profileInFlight.set(key, task);
+  try {
+    return await task;
+  } finally {
+    if (profileInFlight.get(key) === task) profileInFlight.delete(key);
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const j: any = await trnGet(riotId(name, tag), trnDrainFor(name, tag, drain) ? { drain: true } : undefined);
-  profileCache.set(key, { at: Date.now(), data: j });
-  writePersisted(`profile:${key}`, j);
-  return j;
 }
 
 /** Current-season overview segment straight from TRN (act-wide, ties included). */
@@ -766,7 +966,8 @@ function stat(seg: any, key: string): number {
   return num(seg?.stats?.[key]?.value);
 }
 
-// In-memory cache for season segments (10 min TTL)
+// Session memo for season segments; the file cache (trn_cache.rs) is what
+// survives a restart.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const seasonSegCache = new Map<string, { at: number; data: any }>();
 // In-flight dedup: agents+maps+acts fan out via Promise.all for the same
@@ -793,12 +994,6 @@ async function fetchSeasonSeg(name: string, tag: string, playlist: string, seaso
   const cacheKey = `${n.toLowerCase()}#${t.toLowerCase()}_${pl}_${sid}`;
   const hit = seasonSegCache.get(cacheKey);
   if (hit && Date.now() - hit.at < ttl) return hit.data;
-  // Survive reloads: a restart must not re-request every act we already hold.
-  const persisted = readPersisted<any>(`season:${cacheKey}`, ttl);
-  if (persisted) {
-    seasonSegCache.set(cacheKey, { at: Date.now(), data: persisted });
-    return persisted;
-  }
   const running = seasonInFlight.get(cacheKey);
   if (running) return running;
 
@@ -806,7 +1001,12 @@ async function fetchSeasonSeg(name: string, tag: string, playlist: string, seaso
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const j: any = await trnGet(
       `${riotId(n, t)}/segments/season?playlist=${encodeURIComponent(pl)}${seasonId ? `&seasonId=${encodeURIComponent(seasonId)}` : ''}&source=web`,
-      trnDrainFor(n, t, drain) ? { drain: true } : undefined
+      {
+        ...(trnDrainFor(n, t, drain) ? { drain: true } : {}),
+        // Survive reloads: a restart must not re-request every act we already
+        // hold. The TTL rides along because it is this caller's policy.
+        ttlMs: ttl,
+      }
     );
     const segs = Array.isArray(j?.data) ? j.data : [];
     const targetSeg = seasonId
@@ -821,7 +1021,7 @@ async function fetchSeasonSeg(name: string, tag: string, playlist: string, seaso
     if (!targetSeg) throw new Error('TRN no season segment.');
     const result = { seg: targetSeg, data: j?.data };
     seasonSegCache.set(cacheKey, { at: Date.now(), data: result });
-    writePersisted(`season:${cacheKey}`, result);
+    evictOldest(seasonSegCache, SEASON_SEG_CACHE_MAX, (v) => v.at);
     return result;
   })();
   seasonInFlight.set(cacheKey, task);
@@ -1450,6 +1650,9 @@ export function calculateTrsFallback(params: {
  * the real `trnPerformanceScore` (TRS) for each match.
  * Returns a map of matchId -> TRS.
  */
+/** Recent matches move a few times a day at most. */
+const TRN_MATCHES_TTL_MS = 6 * 60 * 60 * 1000;
+
 export async function fetchTrnMatches(
   name: string,
   tag: string,
@@ -1458,13 +1661,16 @@ export async function fetchTrnMatches(
 ): Promise<Record<string, number>> {
   if (trnNegativeBlocked(name, tag)) throw new Error(TRN_NEGATIVE_BACKOFF);
   const key = `matches:${name.toLowerCase()}#${tag.toLowerCase()}:${playlist}`;
-  const cached = readPersisted<Record<string, number>>(key, 6 * 3600 * 1000); // 6 hours
+  const cached = readPersisted<Record<string, number>>(key, TRN_MATCHES_TTL_MS);
   if (cached) return cached;
 
   const path = `/api/v2/valorant/standard/matches/riot/${encodeURIComponent(name)}%23${encodeURIComponent(tag)}?type=${encodeURIComponent(playlist)}`;
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const raw = (await trnGet(path, trnDrainFor(name, tag, opts?.drain === true) ? { drain: true } : undefined)) as any;
+    const raw = (await trnGet(path, {
+      ...(trnDrainFor(name, tag, opts?.drain === true) ? { drain: true } : {}),
+      ttlMs: TRN_MATCHES_TTL_MS,
+    })) as any;
     const matches = raw?.data?.matches;
     if (!Array.isArray(matches)) return {};
 
@@ -1477,7 +1683,9 @@ export async function fetchTrnMatches(
       }
     }
     // Never cache an empty map: a parse miss must not poison the 6h cache.
-    if (Object.keys(out).length > 0) writePersisted(key, out);
+    if (Object.keys(out).length > 0 && !writePersisted(key, out) && import.meta.env.DEV) {
+      trnLog('cache write refused', `localStorage ${key.slice(0, 60)}`);
+    }
     return out;
   } catch (e) {
     if (import.meta.env.DEV) logger.warn('Failed to fetch TRN matches:', e);
@@ -1489,18 +1697,21 @@ export async function fetchTrnMatches(
  * Fetches full match details from Tracker.gg to extract the real TRS for EVERY player in the lobby.
  * Returns a map keyed by lowercase Riot ID ("name#tag") and lowercase agent name -> TRS.
  */
+/** Past matches are immutable, so their TRS never needs revalidating. */
+const TRN_MATCH_DETAIL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
 export async function fetchTrnMatchDetails(
   matchId: string
 ): Promise<Record<string, number>> {
   if (!matchId) return {};
   const key = `match_detail_trs:${matchId}`;
-  const cached = readPersisted<Record<string, number>>(key, 7 * 24 * 3600 * 1000); // 7 days (past matches are immutable)
+  const cached = readPersisted<Record<string, number>>(key, TRN_MATCH_DETAIL_TTL_MS);
   if (cached) return cached;
 
   const path = `/api/v2/valorant/standard/matches/${encodeURIComponent(matchId)}`;
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const raw = (await trnGet(path)) as any;
+    const raw = (await trnGet(path, { ttlMs: TRN_MATCH_DETAIL_TTL_MS })) as any;
     const segments = raw?.data?.segments;
     if (!Array.isArray(segments)) return {};
 
@@ -1526,7 +1737,9 @@ export async function fetchTrnMatchDetails(
       if (agent && !(`agent:${agent}` in out)) out[`agent:${agent}`] = roundedTrs;
     }
     // Never cache an empty map: a parse miss must not poison the 7d cache.
-    if (Object.keys(out).length > 0) writePersisted(key, out);
+    if (Object.keys(out).length > 0 && !writePersisted(key, out) && import.meta.env.DEV) {
+      trnLog('cache write refused', `localStorage ${key.slice(0, 60)}`);
+    }
     return out;
   } catch (e) {
     if (import.meta.env.DEV) logger.warn('Failed to fetch TRN match detail:', e);

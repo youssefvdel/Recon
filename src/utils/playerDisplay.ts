@@ -47,6 +47,10 @@ export function getTrackerUrls(name: string, tag?: string) {
 
 /** Tooltip for the private-tracker lock badge in player rows. */
 export const TRN_PRIVATE_TOOLTIP = 'Private tracker profile — sign in on tracker.gg to make it public';
+/** Tooltip for the "still filling" dot on an unresolved TRN stat. */
+export const TRN_PENDING_TOOLTIP = 'Fetching tracker.gg stats…';
+/** Tooltip for a TRN stat we asked for and could not get. */
+export const TRN_UNAVAILABLE_TOOLTIP = 'tracker.gg lookup failed — retrying later';
 
 /** Full MMR picture for a lobby player, surfaced on hover. */
 export function rankTooltip(p: LiveMatchPlayer, actLabel?: string): string {

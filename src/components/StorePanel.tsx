@@ -89,10 +89,28 @@ export const StorePanel: React.FC = () => {
   }, [store?.fetchedAt]);
 
   // Clocks tick every second — countdowns come from the payload, never refetched.
+  // Hidden-tab skip: no countdown semantics change, still exactly 1s visible.
   useEffect(() => {
     if (!store) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      setNow(Date.now());
+    };
+    const onVis = () => {
+      if (typeof document !== 'undefined' && !document.hidden) setNow(Date.now());
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVis);
+      window.addEventListener('focus', onVis);
+    }
+    const id = setInterval(tick, 1000);
+    return () => {
+      clearInterval(id);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVis);
+        window.removeEventListener('focus', onVis);
+      }
+    };
   }, [store]);
 
   // Auto-rotation, like the client: advance every 6s while several bundles

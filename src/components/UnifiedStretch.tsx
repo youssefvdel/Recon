@@ -783,7 +783,7 @@ export const UnifiedStretch: React.FC<UnifiedStretchProps> = ({
                 </div>
               ) : autoBlState === 'waiting' ? (
                 <div className="px-2 py-1.5 rounded-lg border border-m3-tertiary/50 bg-m3-tertiary/10 text-[10px] text-m3-on-surface-variant flex items-center gap-1.5 leading-snug">
-                  <span className="w-1.5 h-1.5 rounded-full bg-m3-tertiary animate-pulse shrink-0" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-m3-tertiary shrink-0" />
                   <span className="truncate">Stretched — waiting for Valorant, will auto-borderless on launch…</span>
                 </div>
               ) : (

@@ -60,6 +60,9 @@ export const AccountsView: React.FC = () => {
   useEffect(() => {
     let dead = false;
     const tick = async () => {
+      // Hidden-tab skip: the tab is unmounted at idle overview anyway; this
+      // covers idling with the accounts tab open in a hidden window.
+      if (typeof document !== 'undefined' && document.hidden) return;
       const r = await accountsAutoTick();
       if (dead || !r || !r.changed) return;
       await load();
@@ -72,10 +75,22 @@ export const AccountsView: React.FC = () => {
       });
     };
     tick();
+    const onVis = () => {
+      if (typeof document === 'undefined' || document.hidden) return;
+      void tick();
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVis);
+      window.addEventListener('focus', onVis);
+    }
     const id = setInterval(tick, 30000);
     return () => {
       dead = true;
       clearInterval(id);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVis);
+        window.removeEventListener('focus', onVis);
+      }
     };
   }, [load]);
 
@@ -187,7 +202,7 @@ export const AccountsView: React.FC = () => {
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-[10px] font-mono text-emerald-300"
               title="New logins save themselves; stored credentials renew automatically"
             >
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
               auto-save on
             </span>
             <button

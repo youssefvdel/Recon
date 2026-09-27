@@ -28,7 +28,6 @@ interface SidebarProps {
   displayInfo: DisplayInfo | null;
   gpuInfo: GpuInfo | null;
   hasUpdate?: boolean;
-  onOpenUpdates?: () => void;
 }
 
 /* Tracker group — keyless Riot data, zero signup. */
@@ -135,7 +134,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }, []);
 
   /* Unread Riot chat count, so an incoming message is visible from any tab —
-     a chat that only refreshes while you stare at it is a broken chat. */
+     a chat that only refreshes while you stare at it is a broken chat.
+     Idle-stretched to 30s (was 10s); visibility/focus return refreshes
+     immediately so the badge never sits a full interval stale. */
   const [chatUnread, setChatUnread] = useState(0);
   useEffect(() => {
     let alive = true;
@@ -148,10 +149,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
         .catch(() => {});
     };
     tick();
-    const id = setInterval(tick, 10000);
+    const onVis = () => {
+      if (typeof document === 'undefined' || document.hidden) return;
+      tick();
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVis);
+      window.addEventListener('focus', onVis);
+    }
+    const id = setInterval(tick, 30000);
     return () => {
       alive = false;
       clearInterval(id);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVis);
+        window.removeEventListener('focus', onVis);
+      }
     };
   }, []);
 
@@ -194,7 +207,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             title={hasUpdate ? "New update available — click to open Settings" : `Recon v${appVer}`}
             className={`shrink-0 relative px-2.5 py-0.5 text-[10px] font-mono font-semibold rounded-full flex items-center gap-1.5 transition-all cursor-pointer ${
               hasUpdate
-                ? 'text-m3-on-primary bg-m3-primary shadow-sm hover:opacity-90 animate-pulse'
+                ? 'text-m3-on-primary bg-m3-primary shadow-sm hover:opacity-90'
                 : 'text-m3-primary bg-m3-primary-container/50 hover:bg-m3-primary/20 border border-m3-primary/40'
             }`}
           >

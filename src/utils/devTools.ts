@@ -23,7 +23,9 @@ const readFlag = (key: string): string | null => {
 export const getDevMockPhase = (): DevMockPhase => {
   // Ungated, any prod user (or stray extension) with this localStorage key
   // would get canned fake-match data in live paths. Dev-only, like the
-  // sibling flags below.
+  // sibling flags below. Static gate first so prod DCE drops the body;
+  // the IS_DEV check keeps the dev-time semantics identical.
+  if (!import.meta.env.DEV) return 'off';
   if (!IS_DEV) return 'off';
   const v = readFlag(DEV_MOCK_KEY);
   return v === 'pregame' || v === 'coregame' || v === 'deathmatch' ? v : 'off';
@@ -31,6 +33,7 @@ export const getDevMockPhase = (): DevMockPhase => {
 
 /** Physical-Tab override for testing the in-match scoreboard peek hands-free. */
 export const isDevTabHeld = (): boolean => {
+  if (!import.meta.env.DEV) return false;
   if (!IS_DEV) return false;
   try {
     return localStorage.getItem(DEV_TAB_KEY) === '1';
@@ -41,6 +44,7 @@ export const isDevTabHeld = (): boolean => {
 
 /** Pretend the Riot Client is closed to exercise empty states. */
 export const isDevNoClient = (): boolean => {
+  if (!import.meta.env.DEV) return false;
   if (!IS_DEV) return false;
   try {
     return localStorage.getItem(DEV_NO_CLIENT_KEY) === '1';
@@ -201,6 +205,8 @@ function mockDeathmatch(): LiveMatchState {
 export function getDevMockMatch(): LiveMatchState | null {
   // Belt-and-braces alongside the getDevMockPhase gate: mock data must never
   // reach a production build even if a caller bypasses the phase check.
+  // Static first so prod DCE drops the switch below to a bare null.
+  if (!import.meta.env.DEV) return null;
   if (!IS_DEV) return null;
   switch (getDevMockPhase()) {
     case 'pregame':

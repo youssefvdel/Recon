@@ -1,6 +1,6 @@
 [package]
 name = "recon"
-version = "0.4.3"
+version = "0.4.4"
 description = "Recon - Competitive Stretched Resolution & Utility"
 authors = ["Youssef Adel <contact@reconlab.app>"]
 license = "Proprietary"
@@ -45,5 +45,8 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 ini-preserve = "0.1.3"
+# Riot API transport: native-tls == Schannel on Windows (OS trust store, no
+# bundled TLS stack, no libclang/cmake). Replaces the per-request curl.exe spawn.
+native-tls = "0.2"
 tokio = { version = "=1.53.1", features = ["rt", "macros", "sync", "time", "net"] }
 

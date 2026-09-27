@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Sparkles,
   RefreshCw,
@@ -25,7 +25,13 @@ import {
   restartApp,
   getUpdateChannel,
   setUpdateChannel,
+  getInstallBlocker,
+  getAutoUpdateState,
+  subscribeAutoUpdate,
+  installAutoUpdate,
+  SAFE_INSTALL_POLL_MS,
   type AvailableUpdate,
+  type AutoUpdateState,
   type UpdateChannel,
 } from '../utils/updater';
 import {
@@ -61,6 +67,11 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
   const [installing, setInstalling] = useState(false);
   const [installStatus, setInstallStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Background auto-updater state, owned by utils/updater (module-level, so it
+  // survives tab switches). Auto-downloaded updates install from here too.
+  const [autoUpdate, setAutoUpdate] = useState<AutoUpdateState>(getAutoUpdateState);
+  const [installBlocker, setInstallBlocker] = useState<string | null>(null);
 
   // System settings state
   const [autostart, setAutostart] = useState(false);
@@ -158,10 +169,51 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
     handleCheckUpdates(channel);
   };
 
+  // Boot once: the deps include the inline onUpdateStatusChange prop, which
+  // changes identity whenever App re-renders (e.g. every download progress
+  // tick), and re-running loadSettings / a GitHub check per tick would be waste.
+  const bootedRef = useRef(false);
   useEffect(() => {
+    if (bootedRef.current) return;
+    bootedRef.current = true;
     loadSettings();
-    handleCheckUpdates();
-  }, [loadSettings, handleCheckUpdates]);
+    // The launch check may already have found (and started downloading) an
+    // update — adopt it instead of firing a duplicate GitHub request.
+    const auto = getAutoUpdateState();
+    if (auto.update) {
+      // Seeding from the module-level updater store at mount is deliberate.
+      // eslint-disable-next-line react/set-state-in-effect
+      setUpdateInfo(auto.update);
+      onUpdateStatusChange?.(true, auto.update.version);
+    } else {
+      handleCheckUpdates();
+    }
+  }, [loadSettings, handleCheckUpdates, onUpdateStatusChange]);
+
+  // Mirror the background updater so the card shows download progress / ready.
+  useEffect(() => subscribeAutoUpdate(setAutoUpdate), []);
+
+  // Keep the Install button honest while an update is offered: the predicate
+  // can flip at any moment (match starts, overlay opens). The click re-checks.
+  useEffect(() => {
+    if (!updateInfo && autoUpdate.phase !== 'ready') return;
+    let alive = true;
+    const tick = () => {
+      getInstallBlocker()
+        .then((reason) => {
+          if (alive) setInstallBlocker(reason);
+        })
+        .catch(() => {
+          if (alive) setInstallBlocker('Could not verify the match/overlay state — try again in a moment.');
+        });
+    };
+    tick();
+    const id = setInterval(tick, SAFE_INSTALL_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [updateInfo, autoUpdate.phase]);
 
   // The overlay owns its own Lock button (and Escape key). Without a listener
   // this view keeps the stale edit-mode flag and keeps asking to "Lock HUD".
@@ -258,6 +310,31 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
   };
 
   const handleInstallUpdate = async () => {
+    // Same guard as the auto path: installing exits the app on Windows, so a
+    // live match or a visible overlay must hard-block it, with a reason shown.
+    const blocker = await getInstallBlocker();
+    if (blocker) {
+      setError(blocker);
+      setInstallBlocker(blocker);
+      return;
+    }
+
+    // Prefer the build the background updater already downloaded and verified.
+    const readyAuto = autoUpdate.phase === 'ready' ? autoUpdate.update : null;
+    if (readyAuto && (!updateInfo || readyAuto.version === updateInfo.version)) {
+      setInstalling(true);
+      setInstallStatus('Installing — the app will restart itself...');
+      setError(null);
+      try {
+        await installAutoUpdate();
+        setInstallStatus('Installed. Restarting...');
+      } catch (e) {
+        setError(String(e));
+        setInstalling(false);
+      }
+      return;
+    }
+
     if (!updateInfo) return;
 
     setInstalling(true);
@@ -304,6 +381,14 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
       }
     } catch {}
   };
+
+  const autoDownloadingSame =
+    autoUpdate.phase === 'downloading' &&
+    !!autoUpdate.update &&
+    (!updateInfo || autoUpdate.update.version === updateInfo.version);
+  // Only meaningful while an update is actually offered; avoids showing a
+  // stale reason from a previous, already-handled update.
+  const activeInstallBlocker = updateInfo || autoUpdate.phase === 'ready' ? installBlocker : null;
 
   return (
     <div className="h-full flex flex-col min-h-0 overflow-y-auto custom-scrollbar bg-m3-surface px-4 sm:px-8 py-6">
@@ -431,7 +516,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
             <div className="p-4 sm:p-5 rounded-2xl bg-m3-primary/10 border border-m3-primary/40 flex flex-col space-y-3.5">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center space-x-2.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-m3-primary animate-pulse" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-m3-primary" />
                   <span className="text-xs sm:text-sm font-bold text-m3-primary">
                     New Version Available: {updateInfo.version}
                   </span>
@@ -451,10 +536,36 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
                 </div>
               </div>
 
-              {installStatus && (
+              {installStatus ? (
                 <div className="flex items-center gap-2 text-xs font-semibold text-m3-primary">
                   <Loader2 className="w-4 h-4 animate-spin" />
                   <span>{installStatus}</span>
+                </div>
+              ) : autoUpdate.phase === 'downloading' && autoUpdate.update ? (
+                <div className="flex items-center gap-2 text-xs font-semibold text-m3-primary">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>
+                    Downloading v{autoUpdate.update.version} in the background
+                    {autoUpdate.total > 0
+                      ? ` — ${Math.min(100, Math.round((autoUpdate.downloaded / autoUpdate.total) * 100))}%`
+                      : '…'}
+                  </span>
+                </div>
+              ) : autoUpdate.phase === 'ready' && autoUpdate.update ? (
+                <div className="flex items-center gap-2 text-xs font-semibold text-m3-mint">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>v{autoUpdate.update.version} downloaded and verified — ready to install.</span>
+                </div>
+              ) : autoUpdate.phase === 'error' && autoUpdate.error ? (
+                <p className="text-[11px] text-amber-300/90 break-words">
+                  Background update failed: {autoUpdate.error}
+                </p>
+              ) : null}
+
+              {activeInstallBlocker && !installing && (
+                <div className="flex items-start gap-2 text-[11px] font-semibold text-amber-300">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>{activeInstallBlocker}</span>
                 </div>
               )}
 
@@ -469,7 +580,8 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
                 </button>
                 <button
                   onClick={handleInstallUpdate}
-                  disabled={installing}
+                  disabled={installing || autoDownloadingSame || activeInstallBlocker !== null}
+                  title={activeInstallBlocker ?? undefined}
                   className="px-4 py-1.5 rounded-xl bg-m3-primary hover:bg-m3-primary/90 text-m3-on-primary text-xs font-bold flex items-center gap-2 transition-all shadow-md cursor-pointer active:scale-95 disabled:opacity-50"
                 >
                   {installing ? (

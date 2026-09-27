@@ -4,10 +4,13 @@ mod custom_res;
 mod display;
 mod game_config;
 mod gpu;
+mod paths;
 mod perf;
+mod riot_http;
 mod shortcuts;
 mod space_spam;
 mod tracker;
+mod trn_cache;
 mod trn_proxy;
 mod window_manager;
 mod updater;
@@ -18,6 +21,13 @@ use std::sync::Mutex;
 static AUTO_BORDERLESS_ENABLED: AtomicBool = AtomicBool::new(false);
 pub static OVERLAY_EDIT_MODE: AtomicBool = AtomicBool::new(false);
 static OVERLAY_WINDOWED: AtomicBool = AtomicBool::new(false);
+
+/// Main window's logical CONTENT size at launch. Mirrored in `tauri.conf.json`
+/// (main window `width`/`height`/`minWidth`/`minHeight`). The runtime floor in
+/// `setup` uses this single constant because config min sizes are not reliably
+/// enforced on undecorated windows on Windows; that floor is grown by the
+/// measured undecorated frame delta so it keeps the client area this large.
+const MAIN_WINDOW_SIZE_LOGICAL: (f64, f64) = (1210.0, 800.0);
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -70,6 +80,50 @@ fn window_is_maximized(window: tauri::WebviewWindow) -> Result<bool, String> {
     window.is_maximized().map_err(|e| e.to_string())
 }
 
+/// Build the dev-dashboard window at runtime instead of declaring it in
+/// `tauri.conf.json`.
+///
+/// Tauri instantiates every statically-declared window during `setup`, in
+/// release too, and each one is a full WebView2 renderer process. A config-
+/// declared `dev` window therefore cost ~100MB of resident RAM on every boot
+/// for a dashboard the release UI never exposes (the TopBar button is
+/// `IS_DEV`-gated and `perf_poll` already refuses in release). Debug builds
+/// re-create it from `setup` below, so `tauri dev` keeps the identical
+/// boot-time behaviour — hidden until the button shows it.
+#[cfg(debug_assertions)]
+fn build_dev_window(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, String> {
+    tauri::WebviewWindowBuilder::new(app, "dev", tauri::WebviewUrl::App("index.html#dev".into()))
+        .title("Recon \u{2022} Dev Dashboard")
+        // 16:9. The dashboard is a multi-column grid (1 → 2 at xl → 3 at 2xl),
+        // and a 1080x780 window only ever reached 2 columns with the trace log
+        // squeezed. NOTE: 1920x1080 inner is larger than a 1080p screen once the
+        // taskbar is subtracted, so the window can overflow the bottom edge
+        // there — it is resizable, and the minimum below keeps a laptop window
+        // usable.
+        .inner_size(1920.0, 1080.0)
+        // 1100x620 is roughly 16:9, i.e. the narrowest the grid stays readable
+        // at (1 column, charts stacked, no clipped trace columns). Below that
+        // the fixed-width log cells start to collide.
+        .min_inner_size(1100.0, 620.0)
+        .resizable(true)
+        .visible(false)
+        // The webview is transparent (index.html forces `background:transparent
+        // !important`), so without this the native layer under it is white and
+        // the dark dashboard flashes white on open. `0x140e1b` is the
+        // `m3-surface` token in tailwind.config.ts.
+        .background_color(tauri::utils::config::Color(0x14, 0x0e, 0x1b, 0xff))
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+/// Release builds have no dev dashboard to open. The command stays registered
+/// so the IPC surface and the frontend `IS_DEV` gate are identical across
+/// debug and release.
+#[cfg(not(debug_assertions))]
+fn build_dev_window(_app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, String> {
+    Err("Dev dashboard is only available in debug builds.".to_string())
+}
+
 #[tauri::command]
 fn open_dev_window(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("dev") {
@@ -78,14 +132,7 @@ fn open_dev_window(app: tauri::AppHandle) -> Result<(), String> {
         let _ = w.set_focus();
         Ok(())
     } else {
-        tauri::WebviewWindowBuilder::new(&app, "dev", tauri::WebviewUrl::App("index.html#dev".into()))
-            .title("Recon \u{2022} Dev Dashboard")
-            .inner_size(1080.0, 780.0)
-            .min_inner_size(720.0, 500.0)
-            .resizable(true)
-            .build()
-            .map_err(|e| e.to_string())?;
-        Ok(())
+        build_dev_window(&app).map(|_| ())
     }
 }
 
@@ -265,11 +312,7 @@ fn get_windows() -> Result<Vec<window_manager::WindowInfo>, String> {
 #[tauri::command]
 fn set_auto_borderless(enabled: bool) -> Result<(), String> {
     AUTO_BORDERLESS_ENABLED.store(enabled, Ordering::Relaxed);
-    if let Ok(app_data) = std::env::var("LOCALAPPDATA") {
-        let dir = std::path::PathBuf::from(app_data).join("TrueStretchStudio");
-        let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::write(dir.join("auto_borderless.txt"), if enabled { "1" } else { "0" });
-    }
+    let _ = paths::write_data_file("auto_borderless.txt", if enabled { "1" } else { "0" });
     Ok(())
 }
 
@@ -531,18 +574,11 @@ fn get_quick_shortcuts() -> Result<Vec<shortcuts::QuickShortcut>, String> {
 
 #[tauri::command]
 fn check_requested_tab() -> Option<String> {
-    if let Ok(app_data) = std::env::var("LOCALAPPDATA") {
-        let p = std::path::PathBuf::from(app_data)
-            .join("TrueStretchStudio")
-            .join("requested_tab.txt");
-        if p.exists() {
-            if let Ok(content) = std::fs::read_to_string(&p) {
-                let _ = std::fs::remove_file(&p);
-                return Some(content.trim().to_lowercase());
-            }
-        }
-    }
-    None
+    let content = paths::read_data_file("requested_tab.txt")?;
+    // One-shot flag: consume it from both dirs so the migrated legacy copy is
+    // not replayed by the read fallback on the next launch.
+    paths::remove_data_file("requested_tab.txt");
+    Some(content.trim().to_lowercase())
 }
 
 #[cfg(target_os = "windows")]
@@ -575,7 +611,7 @@ extern "system" {
 pub fn trim_working_set() {
     #[cfg(target_os = "windows")]
     unsafe {
-        // 1. Trim host process itself (TrueStretchStudio)
+        // 1. Trim host process itself (Recon)
         let handle = GetCurrentProcess();
         SetProcessWorkingSetSize(handle, usize::MAX, usize::MAX);
 
@@ -640,27 +676,11 @@ pub fn trim_working_set() {
 }
 
 #[tauri::command]
-async fn check_app_updates() -> Result<updater::UpdateInfo, String> {
-    // Network call — never on the main thread, or every check freezes the UI.
-    tauri::async_runtime::spawn_blocking(updater::check_for_updates)
-        .await
-        .map_err(|e| format!("Task failed: {}", e))?
-}
-
-#[tauri::command]
 async fn check_channel_update(
     webview: tauri::Webview,
     channel: String,
 ) -> Result<Option<updater::UpdateMetadata>, String> {
     updater::check_channel_update_internal(webview, channel).await
-}
-
-#[tauri::command]
-async fn install_app_update(download_url: String) -> Result<String, String> {
-    // Downloads + swaps the binary: must stay off the UI thread.
-    tauri::async_runtime::spawn_blocking(move || updater::download_and_install_update(&download_url))
-        .await
-        .map_err(|e| format!("Task failed: {}", e))?
 }
 
 #[tauri::command]
@@ -794,6 +814,10 @@ fn list_supported_modes() -> Result<Vec<display::DisplayMode>, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Copy any pre-rename data out of %LOCALAPPDATA%\TrueStretchStudio before
+    // the first read below; copy-only, per file, idempotent, failures logged.
+    paths::migrate_legacy_data();
+
     let initial_shortcut = display::load_saved_hotkey();
     let (hotkey_controller, rx) = display::start_hotkey_listener(initial_shortcut);
 
@@ -809,12 +833,9 @@ pub fn run() {
     let preferred_stretched = std::sync::Arc::new(Mutex::new((saved_w, saved_h)));
     let pref_clone = std::sync::Arc::clone(&preferred_stretched);
 
-    let initial_auto_bl = if let Ok(app_data) = std::env::var("LOCALAPPDATA") {
-        let path = std::path::PathBuf::from(app_data).join("TrueStretchStudio").join("auto_borderless.txt");
-        std::fs::read_to_string(path).map(|s| s.trim() == "1").unwrap_or(false)
-    } else {
-        false
-    };
+    let initial_auto_bl = paths::read_data_file("auto_borderless.txt")
+        .map(|s| s.trim() == "1")
+        .unwrap_or(false);
     AUTO_BORDERLESS_ENABLED.store(initial_auto_bl, Ordering::Relaxed);
 
     // Self-heal: earlier builds wrote vendor display keys (AMD Dal*, Intel
@@ -848,6 +869,13 @@ pub fn run() {
     builder
         .manage(app_state)
         .setup(move |app| {
+            // Dev-only: re-create the boot-time dev dashboard that used to be
+            // declared in tauri.conf.json. Compiled out of release entirely —
+            // no renderer, no window, nothing to hide.
+            #[cfg(debug_assertions)]
+            if let Err(e) = build_dev_window(app.handle()) {
+                log::warn!("[dev] dev dashboard window: {e}");
+            }
             space_spam::start(app.handle());
             let handle = app.handle().clone();
             std::thread::spawn(move || {
@@ -934,8 +962,20 @@ pub fn run() {
             });
 
             // Auto In-Game Overlay Daemon:
-            // Shows overlay automatically when Valorant game window is present,
-            // and hides it when Valorant exits (unless the user is actively customizing HUD in Edit Mode).
+            // Shows overlay automatically when Valorant is the foreground window,
+            // and hides it when Valorant exits OR is tabbed out (background).
+            // Hiding while background lets the compositor skip the fullscreen
+            // transparent WebView entirely — at 260Hz that vsync churn alone is
+            // several percent CPU before any JS runs. The 2s cadence stays:
+            // worst-case re-show on tab-back-in is ~2s, fine against
+            // agent-select/pregame durations.
+            // Edit-mode / windowed-debug precedence: daemon never hides while
+            // editing (set_overlay_edit_mode already forces visible on entry).
+            // Last daemon decision for the debug-only change-of-decision trace
+            // below: u8::MAX = none yet, 0 = skip, 1 = show, 2 = hide.
+            #[cfg(debug_assertions)]
+            static LAST_OVERLAY_DECISION: std::sync::atomic::AtomicU8 =
+                std::sync::atomic::AtomicU8::new(u8::MAX);
             let auto_overlay_handle = app.handle().clone();
             std::thread::spawn(move || {
                 loop {
@@ -943,16 +983,62 @@ pub fn run() {
                     if OVERLAY_EDIT_MODE.load(Ordering::Relaxed)
                         || OVERLAY_WINDOWED.load(Ordering::Relaxed)
                     {
+                        // ponytail: eprintln!, not log::debug! — like trn_trace!,
+                        // there is no logger backend so log:: would vanish in dev.
+                        #[cfg(debug_assertions)]
+                        {
+                            let reason = if OVERLAY_EDIT_MODE.load(Ordering::Relaxed) {
+                                "edit"
+                            } else {
+                                "windowed"
+                            };
+                            if LAST_OVERLAY_DECISION.swap(0, Ordering::Relaxed) != 0 {
+                                let ms = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_millis())
+                                    .unwrap_or(0);
+                                eprintln!("[OVERLAY {ms}] daemon decision=skip reason={reason}");
+                            }
+                        }
                         continue;
                     }
                     let valorant_present = window_manager::find_valorant_game_window().is_some();
+                    // Same foreground reader as the TRN/perf pause gates
+                    // (GetForegroundWindow in window_manager::is_valorant_foreground).
+                    // Agent select / pregame runs with VALORANT foreground, so
+                    // foreground-gating preserves pre-pick — do not "fix" this
+                    // by showing while background.
+                    let valorant_foreground =
+                        valorant_present && window_manager::is_valorant_foreground();
+                    let should_show = valorant_present && valorant_foreground;
+                    #[cfg(debug_assertions)]
+                    {
+                        let reason = if should_show {
+                            "foreground"
+                        } else if !valorant_present {
+                            "no-game"
+                        } else {
+                            "background"
+                        };
+                        let want = if should_show { 1 } else { 2 };
+                        if LAST_OVERLAY_DECISION.swap(want, Ordering::Relaxed) != want {
+                            let ms = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_millis())
+                                .unwrap_or(0);
+                            eprintln!(
+                                "[OVERLAY {ms}] daemon decision={} reason={reason}",
+                                if should_show { "show" } else { "hide" }
+                            );
+                        }
+                    }
                     if let Some(overlay) = auto_overlay_handle.get_webview_window("overlay") {
                         let is_vis = overlay.is_visible().unwrap_or(false);
-                        if valorant_present && !is_vis {
+                        if should_show && !is_vis {
                             let _ = show_overlay(auto_overlay_handle.clone());
-                        } else if !valorant_present && is_vis {
+                        } else if !should_show && is_vis {
                             let _ = hide_overlay(auto_overlay_handle.clone());
-                        } else if valorant_present && is_vis {
+                        } else if should_show && is_vis {
                             #[cfg(windows)]
                             if let Ok(hwnd) = overlay.hwnd() {
                                 let _ = window_manager::align_overlay_to_valorant(hwnd.0 as isize);
@@ -976,7 +1062,30 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 let img = tauri::include_image!("icons/icon.png");
                 let _ = window.set_icon(img);
-                let _ = window.set_min_size(Some(tauri::LogicalSize::new(1210.0, 800.0)));
+                // Single runtime owner of the main window floor. Windows
+                // enforces ptMinTrackSize on the OUTER rect, so a bare
+                // MAIN_WINDOW_SIZE_LOGICAL floor let the client area shrink to
+                // 1194x791 and the layout overflow. Measure the undecorated
+                // frame delta per launch (DPI- and Windows-version-dependent)
+                // and add it, guaranteeing a 1210x800 CONTENT area. The
+                // frontend no longer touches min size (its call was
+                // ACL-denied and drifted with whatever outer size it saw).
+                let (main_w, main_h) = MAIN_WINDOW_SIZE_LOGICAL;
+                let scale = window.scale_factor().unwrap_or(1.0);
+                let (frame_w, frame_h) = match (window.outer_size(), window.inner_size()) {
+                    (Ok(outer), Ok(inner)) => (
+                        outer.width.saturating_sub(inner.width) as f64,
+                        outer.height.saturating_sub(inner.height) as f64,
+                    ),
+                    _ => (0.0, 0.0),
+                };
+                // ceil: display rounding may never eat a pixel of the floor.
+                let min_w = main_w + (frame_w / scale).ceil();
+                let min_h = main_h + (frame_h / scale).ceil();
+                log::info!(
+                    "[window] main frame delta {frame_w}x{frame_h} px @ {scale}x -> min size {min_w}x{min_h} logical"
+                );
+                let _ = window.set_min_size(Some(tauri::LogicalSize::new(min_w, min_h)));
             }
 
             // Ensure overlay window starts in true click-through mode
@@ -1109,6 +1218,13 @@ pub fn run() {
             trn_proxy::trn_proxy_fetch,
             trn_proxy::trn_proxy_paused,
             trn_proxy::trn_proxy_state,
+            trn_proxy::trn_trace_log,
+            trn_cache::trn_cache_get,
+            trn_cache::trn_cache_put,
+            trn_cache::trn_cache_read,
+            trn_cache::trn_cache_write,
+            trn_cache::trn_cache_stats,
+            trn_cache::trn_cache_trace_log,
             perf::perf_poll,
             space_spam::set_space_spam,
             get_quick_shortcuts,
@@ -1128,9 +1244,7 @@ pub fn run() {
             add_custom_resolution,
             remove_custom_override,
             list_supported_modes,
-            check_app_updates,
             check_channel_update,
-            install_app_update,
             get_autostart_enabled,
             set_autostart_enabled,
             open_external_url,

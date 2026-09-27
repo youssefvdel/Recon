@@ -56,8 +56,8 @@ interface MarkProps {
   palette: PreviewPalette;
 }
 
-/** One hipfire/ADS reticle in exact 1:1 pixels centered at (0, 0). */
-const Reticle: React.FC<MarkProps> = ({ section, palette }) => {
+/** One hipfire/ADS reticle in exact 1:1 pixels centered at (0, 0). Shared by the overlay crosshair. */
+export const Reticle: React.FC<MarkProps> = ({ section, palette }) => {
   if (!section || section.bHideCrosshair) return null;
 
   const hasOutline = !!section.bHasOutline;

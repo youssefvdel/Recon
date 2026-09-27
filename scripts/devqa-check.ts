@@ -239,16 +239,10 @@ await trnGet('/api/v2/valorant/standard/profile/riot/x%23y', {
 }).catch(() => {});
 check('pre-transport throw still reports would-be EDGE', seenTransport, 'EDGE');
 check('no-callback call still throws the same way', await trnGet('/x').then(() => 'no-throw').catch((e: Error) => String(e.message)), 'TRN needs the desktop app.');
-// Button wiring (source text, same style as trn-spread-check.ts).
+// Source-text wiring (same style as trn-spread-check.ts). The dashboard used to
+// pin the Tracker QA burst buttons here; it now pins the smoke panel further
+// down. Declared once, up here, because the proxy/pause checks below read it.
 const dashboard = await Bun.file('src/components/DevDashboard.tsx').text();
-check('burst button exists', dashboard.includes('Burst QA (12×)'), true);
-check('burst fans out concurrently', dashboard.includes('Promise.all('), true);
-check('burst goes through trnGet', dashboard.includes('trnGet(trnProfilePath('), true);
-check('burst passes onTransport', dashboard.includes('onTransport'), true);
-check('burst tags each line with transport', dashboard.includes('[${transport}]'), true);
-check('burst renders an EDGE-fired summary', dashboard.includes('transport: EDGE fired'), true);
-check('burst renders an all-fallback summary', dashboard.includes('transport: everything fell back to RUST'), true);
-check('burst renders a VERDICT line', dashboard.includes('VERDICT: ${burstQaVerdict(lines)}'), true);
 // Transport plumbing is display-only: trn.ts still funnels through the one gate.
 const trnSrc = await Bun.file('src/utils/trn.ts').text();
 check('trnGet accepts onTransport', trnSrc.includes('onTransport'), true);
@@ -297,7 +291,7 @@ check('readiness helper ignores other errors', isTrnProxyNotReady(new Error('HTT
 check('readiness helper handles strings', isTrnProxyNotReady('EDGE_PAUSED proxy not ready: x'), true);
 check('readiness shape never trips the ladder', !TRN_PROXY_NOT_READY.includes('429') && !TRN_PROXY_NOT_READY.includes('403') && !TRN_PROXY_NOT_READY.includes('1015'), true);
 check('readiness helper wired in trn.ts', trnSrc.includes('isTrnProxyNotReady'), true);
-check('readiness gate waits before first fetch', proxySrc.includes('wait_proxy_ready(&window).await?'), true);
+check('readiness gate waits before first fetch', proxySrc.includes('wait_proxy_ready(&window, &path).await?'), true);
 check('readiness is per window lifetime', proxySrc.includes('PROXY_READY.store(false'), true);
 check('ready window skips the gate', proxySrc.includes('PROXY_READY.load('), true);
 check('readiness expiry is EDGE_PAUSED', proxySrc.includes('EDGE_PAUSED proxy not ready'), true);
@@ -318,7 +312,7 @@ setTrnMatchPhase('idle');
 check('phase hint round-trips idle', getTrnMatchPhase(), 'idle');
 setTrnMatchPhase('');
 const trackerSrc = await Bun.file('src/utils/tracker.ts').text();
-check('edgeGet sends the phase hint', trnSrc.includes("{ path, phase: trnMatchPhase, drain }"), true);
+check('edgeGet sends the phase hint', trnSrc.includes('phase: trnMatchPhase,'), true);
 check('poll loop stamps live phase', trackerSrc.includes('setTrnMatchPhase(phase)'), true);
 check('idle path stamps idle (no stale coregame pause)', trackerSrc.includes("setTrnMatchPhase('idle')"), true);
 check('pause gate reads the phase', proxySrc.includes('game_foreground: bool, phase: &str'), true);
@@ -343,7 +337,7 @@ check('proxy state null → UNKNOWN', parseTrnProxyState(null), 'UNKNOWN');
 check('proxy state undefined → UNKNOWN', parseTrnProxyState(undefined), 'UNKNOWN');
 check('watchdog budget is 2s', proxySrc.includes('WATCHDOG_TIMEOUT: Duration = Duration::from_secs(2)'), true);
 check('watchdog ping reuses the passive probe', proxySrc.includes('readiness_probe(), WATCHDOG_TIMEOUT'), true);
-check('watchdog pings every fetch on vetted windows', proxySrc.includes('ensure_proxy_alive(&app, &mut window).await?'), true);
+check('watchdog pings every fetch on vetted windows', proxySrc.includes('ensure_proxy_alive(&app, &mut window, &path).await?'), true);
 check('fresh windows skip the ping (gate vets them)', proxySrc.includes('if !PROXY_READY.load(Ordering::Relaxed)'), true);
 check('wedge destroys (not close — close is hide-trapped)', proxySrc.includes('w.destroy()'), true);
 check('recreate resets readiness + marks RECREATED', proxySrc.includes('set_proxy_state(ProxyState::Recreated)'), true);
@@ -351,9 +345,31 @@ check('answered fetch marks READY', proxySrc.includes('set_proxy_state(ProxyStat
 check('readiness expiry marks CHALLENGED', proxySrc.includes('set_proxy_state(ProxyState::Challenged)'), true);
 check('pause marks PAUSED', proxySrc.includes('set_proxy_state(ProxyState::Paused)'), true);
 check('state command registered', libSrc.includes('trn_proxy::trn_proxy_state'), true);
-check('dashboard reads proxy state', dashboard.includes('trnProxyState'), true);
-check('dashboard renders the proxy line', dashboard.includes('qaProxyOut'), true);
+// The dashboard reads the Rust-owned state. It used to be the Tracker QA proxy
+// line (`qaProxyOut`); it is now the Diagnostics smoke check, which invokes the
+// command directly so a missing command cannot hide behind the UNKNOWN default.
+check('dashboard reads proxy state', dashboard.includes("'trn_proxy_state'"), true);
+check('dashboard no longer renders the QA proxy line', !dashboard.includes('qaProxyOut'), true);
 check('no rust trn http in watchdog path', !proxySrc.includes('reqwest') && !proxySrc.includes('ureq') && !proxySrc.includes('hyper'), true);
+
+// --- shared request ceiling + cross-realm memo (Rust is the only place both
+// WebView realms meet, so this is the only place a bound can be provable) ---
+// The verdict math (cap values, window roll, memo TTL) lives in Rust cargo
+// tests. What is pinned here is the wiring: the lobby key travels with every
+// request, and both new gates sit AHEAD of any work in the command.
+check('every request carries the lobby key', trnSrc.includes('lobby: trnLobbyKey'), true);
+check('poll stamps the lobby key', trackerSrc.includes('setTrnLobbyKey(matchId)'), true);
+check('idle poll clears the lobby key', trackerSrc.includes("setTrnLobbyKey('')"), true);
+check('rust fetch takes the lobby key', proxySrc.includes('lobby: Option<String>'), true);
+check('ceiling is checked before the window opens', proxySrc.indexOf('spend_ceiling(lobby_key)') < proxySrc.indexOf('let _inflight = InflightGuard::enter'), true);
+check('a paused call spends no ceiling (pause check first)', proxySrc.indexOf('should_pause(\n        crate::window_manager::find_valorant_game_window().is_some(),') < proxySrc.indexOf('spend_ceiling(lobby_key)'), true);
+check('ceiling denial is a quiet shape (never trips the ladder)', proxySrc.includes('"TRN_BUDGET {which} spent"') && !/TRN_BUDGET[^"]*(429|403|1015)/.test(proxySrc), true);
+check('ceiling is one shared mutex, not per realm', proxySrc.includes('static TRN_CEILING: Mutex<TrnCeiling>'), true);
+check('per-lobby cap is a named constant', proxySrc.includes('const TRN_LOBBY_MAX_REQUESTS: u32 = 30'), true);
+check('per-hour cap is a named constant', proxySrc.includes('const TRN_HOURLY_MAX_REQUESTS: u32 = 900'), true);
+check('memo hit skips the wire AND the ceiling', proxySrc.indexOf('memo_get(&path, now_ms())') < proxySrc.indexOf('spend_ceiling(lobby_key)'), true);
+check('only 2xx bodies are memoized', proxySrc.includes('if let Ok(body) = &out'), true);
+check('memo is itself bounded', proxySrc.includes('const TRN_MEMO_MAX: usize = 64'), true);
 
 // --- dev-only TRN logging: [TRN] prefix + timestamps, zero prod output ---
 // Shapes only (no runtime log capture): helper exists, call sites are gated,
@@ -369,10 +385,39 @@ check('fill start logged (count, budget)', trackerSrc.includes("if (import.meta.
 check('fill dispatched logged (budget)', trackerSrc.includes("trnLog('fill dispatched'"), true);
 check('rust trace macro exists', proxySrc.includes('macro_rules! trn_trace'), true);
 check('rust trace compiled out in release', proxySrc.includes('#[cfg(not(debug_assertions))]'), true);
-check('rust fetch start logged', proxySrc.includes('trn_trace!("fetch start'), true);
+check('rust fetch start logged', proxySrc.includes('"fetch start path={} phase={} drain={} lobby={}"'), true);
+check('memo hit logged', proxySrc.includes('trn_trace!("MEMO hit'), true);
+check('ceiling denial logged', proxySrc.includes('trn_trace!("CEILING spent='), true);
 check('rust transitions logged', proxySrc.includes('trn_trace!("RECREATED') && proxySrc.includes('trn_trace!("READY') && proxySrc.includes('trn_trace!("NOT READY'), true);
-check('rust outcome logged (status, ms)', proxySrc.includes('trn_trace!("outcome ok='), true);
+check('rust outcome logged (status, ms)', proxySrc.includes('"outcome ok={} status={} elapsed_ms={}{}"'), true);
 check('rust never logs bodies', !proxySrc.includes('trn_trace!("outcome ok={} status={} body'), true);
+
+// --- the trace can explain a failure without a terminal screenshot ---
+// A `status=0` line used to be the whole record of a rejected in-page fetch:
+// no status, no elapsed, no reason. The page's own message now rides along, and
+// it is the ONLY body-shaped text allowed in the trace (a JS error string, not
+// a response body).
+check('rejected fetch carries its in-page message', proxySrc.includes('trace_err(&r)') && proxySrc.includes('const TRACE_ERR_CHARS: usize = 200'), true);
+check('the message is only attached to status=0', proxySrc.includes('if r.status != 0 {\n        return String::new();'), true);
+check('a failed fetch traces its reason', proxySrc.includes('trn_trace!("FAILED path={} err={}"'), true);
+check('a lost proxy traces its reason', proxySrc.includes('trn_trace!("LOST path={path} err=proxy lost'), true);
+check('a hung page names the path and the wait', proxySrc.includes('"fetch timeout path={} elapsed_ms={} (hung page)"'), true);
+check('a rejected path is traced', proxySrc.includes('trn_trace!("REJECTED path={path} err={e}"'), true);
+check('a park names the request that parked', proxySrc.includes('trn_trace!("NOT READY path={path}'), true);
+check('a recreate names its reason and its request', proxySrc.includes('"RECREATED reason={reason} path={path}') && proxySrc.includes('watchdog_reason(ping.as_ref())'), true);
+check('the watchdog reason table is a pure fn', proxySrc.includes('fn watchdog_reason('), true);
+// The cookie jar must be read whole: a `.slice(0,500)` could cut
+// `cf_clearance` off the end and report "no clearance" on a cleared page.
+check('readiness probe never slices the cookie jar', proxySrc.includes("cookies:document.cookie||''") && !proxySrc.includes("cookies:(document.cookie||'').slice"), true);
+// `fetch start` used to sit ABOVE the memo check, so a cache replay announced
+// a wire request that never happened — the panel's "wire" count was inflated
+// by every memo hit. It is now logged at the point the request really goes out.
+check(
+  'fetch start is logged after the memo/pause/ceiling gates',
+  proxySrc.indexOf('trn_trace!(\n            "fetch start path={}') > proxySrc.indexOf('memo_get(&path, now_ms())')
+    && proxySrc.indexOf('trn_trace!(\n            "fetch start path={}') > proxySrc.indexOf('spend_ceiling(lobby_key)'),
+  true,
+);
 
 // --- pause costs zero: pre-check before gate claim AND budget spend ---
 // Live proof: paused fills burned 2.6s→25s+ gate waits + full lobby budget.
@@ -400,9 +445,12 @@ check(
   trnSrc.includes('opts?.drain !== true && (await trnProxyPaused())'),
   true
 );
-check('drain reaches the transport', trnSrc.includes('{ path, phase: trnMatchPhase, drain }'), true);
+check('drain reaches the transport', trnSrc.includes('drain,') && proxySrc.includes('drain: Option<bool>'), true);
 check('drain flows through act stats', trnSrc.includes('{ drain: true }'), true);
-check('QA burst bypasses pause (tests transport, not policy)', dashboard.includes('drain: true });'), true);
+// The one caller that fired undrained-but-`drain:true` from the dashboard was
+// the Tracker QA burst, removed with the rest of that section. Production
+// drains (the checks above) and the pause gate itself are unchanged.
+check('no dashboard caller fires trnGet any more', !dashboard.includes('trnGet('), true);
 check('rust fetch takes the drain token', proxySrc.includes('drain: Option<bool>'), true);
 check('rust skips pause on drain', proxySrc.includes('if drain {'), true);
 check(
@@ -538,6 +586,212 @@ check(
   trnSrc.includes("if (msg.includes('HTTP ') || isTrnNetDead(msg)) noteTrnPathFailed(path);"),
   true
 );
+
+// --- IPC smoke panel: groups, precondition states, run-all tally ------------
+// The Tracker QA section (fetch test, 12× burst, cooldown controls, kill
+// switch, pod fixtures) is gone; its log export survives as its own panel.
+// What is protected here is the replacement: six subsystem groups, a
+// precondition state distinct from a failure, and a tally that never reads as
+// a clean sweep while something is unmet.
+const { SMOKE_GROUPS, SMOKE_CHECK_COUNT, detectPrecondition, tallySmoke, smokeVerdict } = await import(
+  '../src/components/DevDashboard.tsx'
+);
+
+const smokeIds = SMOKE_GROUPS.flatMap((g) => g.checks.map((c) => c.id));
+const checkById = (id: string) => SMOKE_GROUPS.flatMap((g) => g.checks).find((c) => c.id === id)!;
+
+check(
+  'six subsystem groups, in order',
+  SMOKE_GROUPS.map((g) => g.id).join(','),
+  'display,overlay,windows,valorant,transport,diag'
+);
+check(
+  'group labels read as subsystems',
+  SMOKE_GROUPS.map((g) => g.label).join('|'),
+  'Display / GPU|Overlay|Windows|VALORANT|Transport|Diagnostics'
+);
+check('check ids are unique', new Set(smokeIds).size, smokeIds.length);
+check('every check is labelled and runnable', SMOKE_GROUPS.every((g) => g.checks.every((c) => c.id && c.label && typeof c.run === 'function')), true);
+check('count matches the groups', SMOKE_CHECK_COUNT, smokeIds.length);
+for (const id of [
+  'display-info',
+  'gpu-info',
+  'overlay-visible',
+  'overlay-edit',
+  'overlay-tab',
+  'overlay-show',
+  'overlay-hide',
+  'overlay-edit-on',
+  'overlay-edit-off',
+  'window-list',
+  'valorant-configs',
+  'valorant-account',
+  'transport-session',
+  'transport-riot-get',
+  'diag-perf',
+  'diag-proxy-state',
+  'diag-proxy-paused',
+  'diag-trace',
+]) {
+  check(`smoke check present: ${id}`, smokeIds.includes(id), true);
+}
+// The pre-existing 12 checks all survive, so removing the QA section did not
+// quietly drop any IPC coverage with it.
+check('display + gpu still covered', ['display', 'overlay', 'windows', 'valorant'].every((g) => SMOKE_GROUPS.some((x) => x.id === g)), true);
+check('no VALORANT install reads as unmet, not a pass', checkById('valorant-configs').precondition!([]), 'no VALORANT install found');
+check('configs present skip the unmet branch', checkById('valorant-configs').precondition!([{ display_name: 'x' }]), null);
+
+// New Rust surface, wired by command name (source text, same style as above).
+for (const cmd of ['perf_poll', 'trn_proxy_state', 'trn_proxy_paused', 'trn_trace_log']) {
+  check(`smoke panel invokes ${cmd}`, dashboard.includes(`'${cmd}'`), true);
+}
+check('transport check uses a real riot_direct_get entry point', dashboard.includes('fetchCompetitiveUpdates'), true);
+check('perf check does not use the swallowing accessor', !dashboard.includes("run: fetchPerf"), true);
+
+// --- the perf check judges the basis instead of normalising it away --------
+const perfExpect = checkById('diag-perf').expect!;
+check(
+  'perf check accepts a private-working-set timeline',
+  perfExpect({ samples: [{ basis: 'PrivateWorkingSet' }], paused: false }).includes('basis PrivateWorkingSet'),
+  true
+);
+check(
+  'perf check reports a fallen-back basis',
+  (() => {
+    try {
+      perfExpect({ samples: [{ basis: 'ResidentWorkingSet' }], paused: false });
+      return 'no throw';
+    } catch (e) {
+      return (e as Error).message;
+    }
+  })(),
+  'basis ResidentWorkingSet — the private counter was not read'
+);
+check(
+  'perf check rejects a payload with no timeline',
+  (() => {
+    try {
+      perfExpect({});
+      return 'no throw';
+    } catch (e) {
+      return (e as Error).message;
+    }
+  })(),
+  'no timeline in the payload'
+);
+check(
+  'perf check rejects an empty ring',
+  (() => {
+    try {
+      perfExpect({ samples: [] });
+      return 'no throw';
+    } catch (e) {
+      return (e as Error).message;
+    }
+  })(),
+  'timeline is empty — the poll pushed no sample'
+);
+// An empty trace ring is valid: no TRN traffic yet is not a failure.
+const traceExpect = checkById('diag-trace').expect!;
+check('trace check accepts an empty ring', traceExpect({ head: 0, lines: [], missed: false }), 'head 0 · 0 held line(s)');
+check('trace check counts held lines', traceExpect({ head: 7, lines: [1, 2], missed: true }), 'head 7 · 2 held line(s) · ring overwrote unseen lines');
+check(
+  'trace check rejects a payload with no head',
+  (() => {
+    try {
+      traceExpect({ lines: [] });
+      return 'no throw';
+    } catch (e) {
+      return (e as Error).message;
+    }
+  })(),
+  'no head/lines in the payload'
+);
+check('proxy state check accepts UNKNOWN as an answer', checkById('diag-proxy-state').expect!('UNKNOWN'), 'UNKNOWN — no proxy fetch yet');
+check('proxy state check accepts a real state', checkById('diag-proxy-state').expect!('READY'), 'READY');
+check(
+  'proxy state check rejects garbage',
+  (() => {
+    try {
+      checkById('diag-proxy-state').expect!('wedged??');
+      return 'no throw';
+    } catch (e) {
+      return (e as Error).message;
+    }
+  })(),
+  'unrecognised state "wedged??"'
+);
+// Overlay setters are verified by read-back, not by their ack.
+check('open overlay reads the state back', checkById('overlay-show').expect!(true), 'visible');
+check(
+  'open overlay fails when the window is not visible',
+  (() => {
+    try {
+      checkById('overlay-show').expect!(false);
+      return 'no throw';
+    } catch (e) {
+      return (e as Error).message;
+    }
+  })(),
+  'ack returned but the window is not visible'
+);
+check('close overlay reads the state back', checkById('overlay-hide').expect!(false), 'hidden');
+
+// --- precondition detection: the callers' own vocabulary --------------------
+// Each needle is a string some caller already throws, so the reason shown here
+// is greppable back to the call site.
+check('lockfile missing → unmet', detectPrecondition('Riot Client lockfile missing — launch Riot Client or Valorant first.'), 'Riot Client not running');
+check('client not responding → unmet', detectPrecondition('Riot Client not responding — launch it and retry.'), 'Riot Client not answering loopback');
+check('no client installed → unmet', detectPrecondition('Riot Client not found on this PC.'), 'no Riot Client on this machine');
+check('no session → unmet', detectPrecondition('No active session — log into the Riot Client first.'), 'no Riot Client session — log in first');
+check('tracker auto-detect → unmet', detectPrecondition('Auto-detect failed — is the Riot Client open?'), 'Riot Client not running');
+check('browser preview → unmet', detectPrecondition('Tracker needs the desktop app.'), 'not running inside the desktop app');
+check('proxy not ready → unmet', detectPrecondition('EDGE_PAUSED proxy not ready: page still loading or challenged'), 'no tracker.gg page loaded yet');
+check('game fullscreen → unmet', detectPrecondition('EDGE_PAUSED game fullscreen'), 'VALORANT owns the screen');
+check('page network dead → unmet', detectPrecondition('EDGE_PAUSED in-page fetch failed: Failed to fetch'), 'proxy page has no network');
+check('rate ladder → unmet', detectPrecondition('TRN_RATE_LIMITED 25s'), 'TRN rate-limit ladder engaged');
+check('kill-switch off → unmet', detectPrecondition('TRN_DISABLED tracker off'), 'tracker kill-switch is OFF');
+check('budget spent → unmet', detectPrecondition('TRN_BUDGET lobby spent'), 'shared TRN request ceiling spent');
+check('detects inside a longer message', detectPrecondition('Error: HTTP 0 — Riot Client not responding — launch it and retry.'), 'Riot Client not answering loopback');
+check('case-insensitive', detectPrecondition('riot client lockfile missing'), 'Riot Client not running');
+// A rate-limited response is a real transport failure, not an absent env.
+check('HTTP 429 is NOT a precondition', detectPrecondition('HTTP 429: too many requests'), null);
+check('a private profile is NOT a precondition', detectPrecondition('HTTP 451: {"errors":[{"code":"CollectorResultStatus::Private"}]}'), null);
+check('an unregistered command is NOT a precondition', detectPrecondition('Command trn_trace_log not found'), null);
+check('an empty error is NOT a precondition', detectPrecondition(''), null);
+
+// --- run-all tally ---------------------------------------------------------
+const t = (o: ('pass' | 'fail' | 'precondition')[]) => {
+  const s = tallySmoke(o);
+  return `${s.pass}/${s.fail}/${s.precondition}`;
+};
+check('empty tally is all zeroes', t([]), '0/0/0');
+check('tally counts each state', t(['pass', 'pass', 'fail', 'precondition', 'pass']), '3/1/1');
+check('verdict: nothing run yet', smokeVerdict(tallySmoke([])), 'no results yet');
+check('verdict: clean', smokeVerdict(tallySmoke(['pass', 'pass'])), 'ALL PASS');
+check('verdict: qualified by the unmet count', smokeVerdict(tallySmoke(['pass', 'precondition'])), 'PASS with 1 unmet');
+check('verdict: a failure always wins', smokeVerdict(tallySmoke(['pass', 'precondition', 'fail'])), '1 FAILED');
+check('verdict: all unmet is not a pass', smokeVerdict(tallySmoke(['precondition'])), 'nothing passed');
+// Sequential, not parallel: these touch real system state.
+check('run-all is sequential', dashboard.includes("for (let i = 0; i < flat.length; i++)"), true);
+check('run-all does not fan out', !dashboard.includes('Promise.all('), true);
+check('run-all is disabled while running', (dashboard.match(/disabled=\{smokeRunning\}/g) || []).length >= 2, true);
+check('progress is shown while running', dashboard.includes('smokeProgress.done + 1'), true);
+check('tally lands in the panel header', dashboard.includes('{smokeVerdict(smokeTally)}'), true);
+
+// --- the removed section left nothing behind -------------------------------
+check('Tracker QA section is gone', !dashboard.includes('>Tracker QA<'), true);
+check('QA fetch/burst/probe handlers are gone', !dashboard.includes('runQaFetch') && !dashboard.includes('runQaBurst') && !dashboard.includes('probeQaGate'), true);
+check('QA fixtures are gone', !dashboard.includes('QA_FIXTURES') && !dashboard.includes('<ServerChip'), true);
+check('jitter/cooldown controls are gone', !dashboard.includes('trnJitterGapMs') && !dashboard.includes('resetTrnCooldown'), true);
+check('trace empty state no longer points at a removed section', !dashboard.includes('Tracker QA above'), true);
+check('log export survived as its own panel', dashboard.includes('>TRN trace export<') && dashboard.includes('downloadLogs') && dashboard.includes('copyLogs'), true);
+// The dev window's export reads the trace ring it actually holds, NOT the
+// module-level logger buffer. `logBuffer` is per-realm, so this realm's is
+// empty and the panel used to always export 0 lines while reporting success.
+check('log export reads the TRN trace ring, not the per-realm logger buffer', dashboard.includes('buildTrnTraceExport(trnLogRows') && !dashboard.includes('getRecentLogs('), true);
+check('empty export is reported as empty, never as success', dashboard.includes('trnExportReport(0, trnLogRows.length'), true);
+check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs') && !dashboard.includes('copyQaLogs'), true);
 
 if (failures > 0) {
   console.error(`${failures} failure(s)`);

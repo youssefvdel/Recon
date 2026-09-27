@@ -1,10 +1,16 @@
 import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { Lock as LockIcon, Check, Users, Shield, RotateCcw, Move, X, Trophy, EyeOff, Swords, Clock, AlertTriangle, Layers, Crosshair } from 'lucide-react';
 import type { LiveMatchState, LiveMatchPlayer } from '../types';
-import { fetchLiveMatchState, gameData, matchEndHarvest, harvestMatchNames, isMatchStateEqual } from '../utils/tracker';
+import { fetchLiveMatchState, gameData, matchEndHarvest, harvestMatchNames, isMatchStateEqual, mergeLiveMatchStateNonRegressing } from '../utils/tracker';
 import { useTrackerData } from '../hooks/useTrackerData';
 import { ScoreBadge, scoreTier } from './ScoreBadge';
 import { ServerChip } from './ServerChip';
+import OverlayCrosshair from './OverlayCrosshair';
+import {
+  DEFAULT_OVERLAY_CROSSHAIR,
+  sanitizeCrosshairShape,
+  type OverlayCrosshairShape,
+} from '../utils/crosshairOverlay';
 import {
   getFlagUrl,
   getCountryName,
@@ -15,6 +21,8 @@ import {
   byAcsDesc,
   queueLabel,
   TRN_PRIVATE_TOOLTIP,
+  TRN_PENDING_TOOLTIP,
+  TRN_UNAVAILABLE_TOOLTIP,
 } from '../utils/playerDisplay';
 import { computeMapAgentStats, getRankTierLabel, type AgentStatSummary } from '../utils/mapMeta';
 import { fetchBlitzAgentStats, peekBlitzAgentStats, type BlitzAgentStat } from '../utils/blitzMeta';
@@ -34,6 +42,9 @@ export interface OverlayConfig {
   showStartingSide?: boolean;
   /** Lobby-only pre-pick reminder badge. Self-hides unless the Pre-Picker is armed. */
   showPrepick?: boolean;
+  /** Screen-centred overlay crosshair. Opt-in; in-match only. */
+  showCrosshair?: boolean;
+  crosshair?: OverlayCrosshairShape;
   positions: {
     lobby: WidgetPos;
     pregame: WidgetPos;
@@ -92,6 +103,10 @@ export function getDefaultOverlayConfig(): OverlayConfig {
     showTopAgents: true,
     showStartingSide: true,
     showPrepick: true,
+    // Opt-in only: existing users must not suddenly get a second crosshair
+    // drawn over their native one.
+    showCrosshair: false,
+    crosshair: DEFAULT_OVERLAY_CROSSHAIR,
     positions: getDefaultOverlayPositions(),
     scales: {
       lobby: 1.0,
@@ -395,6 +410,8 @@ export const OverlayView: React.FC = () => {
         ...parsed,
         positions: { ...DEFAULT_OVERLAY_CONFIG.positions, ...(parsed.positions || {}) },
         scales: { ...DEFAULT_OVERLAY_CONFIG.scales, ...(parsed.scales || {}) },
+        // `...parsed` spreads a stored crosshair blindly; complete + clamp it.
+        crosshair: sanitizeCrosshairShape(parsed.crosshair),
       } as OverlayConfig;
     };
     try {
@@ -586,7 +603,7 @@ export const OverlayView: React.FC = () => {
       if (e.key === 'recon_overlay_cfg_v7' && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
-          setConfig((prev) => ({ ...prev, ...parsed }));
+          setConfig((prev) => ({ ...prev, ...parsed, crosshair: sanitizeCrosshairShape(parsed.crosshair) }));
         } catch {}
       }
     };
@@ -624,8 +641,11 @@ export const OverlayView: React.FC = () => {
       // A slow Riot round-trip must not let setInterval stack overlapping polls.
       if (ticking.current) return;
       if (phaseRef.current === 'idle') {
-        // Idle backoff: fetch every 5th tick ≈ 12.5s (was 3 × 4.5s = 13.5s).
-        idleSkips.current = (idleSkips.current + 1) % 5;
+        // Idle backoff: fetch every 12th tick ≈ 30s (was every 5th ≈ 12.5s).
+        // Wake stays instant: the main window polls every 3s and broadcasts
+        // `recon:live-match-sync` on change (listener below applies it
+        // immediately), and visibility return forces a fetch via onVis.
+        idleSkips.current = (idleSkips.current + 1) % 12;
         if (idleSkips.current !== 0) return;
       }
       ticking.current = true;
@@ -648,7 +668,11 @@ export const OverlayView: React.FC = () => {
     };
 
     const onVis = () => {
-      if (typeof document !== 'undefined' && !document.hidden) tick();
+      if (typeof document === 'undefined' || document.hidden) return;
+      // Prime the idle counter so the return-from-hidden tick always fetches
+      // instead of landing on a skipped slot.
+      if (phaseRef.current === 'idle') idleSkips.current = 11;
+      tick();
     };
 
     if (typeof document !== 'undefined') {
@@ -664,10 +688,14 @@ export const OverlayView: React.FC = () => {
             const s = event.payload;
             const harvest = matchEndHarvest(prevStateRef.current, s);
             if (harvest) harvestMatchNames(harvest).catch(() => {});
-            if (!isMatchStateEqual(prevStateRef.current, s)) {
-              prevStateRef.current = s;
-              phaseRef.current = s.phase;
-              setMatchState(s);
+            // The main window runs its own poll and its own TRN cache, so `s`
+            // can be poorer than what we already show. Merge instead of
+            // replacing, or the two realms ping-pong for the whole match.
+            const merged = mergeLiveMatchStateNonRegressing(prevStateRef.current, s);
+            if (!isMatchStateEqual(prevStateRef.current, merged)) {
+              prevStateRef.current = merged;
+              phaseRef.current = merged.phase;
+              setMatchState(merged);
             }
           }
         })
@@ -881,6 +909,10 @@ export const OverlayView: React.FC = () => {
   const scoreVisible = config.showLobby && showScorePanel;
   const pregameVisible = config.showPregame && showPregamePanel;
   const topAgentsVisible = config.showTopAgents && (isPregame || isEditMode);
+  // In-match only (edit mode always previews) — a crosshair floating over the
+  // lobby/menus is wrong. Matches the widgetVisible = flag && (phase || edit) convention.
+  const crosshairVisible = !!config.showCrosshair && (isEditMode || isCoregame);
+  const xhair = config.crosshair ?? DEFAULT_OVERLAY_CROSSHAIR;
 
   // Safe Pre-Picker reminder: visible while simply queued (no lobby yet), and
   // hidden the moment Agent Select or the game starts — the hover is spent by
@@ -902,7 +934,7 @@ export const OverlayView: React.FC = () => {
   useEffect(() => {
     const t = setTimeout(forceRepaint, 80);
     return () => clearTimeout(t);
-  }, [scoreVisible, pregameVisible, topAgentsVisible, prepickVisible, forceRepaint]);
+  }, [scoreVisible, pregameVisible, topAgentsVisible, prepickVisible, crosshairVisible, forceRepaint]);
 
   return (
     <div
@@ -938,7 +970,7 @@ export const OverlayView: React.FC = () => {
       {isEditMode && (
         <div className="fixed top-4 inset-x-0 mx-auto w-fit z-50 pointer-events-auto flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-m3-surface-container/[0.75] border border-m3-primary/40 shadow-2xl backdrop-blur-xl">
           <div className="flex items-center gap-2 pr-2 border-r border-m3-outline-subtle/55">
-            <span className="w-2.5 h-2.5 rounded-full bg-m3-mint animate-pulse shadow-[0_0_8px_rgba(58,227,116,0.8)]" />
+            <span className="w-2.5 h-2.5 rounded-full bg-m3-mint shadow-[0_0_8px_rgba(58,227,116,0.8)]" />
             <span className="font-display font-black text-xs text-m3-on-surface tracking-wider uppercase">
               HUD Edit Mode
             </span>
@@ -998,7 +1030,7 @@ export const OverlayView: React.FC = () => {
               <span>Widgets List</span>
             </span>
             <span className="text-[10px] font-mono text-m3-primary font-bold">
-              {[config.showPregame, config.showLobby, config.showTopAgents, config.showPrepick, config.showStartingSide].filter(Boolean).length} / 5 ON
+              {[config.showPregame, config.showLobby, config.showTopAgents, config.showPrepick, config.showStartingSide, config.showCrosshair].filter(Boolean).length} / 6 ON
             </span>
           </div>
 
@@ -1159,6 +1191,121 @@ export const OverlayView: React.FC = () => {
             >
               {config.showStartingSide ? 'ON' : 'OFF'}
             </button>
+          </div>
+
+          {/* 6. OVERLAY CROSSHAIR (CENTRE-ANCHORED, IN-MATCH ONLY) */}
+          <div className={`p-2.5 rounded-2xl border transition-all flex flex-col gap-2 ${
+            config.showCrosshair ? 'bg-m3-primary/10 border-m3-primary/45 shadow-md ring-1 ring-m3-primary/40' : 'bg-m3-surface-container-low/70 border-m3-outline-subtle/55 opacity-60'
+          }`}>
+            <div className="flex items-center justify-between">
+              <div className="flex flex-col">
+                <span className="text-xs font-bold text-m3-on-surface flex items-center gap-1.5 min-w-0">
+                  <Crosshair className="w-3.5 h-3.5 text-m3-primary" />
+                  <span>Overlay Crosshair</span>
+                </span>
+                <span className="text-[10px] text-m3-on-surface-variant">Centred overlay reticle • disable your in-game crosshair to avoid two</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => saveConfig({ ...config, showCrosshair: !config.showCrosshair })}
+                className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
+                  config.showCrosshair
+                    ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
+                    : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/55'
+                }`}
+              >
+                {config.showCrosshair ? 'ON' : 'OFF'}
+              </button>
+            </div>
+
+            {/* Reticle is fed by an adapter, so the editor only covers the
+                fields in OverlayCrosshairShape. */}
+            {config.showCrosshair && (
+              <div className="flex flex-col gap-1.5 border-t border-m3-outline-subtle/55 pt-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-m3-on-surface-variant">Core colour</span>
+                  <input
+                    type="color"
+                    className="m3-color"
+                    value={xhair.core}
+                    onChange={(e) => saveConfig({ ...config, crosshair: { ...xhair, core: e.target.value } })}
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-m3-on-surface-variant">Outline colour</span>
+                  <input
+                    type="color"
+                    className="m3-color"
+                    value={xhair.outline}
+                    onChange={(e) => saveConfig({ ...config, crosshair: { ...xhair, outline: e.target.value } })}
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-m3-on-surface-variant">Outline</span>
+                  <button
+                    type="button"
+                    onClick={() => saveConfig({ ...config, crosshair: { ...xhair, outlineOn: !xhair.outlineOn } })}
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
+                      xhair.outlineOn
+                        ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
+                        : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/55'
+                    }`}
+                  >
+                    {xhair.outlineOn ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-m3-on-surface-variant w-24 shrink-0">Outline thickness</span>
+                  <input type="range" min={0} max={6} step={1} className="flex-1 min-w-0 m3-range" value={xhair.outlineThickness}
+                    onChange={(e) => saveConfig({ ...config, crosshair: { ...xhair, outlineThickness: Number(e.target.value) } })} />
+                  <span className="text-[10px] font-mono text-m3-on-surface w-5 text-right">{xhair.outlineThickness}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-m3-on-surface-variant w-24 shrink-0">Length</span>
+                  <input type="range" min={0} max={20} step={1} className="flex-1 min-w-0 m3-range" value={xhair.length}
+                    onChange={(e) => saveConfig({ ...config, crosshair: { ...xhair, length: Number(e.target.value) } })} />
+                  <span className="text-[10px] font-mono text-m3-on-surface w-5 text-right">{xhair.length}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-m3-on-surface-variant w-24 shrink-0">Thickness</span>
+                  <input type="range" min={1} max={10} step={1} className="flex-1 min-w-0 m3-range" value={xhair.thickness}
+                    onChange={(e) => saveConfig({ ...config, crosshair: { ...xhair, thickness: Number(e.target.value) } })} />
+                  <span className="text-[10px] font-mono text-m3-on-surface w-5 text-right">{xhair.thickness}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-m3-on-surface-variant w-24 shrink-0">Gap</span>
+                  <input type="range" min={0} max={20} step={1} className="flex-1 min-w-0 m3-range" value={xhair.gap}
+                    onChange={(e) => saveConfig({ ...config, crosshair: { ...xhair, gap: Number(e.target.value) } })} />
+                  <span className="text-[10px] font-mono text-m3-on-surface w-5 text-right">{xhair.gap}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-m3-on-surface-variant">Centre dot</span>
+                  <button
+                    type="button"
+                    onClick={() => saveConfig({ ...config, crosshair: { ...xhair, dotOn: !xhair.dotOn } })}
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
+                      xhair.dotOn
+                        ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
+                        : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/55'
+                    }`}
+                  >
+                    {xhair.dotOn ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-m3-on-surface-variant w-24 shrink-0">Dot size</span>
+                  <input type="range" min={0} max={6} step={1} className="flex-1 min-w-0 m3-range" value={xhair.dotSize}
+                    onChange={(e) => saveConfig({ ...config, crosshair: { ...xhair, dotSize: Number(e.target.value) } })} />
+                  <span className="text-[10px] font-mono text-m3-on-surface w-5 text-right">{xhair.dotSize}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-m3-on-surface-variant w-24 shrink-0">Opacity</span>
+                  <input type="range" min={0} max={1} step={0.05} className="flex-1 min-w-0 m3-range" value={xhair.opacity}
+                    onChange={(e) => saveConfig({ ...config, crosshair: { ...xhair, opacity: Number(e.target.value) } })} />
+                  <span className="text-[10px] font-mono text-m3-on-surface w-5 text-right">{xhair.opacity}</span>
+                </div>
+              </div>
+            )}
           </div>
 
         </div>
@@ -1393,7 +1540,7 @@ export const OverlayView: React.FC = () => {
             {/* Header: Map • Starting Side Badge */}
             <div className="flex items-center justify-between px-1">
               <div className="flex items-center gap-2 min-w-0">
-                <span className="w-2 h-2 rounded-full bg-m3-mint animate-pulse shadow-[0_0_8px_rgba(58,227,116,0.8)]" />
+                <span className="w-2 h-2 rounded-full bg-m3-mint shadow-[0_0_8px_rgba(58,227,116,0.8)]" />
                 <span className="font-display font-black text-m3-on-surface text-xs tracking-wider uppercase">
                   {matchState?.mapName || 'Ascent'} • Team Scout
                 </span>
@@ -1882,10 +2029,13 @@ export const OverlayView: React.FC = () => {
                 <span className="text-m3-outline font-normal"> • hover only</span>
               </span>
             </div>
-            <span className="ml-1 w-1.5 h-1.5 rounded-full bg-m3-mint animate-pulse shrink-0" />
+            <span className="ml-1 w-1.5 h-1.5 rounded-full bg-m3-mint shrink-0" />
           </div>
         </div>
       )}
+
+      {/* Centre-anchored, non-draggable widget — no widgetRefs/positions/scales entry. */}
+      {crosshairVisible && <OverlayCrosshair shape={config.crosshair ?? DEFAULT_OVERLAY_CROSSHAIR} />}
     </div>
   );
 };
@@ -2168,6 +2318,19 @@ const VerticalSquadColumn: React.FC<{
           <LockIcon className="w-2.5 h-2.5" />
         </span>
       );
+      // "Still filling" vs "nothing there": a faint dot while the TRN fill is
+      // queued or in flight, the plain dash once we have a verdict. One dot, no
+      // animation — this grid repaints on every 2.5s tick.
+      const trnBlank = (state: LiveMatchPlayer['trnState']) =>
+        state === 'pending' ? (
+          <span title={TRN_PENDING_TOOLTIP} className="inline-flex items-center justify-center">
+            <span className="block h-[3px] w-[3px] rounded-full bg-m3-outline/50" />
+          </span>
+        ) : (
+          <span className="text-m3-outline/70" title={state === 'unavailable' ? TRN_UNAVAILABLE_TOOLTIP : undefined}>
+            —
+          </span>
+        );
       const party = getPartyStyle(p.partyIndex);
       const flagUrl = getFlagUrl(p.country);
       const countryName = getCountryName(p.country);
@@ -2209,6 +2372,8 @@ const VerticalSquadColumn: React.FC<{
                 ? `Tracker Score: ${p.trnScore} / 1000 — Tier ${scoreTier(p.trnScore).tier}`
                 : p.isTrnPrivate
                 ? TRN_PRIVATE_TOOLTIP
+                : p.trnState === 'pending'
+                ? TRN_PENDING_TOOLTIP
                 : 'Tracker Score unavailable'
             }
           >
@@ -2219,9 +2384,7 @@ const VerticalSquadColumn: React.FC<{
                 <LockIcon className="w-2.5 h-2.5" />
               </span>
             ) : (
-              <span className="w-3.5 h-3.5 rounded border border-m3-outline-subtle/55 bg-m3-surface-container-high/60 flex items-center justify-center text-[7.5px] font-mono text-m3-outline/70">
-                —
-              </span>
+              trnBlank(p.trnState)
             )}
           </div>
 
@@ -2297,13 +2460,13 @@ const VerticalSquadColumn: React.FC<{
             ) : privLocked ? (
               privLockCell
             ) : (
-              <span className="text-m3-outline/70">—</span>
+              trnBlank(p.trnState)
             )}
           </div>
 
           {/* KD */}
           <div className="text-right font-mono text-[10px] tabular-nums whitespace-nowrap" title="Act-wide K/D">
-            {privLocked ? privLockCell : <span className={kd.color}>{kd.text}</span>}
+            {privLocked ? privLockCell : p.kd == null ? trnBlank(p.trnState) : <span className={kd.color}>{kd.text}</span>}
           </div>
 
           {/* Act-wide win rate */}
@@ -2315,13 +2478,13 @@ const VerticalSquadColumn: React.FC<{
             ) : privLocked ? (
               privLockCell
             ) : (
-              <span className="text-m3-outline/70">—</span>
+              trnBlank(p.trnState)
             )}
           </div>
 
           {/* Act-wide headshot % */}
           <div className="text-right font-mono text-[10px] text-amber-200/90 tabular-nums whitespace-nowrap" title="Act-wide headshot %">
-            {p.hsPct != null && p.hsPct > 0 ? `${p.hsPct.toFixed(0)}%` : privLocked ? privLockCell : <span className="text-m3-outline/70">—</span>}
+            {p.hsPct != null && p.hsPct > 0 ? `${p.hsPct.toFixed(0)}%` : privLocked ? privLockCell : trnBlank(p.trnState)}
           </div>
         </div>
       );

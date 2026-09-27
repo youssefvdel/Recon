@@ -186,6 +186,93 @@ store = initStore();
 let refreshPromise: Promise<void> | null = null;
 let hasAutoRefreshed = false;
 
+/* ---- One owner for the TRN enrichment ------------------------------------ *
+ * The store above is module state, so every WebView2 realm has its own copy:
+ * `main` and `overlay` each ran their own `runRefresh()`, and each one drove
+ * the WHOLE TRN enrichment block (root profile + current-season segment + up
+ * to 3 previous-act segments) for the SAME local account. Measured live
+ * 2026-09-26 in a steady state: one main-realm refresh cost 1 wire request, and
+ * the very next overlay-realm refresh cost 1-2 MORE for identical paths. The
+ * per-realm `profileCache`/`seasonSegCache` in trn.ts cannot dedupe across
+ * realms, and the Rust memo's 10s TTL only covers calls landing inside it.
+ *
+ * Those 24h persisted caches were meant to be the safety net. They are not, on
+ * this box: localStorage sits at 4.76 MB of a ~5 MB quota and the payloads
+ * measured 1.27 MB (root profile) and 1.72 MB (season segment), so every
+ * `writePersisted` throws QuotaExceededError, its retry has no other TRN entry
+ * to evict, and the error is swallowed. Verified directly: after 40+ successful
+ * season fetches, `recon_trn_cache_v1:profile:*` and `season:*` were still
+ * absent while the small `matches:*` entry persisted. So each realm re-fetched
+ * the local account on every refresh, indefinitely. That cache lives in trn.ts
+ * and is not this change's to fix.
+ *
+ * So the duplicated work is stopped here instead: the TRN enrichment runs in
+ * ONE realm and its result is broadcast to the others. Deliberately NOT a
+ * longer `TRN_MEMO_TTL_MS` — that would make live lobby stats stale, which is
+ * the reason it is 10s.
+ *
+ * The hand-off is a Tauri event, which is the mechanism this codebase already
+ * uses for cross-realm state (`recon:live-match-sync`, consumed at
+ * OverlayView.tsx:679 with the same non-regressing-merge rule). localStorage was
+ * the first choice and is NOT usable: the same quota above makes the 938 KB
+ * tracker snapshot fail to write, so it cannot carry anything. Only the TRN
+ * fields travel — `detailsById` is 928 KB of that snapshot and the overlay
+ * already derives its own from Riot-local match details, which is not the
+ * rate-limited path this fixes.
+ *
+ * `ownsRefresh` gates the enrichment, NOT the whole refresh: the overlay keeps
+ * its own account/Riot-local reads so `profile`, `games` and `detailsById`
+ * behave exactly as before, and only the duplicated TRN calls stop. */
+const ownsRefresh = (): boolean => {
+  try {
+    // Same probe App.tsx uses to tell the overlay route apart.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const label = (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
+    // No Tauri (browser preview, the marketing-site embed) → own it, exactly as
+    // before: one realm there, so nothing is duplicated.
+    return label !== 'overlay';
+  } catch {
+    return true;
+  }
+};
+
+/** Broadcast the enriched TRN fields to the other realms. Fired once per
+ *  refresh, after the enrichment settles — not per render, and not per fetch. */
+async function broadcastTrn(payload: {
+  trn: TrnActStats | null;
+  trnAgents: TrnAgentStat[];
+  trnMaps: TrnMapStat[];
+  trnPrev: Record<string, { kd: number; matches: number }>;
+  trnMatchTrs: Record<string, number>;
+}): Promise<void> {
+  try {
+    if (!isTauri()) return;
+    const { emit } = await import('@tauri-apps/api/event');
+    await emit('recon:tracker-trn', payload);
+  } catch {
+    /* No event bus (browser preview): every realm runs its own enrichment. */
+  }
+}
+
+/** Non-regressing merge, the rule `recon:live-match-sync` already uses: only
+ *  replace a field when the incoming one actually carries data, so a late or
+ *  poorer broadcast can never blank a field the realm already filled. */
+function mergeTrnBroadcast(p: {
+  trn: TrnActStats | null;
+  trnAgents: TrnAgentStat[];
+  trnMaps: TrnMapStat[];
+  trnPrev: Record<string, { kd: number; matches: number }>;
+  trnMatchTrs: Record<string, number>;
+}): void {
+  const next: Partial<TrackerData> = {};
+  if (p.trn) next.trn = p.trn;
+  if (p.trnAgents?.length) next.trnAgents = p.trnAgents;
+  if (p.trnMaps?.length) next.trnMaps = p.trnMaps;
+  if (p.trnPrev && Object.keys(p.trnPrev).length) next.trnPrev = p.trnPrev;
+  if (p.trnMatchTrs && Object.keys(p.trnMatchTrs).length) next.trnMatchTrs = p.trnMatchTrs;
+  if (Object.keys(next).length > 0) updateStore(next);
+}
+
 export async function triggerGlobalRefresh(): Promise<void> {
   if (refreshPromise) return refreshPromise;
   refreshPromise = (async () => {
@@ -381,92 +468,124 @@ async function runRefresh(): Promise<void> {
       banner: null,
     });
 
-    // Write latest snapshot
-    writeSnapshot({
-      savedAt: Date.now(),
-      puuid: prof.puuid || liveAcc.puuid,
-      profile: fullProfile,
-      games: comp,
-      agg: store.agg,
-      mapById: mm,
-      queueById: meta.queueById,
-      trn: store.trn,
-      trnAgents: store.trnAgents,
-      trnMaps: store.trnMaps,
-      trnPrev: store.trnPrev,
-      trnMatchTrs: store.trnMatchTrs,
-      detailsById: store.detailsById,
-      detailsReady: store.detailsReady,
-    });
+    /* One snapshot writer, called again as the async enrichment lands. The
+     * cross-realm hand-off depends on it: the overlay adopts whatever the
+     * owner last wrote, so a snapshot taken before `fetchTrnAgents` resolved
+     * would hand over empty `trnAgents`/`trnMaps` and never correct itself.
+     * `store.*` is read fresh on every call, so each write is the whole
+     * current state, never a stale partial. */
+    const saveSnapshot = (): void =>
+      writeSnapshot({
+        savedAt: Date.now(),
+        puuid: prof.puuid || liveAcc.puuid,
+        profile: fullProfile,
+        games: comp,
+        agg: store.agg,
+        mapById: mm,
+        queueById: meta.queueById,
+        trn: store.trn,
+        trnAgents: store.trnAgents,
+        trnMaps: store.trnMaps,
+        trnPrev: store.trnPrev,
+        trnMatchTrs: store.trnMatchTrs,
+        detailsById: store.detailsById,
+        detailsReady: store.detailsReady,
+      });
+    saveSnapshot();
 
-    // Background TRN enrichment (best-effort)
-    if (accName) {
-      fetchTrnActStats(accName, accTag, prof.currentSeasonId)
-        .then(({ stats }) => updateStore({ trn: stats }))
-        .catch(() => {});
-      fetchTrnMatches(accName, accTag)
-        .then((matchTrs) => updateStore({ trnMatchTrs: matchTrs }))
-        .catch(() => {});
+    // Background TRN enrichment (best-effort). ONE realm runs this and
+    // broadcasts the result; the others used to repeat the identical calls for
+    // the same local account (see `ownsRefresh`). The promises are collected
+    // rather than just fired, so the broadcast can wait for the SAME in-flight
+    // requests instead of re-calling them just to learn when they finished.
+    const enrichment: Promise<unknown>[] = [];
+    if (accName && ownsRefresh()) {
+      enrichment.push(
+        fetchTrnActStats(accName, accTag, prof.currentSeasonId)
+          .then(({ stats }) => updateStore({ trn: stats }))
+          .catch(() => {})
+      );
+      enrichment.push(
+        fetchTrnMatches(accName, accTag)
+          .then((matchTrs) => updateStore({ trnMatchTrs: matchTrs }))
+          .catch(() => {})
+      );
       if (prof.currentSeasonId) {
-        fetchTrnAgents(accName, accTag, prof.currentSeasonId)
-          .then((agents) => updateStore({ trnAgents: agents }))
-          .catch(() => {});
-        fetchTrnMaps(accName, accTag, prof.currentSeasonId)
-          .then((maps) => updateStore({ trnMaps: maps }))
-          .catch(() => {});
+        enrichment.push(
+          fetchTrnAgents(accName, accTag, prof.currentSeasonId)
+            .then((agents) => updateStore({ trnAgents: agents }))
+            .catch(() => {})
+        );
+        enrichment.push(
+          fetchTrnMaps(accName, accTag, prof.currentSeasonId)
+            .then((maps) => updateStore({ trnMaps: maps }))
+            .catch(() => {})
+        );
       }
     }
 
-    // Previous act K/D
-    {
+    // Previous act K/D. Inside the same ownership guard as the block above on
+    // purpose: this is 3 more `fetchTrnActStats` calls for the SAME local
+    // account, and leaving it out is exactly how the overlay kept re-fetching
+    // season segments after the first half of the duplication was closed.
+    if (accName && ownsRefresh()) {
       const played = new Set(prof.seasons.filter((s) => s.games > 0).map((s) => s.id.toLowerCase()));
       const order = gd.seasonOrder.length > 0 ? gd.seasonOrder : [...played];
       const prev = order
         .filter((id) => id !== prof.currentSeasonId.toLowerCase() && played.has(id))
         .slice(0, 3);
-      Promise.all(
-        prev.map((sid) =>
-          fetchTrnActStats(accName, accTag, sid)
-            .then(({ stats }) => ({ sid, kd: stats.kd, matches: stats.wins + stats.losses + stats.ties }))
-            .catch(() => null)
-        )
-      ).then((res) => {
-        const m: Record<string, { kd: number; matches: number }> = {};
-        for (const r of res) if (r) m[r.sid] = { kd: r.kd, matches: r.matches };
-        updateStore({ trnPrev: m });
-      });
+      enrichment.push(
+        Promise.all(
+          prev.map((sid) =>
+            fetchTrnActStats(accName, accTag, sid)
+              .then(({ stats }) => ({ sid, kd: stats.kd, matches: stats.wins + stats.losses + stats.ties }))
+              .catch(() => null)
+          )
+        ).then((res) => {
+          const m: Record<string, { kd: number; matches: number }> = {};
+          for (const r of res) if (r) m[r.sid] = { kd: r.kd, matches: r.matches };
+          updateStore({ trnPrev: m });
+        })
+      );
     }
+
+    // Re-publish once the TRN enrichment has settled, so a non-owner realm (the
+    // overlay) adopts agents/maps/matches instead of running the same calls
+    // itself. Never rejects: every branch above already swallows its own error,
+    // and a failed broadcast just means the next refresh sends it again.
+    void Promise.allSettled(enrichment).then(() => {
+      saveSnapshot();
+      if (ownsRefresh()) {
+        void broadcastTrn({
+          trn: store.trn,
+          trnAgents: store.trnAgents,
+          trnMaps: store.trnMaps,
+          trnPrev: store.trnPrev,
+          trnMatchTrs: store.trnMatchTrs,
+        });
+      }
+    });
 
     // Match details
     const puuid = prof.puuid;
     const ids = comp.map((g) => g.matchId).filter(Boolean);
     updateStore({ detailsTotal: ids.length });
     if (puuid && ids.length > 0) {
-      aggregateDetails(region, ids, puuid)
-        .then(({ agg: a, byId }) => {
-          updateStore({
-            agg: a,
-            detailsById: byId,
-            detailsReady: Object.keys(byId).length,
-          });
-          writeSnapshot({
-            savedAt: Date.now(),
-            puuid: prof.puuid || liveAcc.puuid,
-            profile: fullProfile,
-            games: comp,
-            agg: a,
-            mapById: mm,
-            queueById: meta.queueById,
-            trn: store.trn,
-            trnAgents: store.trnAgents,
-            trnMaps: store.trnMaps,
-            trnPrev: store.trnPrev,
-            trnMatchTrs: store.trnMatchTrs,
-            detailsById: byId,
-            detailsReady: Object.keys(byId).length,
-          });
-        })
-        .catch(() => {});
+      enrichment.push(
+        aggregateDetails(region, ids, puuid)
+          .then(({ agg: a, byId }) => {
+            updateStore({
+              agg: a,
+              detailsById: byId,
+              detailsReady: Object.keys(byId).length,
+            });
+            // `saveSnapshot` reads `store.*`, which the updateStore above has
+            // already folded in, so this publishes the details without a second
+            // copy of the snapshot literal.
+            saveSnapshot();
+          })
+          .catch(() => {})
+      );
     }
   } catch (e) {
     // If live fetch fails, we keep the cached profile/games intact!
@@ -488,6 +607,36 @@ export function useTrackerData(): TrackerData {
       hasAutoRefreshed = true;
       triggerGlobalRefresh();
     }
+  }, []);
+
+  /* Non-owner realms take their TRN enrichment from the owner's broadcast
+   * instead of repeating the calls. Registered once per realm (the same guard
+   * as the auto-refresh above, and the same reason: 7 call sites share this
+   * hook). The owner neither listens nor needs to. */
+  useEffect(() => {
+    if (ownsRefresh() || !isTauri()) return;
+    let alive = true;
+    let un: (() => void) | undefined;
+    void import('@tauri-apps/api/event')
+      .then(({ listen }) =>
+        listen<Parameters<typeof mergeTrnBroadcast>[0]>('recon:tracker-trn', (ev) => {
+          if (alive && ev.payload) mergeTrnBroadcast(ev.payload);
+        })
+      )
+      .then((fn) => {
+        if (alive) un = fn;
+        // Unmounted before the listener resolved: do not leak it.
+        else fn();
+      })
+      .catch(() => {
+        /* No event bus: this realm simply stays on its own (un-enriched) data. */
+      });
+    return () => {
+      alive = false;
+      try {
+        un?.();
+      } catch {}
+    };
   }, []);
 
   return state;

@@ -42,8 +42,8 @@ use winreg::{RegKey, RegValue};
 // Validation
 // ---------------------------------------------------------------------------
 
-pub const ADMIN_ADD_ERR: &str = "Requires admin: run TrueStretch as administrator to add custom resolutions (EDID override needs elevated registry write).";
-pub const ADMIN_REMOVE_ERR: &str = "Requires admin: run TrueStretch as administrator to remove EDID overrides (needs elevated registry write).";
+pub const ADMIN_ADD_ERR: &str = "Requires admin: run Recon as administrator to add custom resolutions (EDID override needs elevated registry write).";
+pub const ADMIN_REMOVE_ERR: &str = "Requires admin: run Recon as administrator to remove EDID overrides (needs elevated registry write).";
 
 pub fn validate_custom_resolution(w: u32, h: u32, hz: u32) -> Result<(), String> {
     if w < 640 || w > 7680 {
@@ -716,9 +716,6 @@ pub fn patch_edid(base: &[u8], timing: [u8; 18]) -> Result<[u8; 128], String> {
 }
 
 fn backup_path_for(pnp: &str) -> Option<std::path::PathBuf> {
-    let app_data = std::env::var("LOCALAPPDATA").ok()?;
-    let dir = std::path::PathBuf::from(app_data).join("TrueStretchStudio");
-    let _ = std::fs::create_dir_all(&dir);
     let safe: String = pnp
         .chars()
         .map(|c| match c {
@@ -726,7 +723,7 @@ fn backup_path_for(pnp: &str) -> Option<std::path::PathBuf> {
             _ => c,
         })
         .collect();
-    Some(dir.join(format!("edid_backup_{}.bin", safe)))
+    crate::paths::data_file(&format!("edid_backup_{}.bin", safe))
 }
 
 fn write_override(dev: &str, inst: &str, patched: &[u8; 128]) -> Result<(), String> {
@@ -1141,7 +1138,7 @@ pub fn remove_custom_override(monitor_id: &str) -> Result<String, String> {
     crate::gpu::enforce_all_gpu_scaling();
     if deleted {
         Ok(format!(
-            "Removed EDID override on {} (backup kept in %LOCALAPPDATA%\\TrueStretchStudio). {}.",
+            "Removed EDID override on {} (backup kept in %APPDATA%\\Recon). {}.",
             pnp, restart_msg
         ))
     } else {

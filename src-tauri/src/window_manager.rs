@@ -603,6 +603,9 @@ pub fn align_overlay_to_valorant(hwnd_val: isize) -> Result<(), String> {
                     || (cur_rect.right - cur_rect.left) != tw
                     || (cur_rect.bottom - cur_rect.top) != th
                 {
+                    // ponytail: no SWP_SHOWWINDOW — positioning must never
+                    // undo a hide(); callers that mean "show" call
+                    // window.show() themselves.
                     let _ = SetWindowPos(
                         hwnd,
                         HWND_TOPMOST,
@@ -610,7 +613,7 @@ pub fn align_overlay_to_valorant(hwnd_val: isize) -> Result<(), String> {
                         ty,
                         tw,
                         th,
-                        SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW,
+                        SWP_NOACTIVATE | SWP_NOZORDER,
                     );
                 }
             }
@@ -679,6 +682,13 @@ pub fn make_child_windows_clickthrough(_top_hwnd: HWND, _clickthrough: bool) {
     // breaks DirectComposition swapchain presentation to Windows DWM!
 }
 
+/// Styles + positions the overlay WITHOUT changing visibility.
+/// Callers: `show_overlay` (already called window.show()), the
+/// `set_overlay_windowed windowed=false` path (deliberately NO show — the
+/// daemon owns hidden-vs-shown when there is no explicit user show intent),
+/// and never the auto-overlay daemon directly. Anyone that means "show"
+/// calls `window.show()` itself; this fn only preserves whatever state is
+/// current, so it can never undo a hide().
 pub fn setup_overlay_window(hwnd_val: isize, clickthrough: bool) -> Result<(), String> {
     unsafe {
         let hwnd = HWND(hwnd_val as *mut std::ffi::c_void);
@@ -686,12 +696,15 @@ pub fn setup_overlay_window(hwnd_val: isize, clickthrough: bool) -> Result<(), S
             return Err("Overlay window handle is invalid.".to_string());
         }
 
-        // 1. Strip ALL standard window decorations, frames, and captions so zero title bar renders
+        // 1. Strip ALL standard window decorations, frames, and captions so zero title bar renders.
+        // WS_VISIBLE is deliberately left untouched here (neither forced
+        // nor cleared): forcing it re-showed a hidden overlay on every
+        // styling pass, and clearing it would undo a show_overlay. Only
+        // window.show()/hide() own visibility.
         let current_style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
         let new_style = ((current_style
             & !(0x00C00000 | 0x00040000 | 0x00010000 | 0x00020000 | 0x00080000 | 0x00800000))
             | 0x80000000  // WS_POPUP
-            | 0x10000000  // WS_VISIBLE
             | 0x04000000) // WS_CLIPSIBLINGS
             as i32 as isize;
         SetWindowLongPtrW(hwnd, GWL_STYLE, new_style);
@@ -715,6 +728,8 @@ pub fn setup_overlay_window(hwnd_val: isize, clickthrough: bool) -> Result<(), S
         // 4. Align strictly to Valorant window rect
         let (x, y, width, height) = overlay_target_rect(hwnd);
 
+        // No SWP_SHOWWINDOW (see align_overlay_to_valorant): showing is
+        // the caller's job (window.show()), never a styling side-effect.
         let _ = SetWindowPos(
             hwnd,
             HWND_TOPMOST,
@@ -722,7 +737,7 @@ pub fn setup_overlay_window(hwnd_val: isize, clickthrough: bool) -> Result<(), S
             y,
             width,
             height,
-            SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            SWP_FRAMECHANGED | SWP_NOACTIVATE,
         );
 
         restore_blur_behind(hwnd);
@@ -767,6 +782,8 @@ pub fn set_overlay_editable(hwnd_val: isize) -> Result<(), String> {
 
         let (x, y, width, height) = overlay_target_rect(hwnd);
 
+        // Deliberate show: entering edit mode is an explicit user intent
+        // to see and interact with the overlay.
         let _ = SetWindowPos(
             hwnd,
             HWND_TOPMOST,
@@ -801,6 +818,12 @@ pub fn overlay_clickthrough_missing(hwnd_val: isize) -> bool {
     }
 }
 
+/// Click-through style toggle. Visibility-preserving by design: leaves
+/// WS_VISIBLE alone and never passes SWP_SHOWWINDOW, so daemon-adjacent
+/// calls (boot init, edit-mode exit, daemon self-heal) can never undo a
+/// hide(). Explicit shows own themselves: `show_overlay` (window.show()),
+/// edit-mode entry (`set_overlay_editable`, which keeps its own show), and
+/// the `set_overlay_windowed windowed=true` debug path (window.show()).
 pub fn toggle_overlay_clickthrough(hwnd_val: isize, clickthrough: bool) -> Result<(), String> {
     unsafe {
         let hwnd = HWND(hwnd_val as *mut std::ffi::c_void);
@@ -808,12 +831,12 @@ pub fn toggle_overlay_clickthrough(hwnd_val: isize, clickthrough: bool) -> Resul
             return Err("Overlay window handle is invalid.".to_string());
         }
 
-        // Always strip caption and force WS_POPUP with 64-bit sign extension
+        // Always strip caption and force WS_POPUP with 64-bit sign extension.
+        // WS_VISIBLE untouched: show()/hide() own visibility.
         let current_style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
         let new_style = ((current_style
             & !(0x00C00000 | 0x00040000 | 0x00010000 | 0x00020000 | 0x00080000 | 0x00800000))
             | 0x80000000  // WS_POPUP
-            | 0x10000000  // WS_VISIBLE
             | 0x04000000) // WS_CLIPSIBLINGS
             as i32 as isize;
         SetWindowLongPtrW(hwnd, GWL_STYLE, new_style);
@@ -833,7 +856,8 @@ pub fn toggle_overlay_clickthrough(hwnd_val: isize, clickthrough: bool) -> Resul
         install_overlay_subclass(hwnd);
         make_child_windows_clickthrough(hwnd, clickthrough);
 
-        // Synchronize position to Valorant if running
+        // Synchronize position to Valorant if running. No SWP_SHOWWINDOW:
+        // a hidden overlay must stay hidden through style re-asserts.
         let (x, y, width, height) = overlay_target_rect(hwnd);
 
         let _ = SetWindowPos(
@@ -843,7 +867,7 @@ pub fn toggle_overlay_clickthrough(hwnd_val: isize, clickthrough: bool) -> Resul
             y,
             width,
             height,
-            SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            SWP_FRAMECHANGED | SWP_NOACTIVATE,
         );
 
         restore_blur_behind(hwnd);

@@ -20,6 +20,10 @@ export const SCORE_TIERS: { tier: ScoreTier; min: number; color: string; dim: st
 export const scoreTier = (score: number): (typeof SCORE_TIERS)[number] =>
   SCORE_TIERS.find((t) => score >= t.min) ?? SCORE_TIERS[SCORE_TIERS.length - 1];
 
+/** Tier letter → palette hex, so callers don't duplicate the SCORE_TIERS colours. */
+export const tierColor = (tier: ScoreTier): string =>
+  SCORE_TIERS.find((t) => t.tier === tier)?.color ?? SCORE_TIERS[SCORE_TIERS.length - 1].color;
+
 /** Letter grade from a TRN percentile. Reproduces TRN's observed bands
     (1K = 99th+ percentile / perfect 1000, S≤15% top, A≤35%, B≤50%, C bottom≤25%, else D). */
 export const gradeFor = (pct: number): ScoreTier => {

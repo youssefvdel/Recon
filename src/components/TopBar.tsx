@@ -170,7 +170,10 @@ export const TopBar: React.FC<TopBarProps> = ({
   useEffect(() => {
     let alive = true;
     const isLive = (s: LiveMatchState | null | undefined): boolean =>
-      !!s && (s.phase === 'pregame' || s.phase === 'coregame') && (s.blueTeam.length > 0 || s.redTeam.length > 0);
+      !!s &&
+      !s.isPreviousMatch &&
+      (s.phase === 'pregame' || s.phase === 'coregame') &&
+      (s.blueTeam.length > 0 || s.redTeam.length > 0);
     try {
       if (alive) setLiveActive(isLive(peekLiveMatchState()));
     } catch {}
@@ -199,16 +202,40 @@ export const TopBar: React.FC<TopBarProps> = ({
 
   useEffect(() => {
     const tick = () => {
-      // Same existing 1s tick — no new intervals. Surfaces the kill-switch
-      // flipped on the Dev QA page. (Cooldown countdown pill removed: the
-      // mechanism runs silently; users never see seconds.)
+      // Idle-stretched kill-switch poll: 5s (was 1s) — the Dev QA toggle is
+      // a dev surface, and the equality guard below means identical values
+      // never re-render. Visibility/focus return refreshes immediately.
+      // Hidden-tab skip: the localStorage read is synchronous but the
+      // setState + re-render is not free across a steady cadence.
+      if (typeof document !== 'undefined' && document.hidden) return;
       try {
-        setTrackerOn(isTrackerEnabled());
+        const v = isTrackerEnabled();
+        // Equality guard (LiveMatchView/OverlayView pattern): identical
+        // values never re-render.
+        setTrackerOn((prev) => (prev === v ? prev : v));
       } catch {}
     };
     tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
+    const onVis = () => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        try {
+          const v = isTrackerEnabled();
+          setTrackerOn((prev) => (prev === v ? prev : v));
+        } catch {}
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVis);
+      window.addEventListener('focus', onVis);
+    }
+    const id = setInterval(tick, 5000);
+    return () => {
+      clearInterval(id);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVis);
+        window.removeEventListener('focus', onVis);
+      }
+    };
   }, []);
 
   const handleXDodge = () => {
@@ -392,10 +419,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/15 border border-red-400/50 text-red-300 text-[10px] font-mono font-bold cursor-pointer hover:bg-red-500/25 active:scale-95 transition-all"
             title="Live match in progress — jump to Live Match tab"
           >
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
-            </span>
+            <span className="inline-flex rounded-full h-1.5 w-1.5 bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.9)]" />
             <span>LIVE</span>
           </button>
         )}

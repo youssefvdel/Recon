@@ -108,6 +108,7 @@ check('acs alone counts as fetched', playerNeedsTrnStats(acsOnly) === false);
 // --- Wiring (source text): concurrent fill on top of the untouched gate ---
 const tracker = await Bun.file('src/utils/tracker.ts').text();
 const trn = await Bun.file('src/utils/trn.ts').text();
+const cacheRs = await Bun.file('src-tauri/src/trn_cache.rs').text();
 
 check('concurrent fill fans out per player', tracker.includes('}, trnFillJitterMs());'), true);
 check('no 6s serialization left', !tracker.includes('TRN_SPREAD_MS') && !tracker.includes('TRN_SPREAD_FIRST_MS') && !tracker.includes('pumpTrnSpread'), true);
@@ -132,7 +133,7 @@ check('fill skips in-flight players without spending', tracker.includes('trnInFl
 check('new fills gate at enqueue while paused', tracker.includes('if (await trnProxyPaused())'), true);
 check('dispatched firings skip the pause check by design', tracker.includes('No paused check by'), true);
 check('dispatched firings carry drain', tracker.includes('fetchTrnStatsNow(puuid, name, tag, true)'), true);
-check('drain reaches act stats', trn.includes('trnDrainFor(name, tag, drain) ? { drain: true } : undefined'), true);
+check('drain reaches act stats', trn.includes('trnDrainFor(name, tag, drain) ? { drain: true } : {}'), true);
 check('drain skips only the pause pre-check', trn.includes('opts?.drain !== true && (await trnProxyPaused())'), true);
 
 // --- Atomic job: descendants inherit drain until settle, then re-gate ---
@@ -164,10 +165,31 @@ check('TRN gap ceiling still 8000ms', trn.includes('TRN_GAP_MAX_MS = 8000'), tru
 check('TRN cooldown base still 25s', trn.includes('TRN_COOLDOWN_BASE_MS = 25 * 1000'), true);
 check('TRN cooldown cap still 60s', trn.includes('TRN_COOLDOWN_MAX_MS = 60 * 1000'), true);
 
+// --- Player-keyed caches are capped (name#tag keys are unbounded over a
+// session). The eviction verdict is in the source; the caps are named. ---
+for (const cap of ['PROFILE_CACHE_MAX', 'SEASON_SEG_CACHE_MAX', 'TRN_PATH_STAMPS_MAX']) {
+  check(`${cap} is a named constant`, trn.includes(`const ${cap} =`), true);
+}
+check('profile cache evicts oldest-first', /evictOldest\(profileCache,[^;]*\(v\) => v\.at\)/.test(trn), true);
+check('season-segment cache evicts oldest-first', /evictOldest\(seasonSegCache,[^;]*\(v\) => v\.at\)/.test(trn), true);
+check('dead-path stamps evict oldest-first', /evictOldest\(trnPathFailedAt,[^;]*\(at\) => at\)/.test(trn), true);
+check('in-flight maps still self-clean (not capped instead)', trn.includes('seasonInFlight.delete(cacheKey)'), true);
+
 // --- Longer TTLs for slow stats (never shorter) ---
+// The TTLs are POLICY and they live in trn.ts; Rust stores bodies and returns
+// `fetched_at` (see trn_cache.rs). Each call site passes its own window into
+// `trnGet` so one body can be fresh for the 6h matches window and stale for
+// nothing else — the assertion is on the named constant AND on it reaching
+// the call, because a constant nobody passes is a constant that does nothing.
 check('profile TTL 24h', trn.includes('const PROFILE_TTL_MS = 24 * 60 * 60 * 1000'), true);
 check('season-segment TTL 24h', trn.includes('const SEASON_SEG_TTL_MS = 24 * 60 * 60 * 1000'), true);
-check('TRN matches TTL 6h', trn.includes('readPersisted<Record<string, number>>(key, 6 * 3600 * 1000)'), true);
+check('TRN matches TTL 6h', trn.includes('const TRN_MATCHES_TTL_MS = 6 * 60 * 60 * 1000'), true);
+check('match-detail TTL 7d', trn.includes('const TRN_MATCH_DETAIL_TTL_MS = 7 * 24 * 60 * 60 * 1000'), true);
+check('pinned history is 365d', trn.includes('const TRN_SEASON_PINNED_TTL_MS = 365 * 24 * 60 * 60 * 1000'), true);
+check('the matches TTL reaches its call', trn.includes('readPersisted<Record<string, number>>(key, TRN_MATCHES_TTL_MS)'), true);
+check('the profile TTL reaches the disk cache', trn.includes('ttlMs: PROFILE_TTL_MS'), true);
+check('the season TTL reaches the disk cache', trn.includes('ttlMs: ttl'), true);
+check('no TTL ever reaches Rust as policy', !cacheRs.includes('ttl'), true);
 
 // --- WebView2 transport seam (mock/source-text only — no live calls) ---
 // Single choke point: every TRN request funnels through one invoke site, so
@@ -200,6 +222,19 @@ const tauriConf = await Bun.file('src-tauri/tauri.conf.json').text();
 const indexHtml = await Bun.file('index.html').text();
 check('tauri CSP disabled (no connect-src block)', tauriConf.includes('"csp": null'), true);
 check('no meta CSP in index.html', !indexHtml.includes('Content-Security-Policy'), true);
+
+// --- Shared ceiling: the TS gate is per-realm, so the PROVABLE bound lives
+// in the one process both realms share. Wired here; the cap arithmetic and
+// window/memo TTL verdicts are Rust cargo tests. ---
+check('lobby key reaches the transport', trn.includes('lobby: trnLobbyKey'), true);
+check('poll stamps the lobby key each match', tracker.includes('setTrnLobbyKey(matchId)'), true);
+check('rust fetch accepts the lobby key', proxyRs.includes('lobby: Option<String>'), true);
+check('ceiling runs before the window opens', proxyRs.indexOf('spend_ceiling(lobby_key)') < proxyRs.indexOf('InflightGuard::enter(&app)'), true);
+check('per-lobby cap named', proxyRs.includes('const TRN_LOBBY_MAX_REQUESTS: u32 = 30'), true);
+check('per-hour cap named', proxyRs.includes('const TRN_HOURLY_MAX_REQUESTS: u32 = 900'), true);
+check('memo precedes the ceiling (a replay costs nothing)', proxyRs.indexOf('memo_get(&path, now_ms())') < proxyRs.indexOf('spend_ceiling(lobby_key)'), true);
+check('memo TTL is short and named', proxyRs.includes('const TRN_MEMO_TTL_MS: u64 = 10 * 1000'), true);
+check('memo only caches 2xx', proxyRs.includes('if let Ok(body) = &out'), true);
 
 if (failures > 0) {
   console.error(`${failures} failure(s)`);

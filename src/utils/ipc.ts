@@ -1,7 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { isDevTabHeld } from './devTools';
-import type { DisplayInfo, ShortcutBinding, GpuInfo, GpuSettingsReport, WindowInfo, ConfigFileInfo, QuickShortcut, MonitorDevice, UpdateInfo } from '../types';
-import { APP_VERSION } from './version';
+import type { DisplayInfo, ShortcutBinding, GpuInfo, GpuSettingsReport, WindowInfo, ConfigFileInfo, QuickShortcut, MonitorDevice } from '../types';
 
 export const isTauri = () => {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -277,7 +276,8 @@ export async function isOverlayVisible(): Promise<boolean> {
 }
 
 export async function isTabDown(): Promise<boolean> {
-  if (isDevTabHeld()) return true;
+  // Static gate so prod DCE drops the dev-only override (150ms live probe path).
+  if (import.meta.env.DEV && isDevTabHeld()) return true;
   if (!isTauri()) return false;
   try {
     return await invoke<boolean>('is_tab_down');
@@ -304,19 +304,6 @@ export async function appMinimize(): Promise<void> {
     const { getCurrentWindow } = await import('@tauri-apps/api/window');
     await getCurrentWindow().minimize();
   }
-}
-
-/** Lock the window's minimum size to its current size — it can never be
- *  resized smaller than this. Main window only; no-op in overlay/dev. */
-export async function lockMinSizeToCurrent(): Promise<void> {
-  if (!isTauri()) return;
-  try {
-    const { getCurrentWindow } = await import('@tauri-apps/api/window');
-    const win = getCurrentWindow();
-    if (win.label !== 'main') return;
-    const size = await win.outerSize();
-    await win.setMinSize(size);
-  } catch {}
 }
 
 export async function appToggleMaximize(): Promise<void> {
@@ -969,38 +956,12 @@ export async function listSupportedModes(): Promise<DisplayMode[]> {
   return await invoke<DisplayMode[]>('list_supported_modes');
 }
 
-export async function checkAppUpdates(): Promise<UpdateInfo> {
-  if (!isTauri()) {
-    // Dev-browser fallback only — version comes from package.json at build
-    // time, never hardcoded (bump script keeps it = Cargo.toml).
-    return {
-      has_update: false,
-      current_version: APP_VERSION,
-      latest_version: APP_VERSION,
-      release_title: `Recon v${APP_VERSION}`,
-      release_notes: 'Running latest dev build.',
-      published_at: new Date().toISOString(),
-      html_url: 'https://github.com/youssefvdel/Recon',
-      download_url: null,
-    };
-  }
-  return await invoke<UpdateInfo>('check_app_updates');
-}
-
 export async function openExternalUrl(url: string): Promise<void> {
   if (!isTauri()) {
     window.open(url, '_blank');
     return;
   }
   await invoke('open_external_url', { url });
-}
-
-export async function installAppUpdate(downloadUrl: string): Promise<string> {
-  if (!isTauri()) {
-    window.open(downloadUrl, '_blank');
-    return 'Browser download initiated';
-  }
-  return await invoke<string>('install_app_update', { downloadUrl });
 }
 
 export async function getAutostartEnabled(): Promise<boolean> {

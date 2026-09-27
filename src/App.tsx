@@ -13,10 +13,18 @@ import { PrepickView } from './components/PrepickView';
 import { AccountsView } from './components/AccountsView';
 import { DevDashboard } from './components/DevDashboard';
 import { OverlayView } from './components/OverlayView';
-import { UpdateModal } from './components/UpdateModal';
 import type { DisplayInfo, ShortcutBinding, GpuInfo, TabType } from './types';
 import { logger } from './utils/logger';
-import { checkForUpdate } from './utils/updater';
+import { resolveInitialTab } from './utils/tabRestore';
+import {
+  startAutoUpdate,
+  subscribeAutoUpdate,
+  getAutoUpdateState,
+  getInstallBlocker,
+  installAutoUpdate,
+  deferAutoInstall,
+  type AutoUpdateState,
+} from './utils/updater';
 import {
   fetchDisplayInfo,
   fetchShortcut,
@@ -66,27 +74,29 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (isOverlay) {
-      document.title = '';
+      document.title = 'Recon • Overlay';
       document.documentElement.style.backgroundColor = 'transparent';
       document.body.style.backgroundColor = 'transparent';
       document.body.classList.add('bg-transparent');
     } else if (isDevWindow) {
       document.title = 'Recon • Dev Dashboard';
     } else {
-      // Current size becomes the floor — the window can never shrink below this.
-      import('./utils/ipc').then((m) => m.lockMinSizeToCurrent()).catch(() => {});
+      // The main window's minimum size (default open size) is owned by the
+      // Rust setup in src-tauri/src/lib.rs — do not re-set it from the frontend.
       return setupGlobalWindowDrag();
     }
   }, [isOverlay, isDevWindow]);
 
   const [currentTab, setCurrentTab] = useState<TabType>(() => {
     try {
-      const saved = localStorage.getItem('recon_active_tab') as TabType;
-      if (saved && ['overview', 'switcher', 'visualizer', 'sens', 'custom_res', 'gpu', 'borderless', 'game_config', 'settings', 'valorant', 'matches', 'store', 'crosshair', 'prepick', 'chat', 'accounts'].includes(saved)) {
-        return saved;
-      }
-    } catch {}
-    return 'overview';
+      // Restore the last tab — except Settings: it is a visit-only page (the
+      // Sidebar version/UPDATE pill navigates there), so resolveInitialTab
+      // excludes it and a launch falls back to overview. The current tab is
+      // still persisted below, so the saved value stays truthful.
+      return resolveInitialTab(localStorage.getItem('recon_active_tab'));
+    } catch {
+      return 'overview';
+    }
   });
 
   useEffect(() => {
@@ -111,7 +121,8 @@ export const App: React.FC = () => {
   const [preferredStretched, setPreferredStretched] = useState<[number, number]>([2088, 1440]);
   const [isLoading, setIsLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
-  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [autoUpdate, setAutoUpdate] = useState<AutoUpdateState>(getAutoUpdateState);
+  const announcedUpdateRef = useRef('');
   const [hasUpdate, setHasUpdate] = useState(false);
   const [_latestVersion, setLatestVersion] = useState('');
   const [showConsent, setShowConsent] = useState<boolean>(() => {
@@ -131,20 +142,15 @@ export const App: React.FC = () => {
     return () => window.removeEventListener(CONSENT_EVENT, onConsent);
   }, []);
 
-  // Background update check on startup (delayed 2.5s so app startup is instantaneous)
+  // Background update check + auto-download, main window only (the overlay and
+  // dev dashboard also mount App). Delayed 2.5s so app startup is instantaneous.
   useEffect(() => {
+    if (isOverlay || isDevWindow) return;
     const timer = setTimeout(() => {
-      checkForUpdate()
-        .then((found) => {
-          if (found) {
-            setHasUpdate(true);
-            setLatestVersion(found.version);
-          }
-        })
-        .catch(() => {});
+      void startAutoUpdate();
     }, 2500);
     return () => clearTimeout(timer);
-  }, []);
+  }, [isOverlay, isDevWindow]);
 
   const showToast = (message: string, type: 'success' | 'info' = 'success', durationMs = 3500) => {
     setToast({ message, type });
@@ -153,9 +159,39 @@ export const App: React.FC = () => {
     }, durationMs);
   };
 
+  // Mirror the background updater into the UI: pill state, one toast per
+  // discovered version, and the ready-to-install prompt once it is safe.
+  useEffect(() => {
+    return subscribeAutoUpdate((state) => {
+      setAutoUpdate(state);
+      const version = state.update?.version;
+      if (!version) return;
+      setHasUpdate(true);
+      setLatestVersion(version);
+      if (state.phase !== 'checking' && announcedUpdateRef.current !== version) {
+        announcedUpdateRef.current = version;
+        showToast(`Update v${version} found — downloading in the background`, 'info', 6000);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const errorToMessage = (e: unknown): string => {
     if (e instanceof Error) return e.message;
     return String(e);
+  };
+
+  const handleInstallReady = async () => {
+    const blocker = await getInstallBlocker();
+    if (blocker) {
+      showToast(blocker, 'info', 7000);
+      return;
+    }
+    try {
+      await installAutoUpdate();
+    } catch (e) {
+      showToast(errorToMessage(e), 'info', 7000);
+    }
   };
 
   /** BADMODE (-2) means the mode was never Added: toast the Add guidance and land on Settings. */
@@ -224,25 +260,36 @@ export const App: React.FC = () => {
     window.addEventListener('blur', handleBlur);
 
     // Poll for tab switch requests (e.g. from automation or scripts) with low-overhead 2000ms interval
+    const applyTabRequest = (req: string | null) => {
+      if (!req) return;
+      if (['switcher', 'visualizer', 'game_config', 'settings', 'gpu', 'valorant', 'overview', 'matches'].includes(req)) {
+        setCurrentTab(req as TabType);
+      } else if (req === 'borderless' || req === 'display' || req === 'monitors') {
+        // Legacy alias: Window Stretcher merged into switcher grid
+        setCurrentTab('switcher');
+      } else if (['config', 'custom', 'cru', 'custom_res'].includes(req)) {
+        // Legacy aliases: custom builder merged into the game config tab
+        setCurrentTab('game_config');
+      } else if (req === 'sens') {
+        // Legacy alias: sens matcher merged into the switcher tab
+        setCurrentTab('switcher');
+      }
+    };
     const tabInterval = setInterval(async () => {
+      // Hidden-tab skip: exact 2000ms cadence kept when visible.
+      if (typeof document !== 'undefined' && document.hidden) return;
       try {
-        const req = await checkRequestedTab();
-        if (req) {
-          if (['switcher', 'visualizer', 'game_config', 'settings', 'gpu', 'valorant', 'overview', 'matches'].includes(req)) {
-            setCurrentTab(req as TabType);
-          } else if (req === 'borderless' || req === 'display' || req === 'monitors') {
-            // Legacy alias: Window Stretcher merged into switcher grid
-            setCurrentTab('switcher');
-          } else if (['config', 'custom', 'cru', 'custom_res'].includes(req)) {
-            // Legacy aliases: custom builder merged into the game config tab
-            setCurrentTab('game_config');
-          } else if (req === 'sens') {
-            // Legacy alias: sens matcher merged into the switcher tab
-            setCurrentTab('switcher');
-          }
-        }
+        applyTabRequest(await checkRequestedTab());
       } catch (_) {}
     }, 2000);
+    // Immediate tick on return (OverlayView/LiveMatchView pattern) so a
+    // request filed while hidden never waits a full interval.
+    const onTabVis = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      checkRequestedTab().then(applyTabRequest).catch(() => {});
+    };
+    document.addEventListener('visibilitychange', onTabVis);
+    window.addEventListener('focus', onTabVis);
 
     const handleNavigateTab = (e: Event) => {
       const tab = (e as CustomEvent<TabType>).detail;
@@ -256,6 +303,8 @@ export const App: React.FC = () => {
       clearInterval(tabInterval);
       window.removeEventListener('blur', handleBlur);
       window.removeEventListener('recon_navigate_tab', handleNavigateTab);
+      document.removeEventListener('visibilitychange', onTabVis);
+      window.removeEventListener('focus', onTabVis);
       if (unlistenFn) unlistenFn();
       if (unlistenBlFn) unlistenBlFn();
     };
@@ -344,7 +393,6 @@ export const App: React.FC = () => {
         displayInfo={displayInfo}
         gpuInfo={gpuInfo}
         hasUpdate={hasUpdate}
-        onOpenUpdates={() => setIsUpdateModalOpen(true)}
       />
 
       {/* Main Content Pane */}
@@ -358,7 +406,6 @@ export const App: React.FC = () => {
           onToggleProfile={handleToggle}
           isLoading={isLoading}
           hasUpdate={hasUpdate}
-          onOpenUpdates={() => setIsUpdateModalOpen(true)}
         />
         {/* Scrollable View Content (unified grid locks to viewport, no scroll) */}
         <main
@@ -438,19 +485,42 @@ export const App: React.FC = () => {
         </main>
       </div>
 
-      {/* In-App Update Modal */}
-      <UpdateModal
-        isOpen={isUpdateModalOpen}
-        onClose={() => setIsUpdateModalOpen(false)}
-        onUpdateStatusChange={(has, ver) => {
-          setHasUpdate(has);
-          setLatestVersion(ver);
-        }}
-      />
-
       {/* First-run data consent + crash diagnostics offer */}
       {showConsent && <ConsentModal onDone={() => setShowConsent(false)} />}
       <CrashOffer />
+
+      {/* Safe-moment install prompt: only once downloaded, no match live, overlay down. */}
+      {autoUpdate.phase === 'ready' && autoUpdate.safeToInstall && !autoUpdate.deferred && autoUpdate.update && (
+        <motion.div
+          initial={{ opacity: 0, y: 16, scale: 0.95 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          className="fixed bottom-6 right-6 z-50 max-w-sm px-4 py-3.5 rounded-2xl bg-m3-surface-bright text-m3-on-surface border border-m3-primary/40 shadow-m3-3 flex flex-col gap-3"
+        >
+          <div className="flex items-start space-x-2.5">
+            <span className="w-2 h-2 mt-1 rounded-full bg-m3-primary shrink-0" />
+            <div className="text-xs">
+              <div className="font-bold">Update v{autoUpdate.update.version} is ready</div>
+              <div className="text-m3-on-surface-variant mt-0.5">
+                Downloaded and signature-verified. Install now and restart, or keep playing.
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              onClick={deferAutoInstall}
+              className="px-3.5 py-1.5 rounded-xl bg-m3-surface-container-high hover:bg-m3-surface-container-highest text-m3-on-surface text-xs font-semibold cursor-pointer"
+            >
+              Later
+            </button>
+            <button
+              onClick={handleInstallReady}
+              className="px-4 py-1.5 rounded-xl bg-m3-primary hover:bg-m3-primary/90 text-m3-on-primary text-xs font-bold shadow-md cursor-pointer active:scale-95"
+            >
+              Install &amp; Restart
+            </button>
+          </div>
+        </motion.div>
+      )}
 
       {/* Animated Toast Notification */}
       <AnimatePresence>

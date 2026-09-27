@@ -1,5 +1,11 @@
 use serde::{Deserialize, Serialize};
-use std::process::Command;
+
+use crate::riot_http::{self, Request};
+
+/// base64 PC/Windows/unknown blob Riot's name-service expects verbatim. This
+/// route predates the ShooterGame-shaped `X-Riot-ClientPlatform` the other
+/// calls send, so it keeps its own value rather than the shared one.
+const NAME_SERVICE_CLIENT_PLATFORM: &str = "ew0KCSJwbGF0Zm9ybVR5cGUiOiAiUEMiLA0KCSJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLA0KCSJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwNCgkicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iDQp9";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalRiotAccount {
@@ -49,17 +55,6 @@ pub(crate) fn lockfile_auth() -> Result<(String, String), String> {
     Ok((parts[2].to_string(), parts[3].to_string()))
 }
 
-fn curl_args() -> Command {
-    let mut cmd = Command::new("curl");
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        cmd.arg("--ssl-no-revoke");
-    }
-    cmd
-}
-
 /// Generic loopback request to the Riot Client's OWN API surface — friends,
 /// friend requests, conversations, messages, blocklist, presence (verified
 /// against the client's live swagger: `/chat/v4|v6/*`, `/social/v1|v2/*`).
@@ -80,45 +75,19 @@ fn local_request_blocking(
         return Err("Invalid path.".to_string());
     }
     let (port, password) = lockfile_auth()?;
-    let url = format!("https://127.0.0.1:{}{}", port, path);
-    let mut args: Vec<String> = vec![
-        "-s".into(),
-        "-k".into(),
-        "--connect-timeout".into(),
-        "1".into(),
-        "--max-time".into(),
-        "5".into(),
-        "-u".into(),
-        format!("riot:{}", password),
-        "-X".into(),
-        upper,
-        "-w".into(),
-        "\n%{http_code}".into(),
-    ];
-    if let Some(b) = body_arg {
-        args.push("-H".into());
-        args.push("Content-Type: application/json".into());
-        args.push("-d".into());
-        args.push(b);
+    let resp = riot_local(
+        &port,
+        &password,
+        &upper,
+        &path,
+        body_arg.as_deref(),
+        std::time::Duration::from_secs(5),
+    )
+    .map_err(|_| "Riot Client not responding — launch it and retry.".to_string())?;
+    if !(200..300).contains(&resp.status) {
+        return Err(format!("HTTP {} from Riot Client.", resp.status));
     }
-    args.push(url);
-    let output = curl_args()
-        .args(&args)
-        .output()
-        .map_err(|e| format!("Local query failed: {}", e))?;
-    if !output.status.success() {
-        return Err("Riot Client not responding — launch it and retry.".to_string());
-    }
-    let raw = String::from_utf8_lossy(&output.stdout).to_string();
-    // Split the body from the status code curl appended (`-w '\n%{http_code}'`).
-    let (body, status) = match raw.rfind('\n') {
-        Some(i) => (raw[..i].to_string(), raw[i + 1..].trim().to_string()),
-        None => (raw.clone(), String::new()),
-    };
-    if !status.is_empty() && !status.starts_with('2') {
-        return Err(format!("HTTP {} from Riot Client.", status));
-    }
-    Ok(body)
+    Ok(resp.body)
 }
 
 /// Call the Riot Client's local API. `path` must be one of its own routes
@@ -134,30 +103,130 @@ pub async fn local_request(
         .map_err(|e| format!("Task failed: {}", e))?
 }
 
-/// GET against the local client (self-signed cert). Password lives only in
-/// the curl argument for one local call — never logged or stored.
-/// `pub(crate)`: the accounts module reads the live Riot ID through it.
-pub(crate) fn local_get(port: &str, password: &str, path: &str) -> Result<serde_json::Value, String> {
-    let url = format!("https://127.0.0.1:{}{}", port, path);
-    let output = curl_args()
-        .args([
-            "-s",
-            "-k",
-            "--connect-timeout",
-            "1",
-            "--max-time",
-            "2",
-            "-u",
-            &format!("riot:{}", password),
-            &url,
-        ])
-        .output()
-        .map_err(|e| format!("Local query failed: {}", e))?;
-    if !output.status.success() {
-        return Err("Riot Client not responding — launch it and retry.".to_string());
+/// Riot's own loopback API answers on 127.0.0.1 over TLS with a self-signed
+/// certificate, so the request is sent with validation off — the in-process
+/// equivalent of the old `curl -k`. The port and password come fresh from the
+/// lockfile on every call and never leave this argument list.
+fn riot_local(
+    port: &str,
+    password: &str,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+    max_time: std::time::Duration,
+) -> Result<riot_http::Response, String> {
+    let headers: Vec<(String, String)> = if body.is_some() {
+        vec![("Content-Type".to_string(), "application/json".to_string())]
+    } else {
+        Vec::new()
+    };
+    let port: u16 = port
+        .parse()
+        .map_err(|_| "Riot Client not responding — launch it and retry.".to_string())?;
+    riot_http::send(&Request {
+        host: "127.0.0.1",
+        port,
+        path,
+        method,
+        headers: &headers,
+        body,
+        basic_auth: Some(format!("riot:{}", password)),
+        accept_invalid_certs: true,
+        connect_timeout: std::time::Duration::from_secs(1),
+        max_time,
+    })
+}
+
+/// Loopback read. Returns the raw JSON body; HTTP status is not inspected,
+/// exactly as before (curl reported 4xx as a success and the JSON parse below
+/// is what rejected it).
+pub(crate) fn local_get(
+    port: &str,
+    password: &str,
+    path: &str,
+) -> Result<serde_json::Value, String> {
+    let resp = riot_local(
+        port,
+        password,
+        "GET",
+        path,
+        None,
+        std::time::Duration::from_secs(2),
+    )
+    .map_err(|_| "Riot Client not responding — launch it and retry.".to_string())?;
+    serde_json::from_str(&resp.body).map_err(|_| "Unexpected local response.".to_string())
+}
+
+/// Riot's remote game servers (`*.a.pvp.net` and friends). These are ordinary
+/// public HTTPS hosts, so the certificate is validated normally — the inverse
+/// of the loopback client above.
+fn riot_remote(
+    method: &str,
+    host: &str,
+    path: &str,
+    headers: &[(String, String)],
+    body: Option<&str>,
+    max_time: std::time::Duration,
+) -> Result<riot_http::Response, String> {
+    riot_http::send(&Request {
+        host,
+        port: 443,
+        path,
+        method,
+        headers,
+        body,
+        basic_auth: None,
+        accept_invalid_certs: false,
+        connect_timeout: std::time::Duration::from_secs(2),
+        max_time,
+    })
+}
+
+/// The four Riot-auth headers the direct calls share, in the order curl sent
+/// them. `User-Agent` is the ShooterGame-shaped one Riot expects.
+fn riot_auth_headers(
+    access_token: &str,
+    entitlements: &str,
+    client_platform: &str,
+    client_version: &str,
+) -> Vec<(String, String)> {
+    vec![
+        (
+            "Authorization".to_string(),
+            format!("Bearer {}", access_token),
+        ),
+        (
+            "X-Riot-Entitlements-JWT".to_string(),
+            entitlements.to_string(),
+        ),
+        (
+            "X-Riot-ClientPlatform".to_string(),
+            client_platform.to_string(),
+        ),
+        (
+            "X-Riot-ClientVersion".to_string(),
+            client_version.to_string(),
+        ),
+        (
+            "User-Agent".to_string(),
+            format!(
+                "ShooterGame/{} Windows/10.0.19042.1.256.64bit",
+                client_version
+            ),
+        ),
+    ]
+}
+
+/// Host/path guard shared by every `riot_direct_*` call. A caller can never be
+/// talked into an absolute URL or a non-Riot host.
+fn validate_direct(host: &str, path: &str) -> Result<(), String> {
+    if host.contains(|c: char| !(c.is_ascii_alphanumeric() || c == '.' || c == '-')) {
+        return Err("Invalid host.".to_string());
     }
-    serde_json::from_str(&String::from_utf8_lossy(&output.stdout))
-        .map_err(|_| "Unexpected local response.".to_string())
+    if path.contains([' ', '\n', '\r']) {
+        return Err("Invalid path.".to_string());
+    }
+    Ok(())
 }
 
 /// PUT twin of `riot_direct_post_blocking`: same hosts/headers, but `-X PUT`
@@ -172,56 +241,30 @@ fn riot_direct_put_blocking(
     client_platform: String,
     client_version: String,
 ) -> Result<String, String> {
-    if host.contains(|c: char| !(c.is_ascii_alphanumeric() || c == '.' || c == '-')) {
-        return Err("Invalid host.".to_string());
-    }
-    if path.contains([' ', '\n', '\r']) {
-        return Err("Invalid path.".to_string());
-    }
-    let url = format!("https://{}{}", host, path);
-    let ua = format!("ShooterGame/{} Windows/10.0.19042.1.256.64bit", client_version);
-    let output = curl_args()
-        .args([
-            "-s",
-            "--connect-timeout",
-            "2",
-            "--max-time",
-            "10",
-            "-X",
-            "PUT",
-            "-H",
-            "Content-Type: application/json",
-            "-H",
-            &format!("Authorization: Bearer {}", access_token),
-            "-H",
-            &format!("X-Riot-Entitlements-JWT: {}", entitlements),
-            "-H",
-            &format!("X-Riot-ClientPlatform: {}", client_platform),
-            "-H",
-            &format!("X-Riot-ClientVersion: {}", client_version),
-            "-H",
-            &format!("User-Agent: {}", ua),
-            "-d",
-            &body_arg,
-            &url,
-        ])
-        .output()
-        .map_err(|e| format!("Riot query failed: {}", e))?;
-    let body = String::from_utf8_lossy(&output.stdout).to_string();
-    if body.contains("\"statusCode\":401")
-        || body.contains("\"httpStatus\":401")
-        || body.contains("\"statusCode\": 401")
-        || body.contains("\"httpStatus\": 401")
-        || body.contains("BAD_AUTH")
-        || body.contains("EXPIRED_AUTH")
-        || body.contains("FORBIDDEN")
-    {
+    validate_direct(&host, &path)?;
+    let mut headers = riot_auth_headers(
+        &access_token,
+        &entitlements,
+        &client_platform,
+        &client_version,
+    );
+    headers.insert(
+        0,
+        ("Content-Type".to_string(), "application/json".to_string()),
+    );
+    let resp = riot_remote(
+        "PUT",
+        &host,
+        &path,
+        &headers,
+        Some(&body_arg),
+        std::time::Duration::from_secs(10),
+    )
+    .map_err(|_| "Riot error: ".to_string())?;
+    if riot_http::is_auth_failure(&resp.body) {
         return Err("RIOT_EXPIRED".to_string());
     }
-    if !output.status.success() {
-        return Err(format!("Riot error: {}", body.chars().take(160).collect::<String>()));
-    }
-    Ok(body)
+    Ok(resp.body)
 }
 
 /// PUT twin of `riot_direct_post`: same pipeline, real JSON body.
@@ -251,33 +294,22 @@ pub async fn riot_direct_put(
 }
 /// POST a JSON body to the local Riot Client. Same trust boundary as
 /// `local_get` (loopback + lockfile credentials).
-fn local_post(port: &str, password: &str, path: &str, body: &str) -> Result<serde_json::Value, String> {
-    let url = format!("https://127.0.0.1:{}{}", port, path);
-    let output = curl_args()
-        .args([
-            "-s",
-            "-k",
-            "--connect-timeout",
-            "1",
-            "--max-time",
-            "3",
-            "-u",
-            &format!("riot:{}", password),
-            "-H",
-            "Content-Type: application/json",
-            "-X",
-            "POST",
-            "-d",
-            body,
-            &url,
-        ])
-        .output()
-        .map_err(|e| format!("Local query failed: {}", e))?;
-    if !output.status.success() {
-        return Err("Riot Client not responding — launch it and retry.".to_string());
-    }
-    serde_json::from_str(&String::from_utf8_lossy(&output.stdout))
-        .map_err(|_| "Unexpected local response.".to_string())
+fn local_post(
+    port: &str,
+    password: &str,
+    path: &str,
+    body: &str,
+) -> Result<serde_json::Value, String> {
+    let resp = riot_local(
+        port,
+        password,
+        "POST",
+        path,
+        Some(body),
+        std::time::Duration::from_secs(3),
+    )
+    .map_err(|_| "Riot Client not responding — launch it and retry.".to_string())?;
+    serde_json::from_str(&resp.body).map_err(|_| "Unexpected local response.".to_string())
 }
 
 /// Resolve PUUIDs to Riot IDs through the Riot Client's OWN account service
@@ -363,7 +395,7 @@ fn detect_local_account_blocking() -> Result<LocalRiotAccount, String> {
     })
 }
 
-/// Async so the spawn_blocking curl never freezes the UI thread.
+/// Async so the blocking network work never freezes the UI thread.
 #[tauri::command]
 pub async fn detect_local_account() -> Result<LocalRiotAccount, String> {
     tauri::async_runtime::spawn_blocking(detect_local_account_blocking)
@@ -454,8 +486,8 @@ pub async fn local_presences() -> Result<String, String> {
 /// the raw body returns so the frontend parses defensively.
 ///
 /// Async + spawn_blocking: a synchronous command runs on Tauri's main thread,
-/// so every curl would stall the webview. The 24h tracker fires dozens of these
-/// per lobby — on the main thread that froze the whole UI.
+/// so every request would stall the webview. The 24h tracker fires dozens of
+/// these per lobby — on the main thread that froze the whole UI.
 #[tauri::command]
 pub async fn riot_direct_get(
     host: String,
@@ -513,50 +545,26 @@ fn riot_direct_get_blocking(
     client_platform: String,
     client_version: String,
 ) -> Result<String, String> {
-    if host.contains(|c: char| !(c.is_ascii_alphanumeric() || c == '.' || c == '-')) {
-        return Err("Invalid host.".to_string());
-    }
-    if path.contains([' ', '\n', '\r']) {
-        return Err("Invalid path.".to_string());
-    }
-    let url = format!("https://{}{}", host, path);
-    let ua = format!("ShooterGame/{} Windows/10.0.19042.1.256.64bit", client_version);
-    let output = curl_args()
-        .args([
-            "-s",
-            "--connect-timeout",
-            "2",
-            "--max-time",
-            "6",
-            "-H",
-            &format!("Authorization: Bearer {}", access_token),
-            "-H",
-            &format!("X-Riot-Entitlements-JWT: {}", entitlements),
-            "-H",
-            &format!("X-Riot-ClientPlatform: {}", client_platform),
-            "-H",
-            &format!("X-Riot-ClientVersion: {}", client_version),
-            "-H",
-            &format!("User-Agent: {}", ua),
-            &url,
-        ])
-        .output()
-        .map_err(|e| format!("Riot query failed: {}", e))?;
-    let body = String::from_utf8_lossy(&output.stdout).to_string();
-    if body.contains("\"statusCode\":401")
-        || body.contains("\"httpStatus\":401")
-        || body.contains("\"statusCode\": 401")
-        || body.contains("\"httpStatus\": 401")
-        || body.contains("BAD_AUTH")
-        || body.contains("EXPIRED_AUTH")
-        || body.contains("FORBIDDEN")
-    {
+    validate_direct(&host, &path)?;
+    let headers = riot_auth_headers(
+        &access_token,
+        &entitlements,
+        &client_platform,
+        &client_version,
+    );
+    let resp = riot_remote(
+        "GET",
+        &host,
+        &path,
+        &headers,
+        None,
+        std::time::Duration::from_secs(6),
+    )
+    .map_err(|_| "Riot error: ".to_string())?;
+    if riot_http::is_auth_failure(&resp.body) {
         return Err("RIOT_EXPIRED".to_string());
     }
-    if !output.status.success() {
-        return Err(format!("Riot error: {}", body.chars().take(160).collect::<String>()));
-    }
-    Ok(body)
+    Ok(resp.body)
 }
 
 fn riot_direct_post_blocking(
@@ -567,56 +575,30 @@ fn riot_direct_post_blocking(
     client_platform: String,
     client_version: String,
 ) -> Result<String, String> {
-    if host.contains(|c: char| !(c.is_ascii_alphanumeric() || c == '.' || c == '-')) {
-        return Err("Invalid host.".to_string());
-    }
-    if path.contains([' ', '\n', '\r']) {
-        return Err("Invalid path.".to_string());
-    }
-    let url = format!("https://{}{}", host, path);
-    let ua = format!("ShooterGame/{} Windows/10.0.19042.1.256.64bit", client_version);
-    let output = curl_args()
-        .args([
-            "-s",
-            "--connect-timeout",
-            "2",
-            "--max-time",
-            "6",
-            "-X",
-            "POST",
-            "-H",
-            "Content-Type: application/json",
-            "-H",
-            &format!("Authorization: Bearer {}", access_token),
-            "-H",
-            &format!("X-Riot-Entitlements-JWT: {}", entitlements),
-            "-H",
-            &format!("X-Riot-ClientPlatform: {}", client_platform),
-            "-H",
-            &format!("X-Riot-ClientVersion: {}", client_version),
-            "-H",
-            &format!("User-Agent: {}", ua),
-            "-d",
-            "{}",
-            &url,
-        ])
-        .output()
-        .map_err(|e| format!("Riot query failed: {}", e))?;
-    let body = String::from_utf8_lossy(&output.stdout).to_string();
-    if body.contains("\"statusCode\":401")
-        || body.contains("\"httpStatus\":401")
-        || body.contains("\"statusCode\": 401")
-        || body.contains("\"httpStatus\": 401")
-        || body.contains("BAD_AUTH")
-        || body.contains("EXPIRED_AUTH")
-        || body.contains("FORBIDDEN")
-    {
+    validate_direct(&host, &path)?;
+    let mut headers = riot_auth_headers(
+        &access_token,
+        &entitlements,
+        &client_platform,
+        &client_version,
+    );
+    headers.insert(
+        0,
+        ("Content-Type".to_string(), "application/json".to_string()),
+    );
+    let resp = riot_remote(
+        "POST",
+        &host,
+        &path,
+        &headers,
+        Some("{}"),
+        std::time::Duration::from_secs(6),
+    )
+    .map_err(|_| "Riot error: ".to_string())?;
+    if riot_http::is_auth_failure(&resp.body) {
         return Err("RIOT_EXPIRED".to_string());
     }
-    if !output.status.success() {
-        return Err(format!("Riot error: {}", body.chars().take(160).collect::<String>()));
-    }
-    Ok(body)
+    Ok(resp.body)
 }
 
 /// Resolve PUUIDs to real GameNames and TagLines via Riot's name-service endpoint.
@@ -644,38 +626,34 @@ fn riot_resolve_names_blocking(shard: String, puuids: Vec<String>) -> Result<Str
         "kr" => "kr",
         _ => "eu",
     };
-    let url = format!("https://pd.{}.a.pvp.net/name-service/v2/players", clean_shard);
+    let path = "/name-service/v2/players";
+    let host = format!("pd.{}.a.pvp.net", clean_shard);
     let body = serde_json::to_string(&puuids).map_err(|e| e.to_string())?;
+    // No User-Agent here, matching the original call.
+    let headers = vec![
+        (
+            "Authorization".to_string(),
+            format!("Bearer {}", access_token),
+        ),
+        ("X-Riot-Entitlements-JWT".to_string(), token.to_string()),
+        (
+            "X-Riot-ClientPlatform".to_string(),
+            NAME_SERVICE_CLIENT_PLATFORM.to_string(),
+        ),
+        ("X-Riot-ClientVersion".to_string(), client_version.clone()),
+        ("Content-Type".to_string(), "application/json".to_string()),
+    ];
 
-    let output = curl_args()
-        .args([
-            "-s",
-            "-X",
-            "PUT",
-            "--max-time",
-            "10",
-            "-H",
-            &format!("Authorization: Bearer {}", access_token),
-            "-H",
-            &format!("X-Riot-Entitlements-JWT: {}", token),
-            "-H",
-            "X-Riot-ClientPlatform: ew0KCSJwbGF0Zm9ybVR5cGUiOiAiUEMiLA0KCSJwbGF0Zm9ybU9TIjogIldpbmRvd3MiLA0KCSJwbGF0Zm9ybU9TVmVyc2lvbiI6ICIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwNCgkicGxhdGZvcm1DaGlwc2V0IjogIlVua25vd24iDQp9",
-            "-H",
-            &format!("X-Riot-ClientVersion: {}", client_version),
-            "-H",
-            "Content-Type: application/json",
-            "-d",
-            &body,
-            &url,
-        ])
-        .output()
-        .map_err(|e| format!("Name service failed: {}", e))?;
-
-    let res = String::from_utf8_lossy(&output.stdout).to_string();
-    if !output.status.success() {
-        return Err(format!("Name service error: {}", res));
-    }
-    Ok(res)
+    let resp = riot_remote(
+        "PUT",
+        &host,
+        path,
+        &headers,
+        Some(&body),
+        std::time::Duration::from_secs(10),
+    )
+    .map_err(|_| "Name service error: ".to_string())?;
+    Ok(resp.body)
 }
 
 #[tauri::command]

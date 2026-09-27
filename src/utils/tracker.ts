@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
 import type { LiveMatchPlayer, LiveMatchState, LocalRiotAccount, TrackerDuel, TrackerMatchDetail, TrackerMmrPoint, TrackerPlayer, TrackerProfile } from '../types';
 import { isTauri } from './ipc';
-import { setTrnMatchPhase, trnLog, trnProxyPaused, openTrnDrainJob, closeTrnDrainJob, isTrnPrivateError, trnNoteNegative } from './trn';
+import { setTrnMatchPhase, setTrnLobbyKey, trnLog, trnProxyPaused, openTrnDrainJob, closeTrnDrainJob, isTrnPrivateError, trnNoteNegative } from './trn';
 import { getDevMockMatch, isDevNoClient } from './devTools';
 import { extractGamePodId, parseGamePodId } from './matchServer';
 import { assignPartyColors } from './playerDisplay';
@@ -18,7 +18,8 @@ import { logger } from './logger';
 
 /** Fast check (<0.1ms) if the local Riot Client lockfile exists. */
 export async function isRiotClientRunning(): Promise<boolean> {
-  if (isDevNoClient()) return false;
+  // Static gate so prod DCE drops the dev-only call entirely (hot poll path).
+  if (import.meta.env.DEV && isDevNoClient()) return false;
   if (!isTauri()) return false;
   try {
     return await invoke<boolean>('is_riot_client_running');
@@ -49,7 +50,7 @@ export async function detectLocalAccount(): Promise<LocalRiotAccount> {
 }
 
 async function detectLocalAccountLive(): Promise<LocalRiotAccount> {
-  if (isDevNoClient()) throw new Error('Auto-detect failed — is the Riot Client open?');
+  if (import.meta.env.DEV && isDevNoClient()) throw new Error('Auto-detect failed — is the Riot Client open?');
   if (!isTauri()) throw new Error('Auto-detect needs the desktop app.');
   try {
     const acc = await invoke<LocalRiotAccount>('detect_local_account');
@@ -1469,6 +1470,51 @@ export async function fetchMatchLoadouts(
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * Per-player cache bounds
+ *
+ * Every cache below is keyed by puuid (or puuid:queue / name#tag), so its
+ * key space is "every player this install has ever queued against" — which
+ * is unbounded over a long session. All of them are bounded here with
+ * age-ordered eviction: no LRU helper exists in this codebase, and every
+ * value already carries its own timestamp, so "oldest first" IS the LRU
+ * order for free.
+ *
+ * `protect` is the CURRENT lobby's puuids. Evicting a live player would
+ * drop their TRN enrichment out from under
+ * `mergeLiveMatchStateNonRegressing` (the merge latches enrichment from
+ * the cache/previous state) and re-arm the flicker this latch exists to
+ * prevent — plus flip `trnState` to 'pending' and re-spend lobby budget.
+ * So the lobby is never a victim, however far over cap we are.
+ * ------------------------------------------------------------------ */
+
+/** Oldest-first eviction down to `cap`. Never evicts a protected key. */
+function evictOldest<K, V>(
+  map: Map<K, V>,
+  cap: number,
+  at: (v: V) => number,
+  protect?: (key: K) => boolean
+): void {
+  if (map.size <= cap) return;
+  const drop = [...map.entries()].sort((a, b) => at(a[1]) - at(b[1]));
+  for (const [k] of drop) {
+    if (map.size <= cap) break;
+    if (protect?.(k)) continue;
+    map.delete(k);
+  }
+}
+
+/** Puuids in the lobby as of the last completed poll (lower-cased). */
+let currentLobbyPuuids = new Set<string>();
+/** True for a key naming a player who is in the lobby right now. */
+const inCurrentLobby = (key: string): boolean => currentLobbyPuuids.has(key);
+
+/** Track-Overview rows: 12 players a lobby, ~50 lobbies an evening is far
+ *  past any realistic need, and Riot-local re-resolves a miss cheaply. */
+const MMR_CACHE_MAX_PLAYERS = 200;
+/** Half the MMR cap: every entry is written TWICE (as given + lower-cased). */
+const MMR_CACHE_MAX_ENTRIES = MMR_CACHE_MAX_PLAYERS * 2;
+
 const liveMmrCache = new Map<
   string,
   {
@@ -1602,6 +1648,16 @@ const recent24hCache = new Map<string, Recent24hRecord>();
 const recent24hInflight = new Map<string, Promise<Recent24hRecord>>();
 const livePlayerRecentMatchesCache = new Map<string, { matches: string[]; fetchedAt: number }>();
 
+/* Both caches are keyed by `puuid:queue` / `puuid`, so they grow one entry
+ * per player ever queued against — unbounded across a long session. A live
+ * VALORANT lobby is at most 12 players and a queueing evening is a few dozen
+ * matches, so 200 keys is ~17 lobbies of slack over what the UI can show.
+ * Over cap the oldest is dropped; a miss only costs one Riot-local
+ * loopback read (no rate limit), and the CURRENT lobby is never a victim —
+ * see `evictOldest`. */
+const RECENT24H_CACHE_MAX = 200;
+const RECENT_MATCHES_CACHE_MAX = 200;
+
 /** Valid Riot presence party IDs only — rejects the absent/null/empty
  *  markers Riot sends when a player has no party to report. Shared with
  *  the presence-union step so grouping and coloring agree on what counts. */
@@ -1678,6 +1734,7 @@ export function isMatchStateEqual(a: LiveMatchState | null, b: LiveMatchState | 
       p1.isIncognito === p2.isIncognito &&
       p1.nameResolved === p2.nameResolved &&
       p1.isTrnPrivate === p2.isTrnPrivate &&
+      p1.trnState === p2.trnState &&
       p1.partyId === p2.partyId &&
       p1.partyIndex === p2.partyIndex
     );
@@ -1694,6 +1751,53 @@ export function isMatchStateEqual(a: LiveMatchState | null, b: LiveMatchState | 
   };
 
   return teamsEqual(a.blueTeam, b.blueTeam) && teamsEqual(a.redTeam, b.redTeam);
+}
+
+/** Cross-realm merge for `recon:live-match-sync`.
+ *
+ *  The `main` and `overlay` WebView2 windows each load this module SEPARATELY,
+ *  so each realm has its own `livePlayerStatsCache`, its own TRN fetch queue and
+ *  its own poll. Both poll on a timer, build a full state, and broadcast it, so
+ *  whoever is momentarily behind on TRN enrichment broadcasts a poorer state and
+ *  the other realm — committing that payload wholesale — reverts to it. That
+ *  ping-pong is the flicker.
+ *
+ *  So: latch ONLY the TRN-derived enrichment (which arrives at a realm's own
+ *  pace) when the incoming value is nullish — except `isTrnPrivate`, which is
+ *  sticky-true (see below) because the row build never leaves it nullish. Every
+ *  other field is live lobby
+ *  state and MUST take the incoming value, or real data goes stale. Teams merge
+ *  independently, matched by PUUID; all other top-level fields come from
+ *  `incoming`. Pure — checked by scripts/live-poll-check.ts.
+ */
+export function mergeLiveMatchStateNonRegressing(
+  prev: LiveMatchState | null,
+  incoming: LiveMatchState
+): LiveMatchState {
+  if (!prev) return incoming;
+  const byPuuid = new Map<string, LiveMatchPlayer>();
+  for (const p of [...prev.blueTeam, ...prev.redTeam]) byPuuid.set(p.puuid.toLowerCase(), p);
+  const mergeTeam = (team: LiveMatchPlayer[]): LiveMatchPlayer[] =>
+    team.map((p) => {
+      const was = byPuuid.get(p.puuid.toLowerCase());
+      if (!was) return p;
+      return {
+        ...p,
+        kd: p.kd ?? was.kd,
+        acs: p.acs ?? was.acs,
+        hsPct: p.hsPct ?? was.hsPct,
+        winPct: p.winPct ?? was.winPct,
+        trnScore: p.trnScore ?? was.trnScore,
+        // Sticky-true, NOT a `??` latch: the row build resolves isTrnPrivate as
+        // `?? false`, so a nullish latch here can never fire — and a realm that
+        // has not fetched the player yet emits that `false`, clobbering a correct
+        // `true` from the realm that has. A `false` with no `kd` is a `?? false`
+        // default, not a verdict, so keep the lock. Real incoming data still
+        // wins: a public profile (kd present, isTrnPrivate false) un-latches.
+        isTrnPrivate: was.isTrnPrivate === true && p.kd == null ? true : p.isTrnPrivate,
+      };
+    });
+  return { ...incoming, blueTeam: mergeTeam(incoming.blueTeam), redTeam: mergeTeam(incoming.redTeam) };
 }
 
 /**
@@ -1780,6 +1884,12 @@ export async function fetchPlayer24hRecord(
 
       if (recent.length === 0) {
         recent24hCache.set(key, empty);
+        evictOldest(
+          recent24hCache,
+          RECENT24H_CACHE_MAX,
+          (r) => r.fetchedAt,
+          (k) => inCurrentLobby(k.split(':')[0])
+        );
         return empty;
       }
 
@@ -1800,8 +1910,15 @@ export async function fetchPlayer24hRecord(
         else break;
       }
       const record: Recent24hRecord = { won, lost, streak, streakIsWin, fetchedAt: Date.now() };
-      recent24hCache.set(key, record);
-      return record;
+        recent24hCache.set(key, record);
+        // Keys are `puuid[:queue]`; the puuid half is what the lobby knows.
+        evictOldest(
+          recent24hCache,
+          RECENT24H_CACHE_MAX,
+          (r) => r.fetchedAt,
+          (k) => inCurrentLobby(k.split(':')[0])
+        );
+        return record;
     } catch {
       // A transient Riot blip must not blank a known W/L + streak for the
       // full TTL (contrast the MMR path, which preserves last-good). Keep the
@@ -1837,6 +1954,11 @@ export interface LivePlayerStatsEntry {
    *  'missing' (404, retry in 24h). The self-heal below must NEVER clear
    *  flagged entries — only unflagged poison from previous sessions. */
   negative?: 'private' | 'missing';
+  /** True when the last lookup FAILED (cooldown, rate limit, blip) rather than
+   *  succeeding with no stats. A failure is negative-cached like any other, but
+   *  it must stay distinguishable: a failed entry is statless AND backoff-armed,
+   *  which is byte-identical to a successful "no data" answer otherwise. */
+  lastFetchFailed?: boolean;
   /** Last successful 24h-record refresh — decoupled from `fetchedAt`, which
    *  TRN updates also bump. Sharing one timestamp let each source suppress
    *  the other's refresh. */
@@ -1846,7 +1968,21 @@ export interface LivePlayerStatsEntry {
 const livePlayerStatsCache = new Map<string, LivePlayerStatsEntry>();
 const LIVE_STATS_CACHE_KEY = 'recon_live_player_stats_v2';
 const LIVE_STATS_TTL = 24 * 60 * 60 * 1000; // 24 hours — player act stats & country do not change every minute
+/** Persisted-store cap: the in-memory `LIVE_STATS_CACHE_MAX` keys' worth. */
+const LIVE_STATS_STORE_MAX = 200;
+/** How many of the oldest keys one prune pass drops. Ample headroom above
+ *  the cap so the store converges instead of oscillating 1-over-threshold. */
+const LIVE_STATS_STORE_PRUNE = 40;
 const trnInFlightLive = new Set<string>();
+
+/** In-memory live-stats cap. This map is keyed by puuid and was never
+ *  pruned, so a long session (every lobby you queue into adds up to 12
+ *  strangers) grew one entry per distinct player forever. A live lobby is
+ *  at most 12 players; 200 is ~16 lobbies of slack over anything the UI can
+ *  show, and an evicted player is re-resolved by one TRN fetch next time
+ *  they appear. The persisted mirror below keeps its own longer history,
+ *  so eviction here loses nothing durable. */
+const LIVE_STATS_CACHE_MAX = 200;
 
 /* ---- TRN lobby fill: ONE concurrent fetch of budgeted players, own team first ---- *
  * A fresh 10-player lobby used to drain one player per ~6s (~60s a lobby).
@@ -2065,7 +2201,13 @@ function fetchTrnStatsNow(puuid: string, realName: string, realTag: string, drai
 
           const update: Partial<LivePlayerStatsEntry> = {
             fetchedAt: Date.now(),
-            retryAfter: undefined,
+            // 0, not undefined: the merge below skips undefined/null so callers
+            // can do partial updates, which made `undefined` a silent no-op and
+            // let a stale backoff survive a successful fetch. 0 is this file's
+            // established "no backoff" value (`cached.retryAfter ?? 0`) and is
+            // falsy, so the poison self-heal ignores it.
+            retryAfter: 0,
+            lastFetchFailed: false,
           };
           if (realCountry) update.country = realCountry;
           if (res?.stats?.kd != null) update.kd = Number(res.stats.kd.toFixed(2));
@@ -2096,6 +2238,9 @@ function fetchTrnStatsNow(puuid: string, realName: string, realTag: string, drai
               : Math.max(30 * 1000, cool + 2000);
           setCachedLivePlayerStats(puuid, {
             retryAfter: Date.now() + backoff,
+            // Marks the entry as a FAILURE, not a successful empty answer — see
+            // LivePlayerStatsEntry.lastFetchFailed.
+            lastFetchFailed: true,
             ...(isTrnPrivateError(e)
               ? { isTrnPrivate: true, negative: 'private' as const }
               : String(e).includes('HTTP 404')
@@ -2183,14 +2328,29 @@ export function setCachedLivePlayerStats(puuid: string, entry: Partial<LivePlaye
   }
 
   livePlayerStatsCache.set(pU, merged);
+  // Age-ordered eviction, never the current lobby: `mergeLiveMatchState-
+  // NonRegressing` latches TRN enrichment out of this cache, so evicting a
+  // live player would strip the row the other realm is still showing and
+  // bring the flicker back.
+  evictOldest(livePlayerStatsCache, LIVE_STATS_CACHE_MAX, (e) => e.fetchedAt, inCurrentLobby);
 
   if (typeof localStorage !== 'undefined') {
     try {
       store[pU] = merged;
       const keys = Object.keys(store);
-      if (keys.length > 200) {
+      if (keys.length > LIVE_STATS_STORE_MAX) {
+        // Oldest-first, and the CURRENT lobby is never a victim: the merge
+        // latches enrichment from this store too, so dropping a live player's
+        // entry would make the next cold realm re-fetch (and re-spend budget
+        // on) a player we already resolved.
         const sorted = keys.sort((a, b) => store[a].fetchedAt - store[b].fetchedAt);
-        for (let i = 0; i < 40; i++) delete store[sorted[i]];
+        let dropped = 0;
+        for (const k of sorted) {
+          if (dropped >= LIVE_STATS_STORE_PRUNE) break;
+          if (inCurrentLobby(k)) continue;
+          delete store[k];
+          dropped++;
+        }
       }
       localStorage.setItem(LIVE_STATS_CACHE_KEY, JSON.stringify(store));
     } catch {}
@@ -2280,6 +2440,15 @@ const PREVIEW_LIVE_MATCH_KEY = 'recon_preview_live_match';
 const LAST_ACTIVE_MATCH_KEY = 'recon_last_active_match_v1';
 /** A stored lobby older than this is never shown as "previous match". */
 const LAST_ACTIVE_TTL_MS = 6 * 60 * 60 * 1000;
+/** A persisted live lobby older than this is never treated as live.
+ *  The live poll refreshes the cache every 3s while a match is running
+ *  (LiveMatchView interval; overlay backs off to ~30s when idle), so a
+ *  snapshot this old means the poll stopped — Riot/RECON closed or the app
+ *  was restarted after a past match — and the lobby it describes is over.
+ *  2 min is ~40 missed 3s polls: generous enough that a transient poll stall
+ *  cannot hide a real lobby from the first-paint seed, while a previous
+ *  session's lobby clears immediately. */
+const LIVE_MATCH_CACHE_TTL_MS = 2 * 60 * 1000;
 /** Key of the match whose round sequence is tracked (old keys are deleted). */
 let lastRoundSeqMatchId = '';
 /** Match the sticky party latch below belongs to — reset on change. */
@@ -2346,11 +2515,23 @@ export function peekLiveMatchState(): LiveMatchState | null {
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { state?: LiveMatchState } & LiveMatchState;
+    const parsed = JSON.parse(raw) as { at?: number; state?: LiveMatchState } & LiveMatchState;
     const state = key === LIVE_MATCH_CACHE_KEY ? parsed?.state : parsed;
     if (state?.phase && state.phase !== 'idle') {
-      lastLiveMatchResult = state;
-      return healMapName(state);
+      /* Freshness gate on the desktop cache only: `updatedAt` is stamped by
+         every poll (types.ts LiveMatchState, set on each fetch result), so an
+         aged one is a dead lobby. The website preview seed has no poller and
+         is not a live path — keep it exactly as it was. */
+      const fresh =
+        key !== LIVE_MATCH_CACHE_KEY ||
+        Date.now() - (state.updatedAt ?? 0) < LIVE_MATCH_CACHE_TTL_MS;
+      if (fresh) {
+        lastLiveMatchResult = state;
+        return healMapName(state);
+      }
+      try {
+        localStorage.removeItem(key);
+      } catch {}
     }
   } catch {}
 
@@ -2406,8 +2587,11 @@ async function fetchLiveGamePodId(
  * localStorage, or the cross-window event.
  */
 export function fetchLiveMatchState(regionOverride?: string, forceRefresh = false): Promise<LiveMatchState> {
-  const devMock = getDevMockMatch();
-  if (devMock) return Promise.resolve(devMock);
+  // Static gate so prod DCE drops the dev-only mock lookup (hot poll path).
+  if (import.meta.env.DEV) {
+    const devMock = getDevMockMatch();
+    if (devMock) return Promise.resolve(devMock);
+  }
   if (!forceRefresh && liveMatchInflight) {
     // Sharer: hand back whatever is newest when this resolves — never a
     // stale intermediate result.
@@ -2442,8 +2626,11 @@ export function fetchLiveMatchState(regionOverride?: string, forceRefresh = fals
 
 async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = false): Promise<LiveMatchState> {
   // Dev dashboard simulator: canned match without Riot open (dev builds only).
-  const devMock = getDevMockMatch();
-  if (devMock) return devMock;
+  // Static gate so prod DCE drops the lookup (hot poll path).
+  if (import.meta.env.DEV) {
+    const devMock = getDevMockMatch();
+    if (devMock) return devMock;
+  }
   // Newest-wins token for the shared writes at the end of this fetch.
   const mySeq = ++liveMatchSeq;
 
@@ -2602,8 +2789,10 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
       }
 
       // Menus/queue (no match): stamp idle so a stale coregame hint can never
-      // keep pausing menu fetches after a match ends.
+      // keep pausing menu fetches after a match ends, and drop the lobby key
+      // so the shared per-lobby ceiling stops billing a finished match.
       setTrnMatchPhase('idle');
+      setTrnLobbyKey('');
       return idleState;
     }
 
@@ -2784,12 +2973,16 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
     const missingMmr = puuids.filter((p) => {
       const pU = p.toLowerCase();
       // Prune stale entries so one map per player cannot grow without bound
-      // across matches.
-      if (liveMmrCache.size > 150) {
+      // across matches, then hard-cap whatever the TTL sweep left behind.
+      // The TTL sweep alone is not a bound: a session that keeps resolving
+      // fresh ranks never has a stale entry to delete, so `size` walks past
+      // 150 and stays there. The hard cap makes the bound unconditional.
+      if (liveMmrCache.size > MMR_CACHE_MAX_ENTRIES) {
         const cutoff = Date.now() - MMR_TTL_MS;
         for (const [k, v] of liveMmrCache) {
           if (v.fetchedAt < cutoff) liveMmrCache.delete(k);
         }
+        evictOldest(liveMmrCache, MMR_CACHE_MAX_ENTRIES, (v) => v.fetchedAt, inCurrentLobby);
       }
       const cached = liveMmrCache.get(p) ?? liveMmrCache.get(pU);
       if (cached) {
@@ -2930,6 +3123,12 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const rows = (Array.isArray(j?.History) ? j.History : []).map((h: any) => String(h?.MatchID ?? '').toLowerCase()).filter(Boolean);
         livePlayerRecentMatchesCache.set(pU, { matches: rows, fetchedAt: Date.now() });
+        evictOldest(
+          livePlayerRecentMatchesCache,
+          RECENT_MATCHES_CACHE_MAX,
+          (v) => v.fetchedAt,
+          inCurrentLobby
+        );
         playerMatchesMap.set(pU, rows);
       } catch {}
     });
@@ -3062,12 +3261,14 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
       lastPartyClusterByPuuid.clear();
       lastPartyIndexByPuuid.clear();
     }
+    const lobbyPuuids = new Set(rawPlayers.map((rp) => rp.puuid.toLowerCase()));
+    currentLobbyPuuids = lobbyPuuids;
     restoreLatchedParties(
       clusterIdByPuuid,
       playerPartyIndexMap,
       lastPartyClusterByPuuid,
       lastPartyIndexByPuuid,
-      new Set(rawPlayers.map((rp) => rp.puuid.toLowerCase()))
+      lobbyPuuids
     );
     for (const [puuid, cid] of clusterIdByPuuid) lastPartyClusterByPuuid.set(puuid, cid);
     for (const [puuid, idx] of playerPartyIndexMap) lastPartyIndexByPuuid.set(puuid, idx);
@@ -3232,6 +3433,11 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
         isIncognito: p.isIncognito ?? false,
         nameResolved,
         isTrnPrivate: resolvedTrnPrivate,
+        trnState: playerStats
+          ? playerStats.lastFetchFailed && playerStats.kd == null && playerStats.acs == null
+            ? 'unavailable'
+            : undefined
+          : 'pending',
         partyId: pPartyId,
         partyIndex: pPartyIndex,
       };
@@ -3248,6 +3454,9 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
     // clock the fill's stale-stop reads — plus the proxy pause hint, so
     // pregame/agent-select never pauses and only true in-match fullscreen does.
     setTrnMatchPhase(phase);
+    // Same stamp for the Rust shared per-lobby request ceiling: it must count
+    // this lobby once across BOTH realms, so it needs the id TS already has.
+    setTrnLobbyKey(matchId);
     trnSpreadLastPollAt = Date.now();
     if (spreadCandidates.length > 0) void enqueueTrnSpread(matchId, phase, spreadCandidates, isDeathmatch);
     else if (trnDrainGen !== 0 && matchId === trnDrainMatchId) {

@@ -123,7 +123,8 @@ piece, not the first.
 *Status:* Fixed — the report now reads the machine.
 
 `get_gpu_settings_report()` used to return `enabled: saved.<flag>`, where `saved` is
-Recon's own `%LOCALAPPDATA%\TrueStretchStudio\gpu_settings.json`. It never inspected the
+Recon's own `gpu_settings.json` (then at `%LOCALAPPDATA%\TrueStretchStudio\gpu_settings.json`,
+now `%APPDATA%\Recon\gpu_settings.json`). It never inspected the
 machine, so it echoed whatever Recon last wrote. If the driver ignored or reset the
 value, the app still showed a green "enabled" — which is exactly what an AMD user
 reported (Recon said on, AMD Software said off).

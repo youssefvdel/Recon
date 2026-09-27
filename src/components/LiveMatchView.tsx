@@ -21,6 +21,7 @@ import {
   harvestMatchNames,
   fetchMatchLoadouts,
   isMatchStateEqual,
+  mergeLiveMatchStateNonRegressing,
 } from '../utils/tracker';
 import { getPrepickConfig } from '../utils/prepick';
 import {
@@ -44,6 +45,8 @@ import {
   splitTeams,
   byAcsDesc,
   TRN_PRIVATE_TOOLTIP,
+  TRN_PENDING_TOOLTIP,
+  TRN_UNAVAILABLE_TOOLTIP,
 } from '../utils/playerDisplay';
 import { isTauri, openExternalUrl } from '../utils/ipc';
 import { listen } from '@tauri-apps/api/event';
@@ -136,9 +139,13 @@ export const LiveMatchView: React.FC = () => {
             const s = event.payload;
             const harvest = matchEndHarvest(prevStateRef.current, s);
             if (harvest) harvestMatchNames(harvest).catch(() => {});
-            if (!isMatchStateEqual(prevStateRef.current, s)) {
-              prevStateRef.current = s;
-              setMatchState(s);
+            // The overlay window runs its own poll and its own TRN cache, so `s`
+            // can be poorer than what we already show. Merge instead of
+            // replacing, or the two realms ping-pong for the whole match.
+            const merged = mergeLiveMatchStateNonRegressing(prevStateRef.current, s);
+            if (!isMatchStateEqual(prevStateRef.current, merged)) {
+              prevStateRef.current = merged;
+              setMatchState(merged);
             }
           }
         })
@@ -265,7 +272,7 @@ export const LiveMatchView: React.FC = () => {
       {!isLive ? (
         <div className="flex-1 flex flex-col items-center justify-center p-8 rounded-3xl bg-m3-surface-container-low border border-m3-outline-subtle text-center">
           <div className="w-16 h-16 rounded-3xl bg-m3-surface-container-high border border-m3-outline-subtle flex items-center justify-center text-m3-outline mb-3">
-            <Radio className="w-8 h-8 animate-pulse text-m3-primary" />
+            <Radio className="w-8 h-8 text-m3-primary" />
           </div>
           <h3 className="font-display font-bold text-lg text-m3-on-surface">
             Waiting for Valorant Match
@@ -284,7 +291,7 @@ export const LiveMatchView: React.FC = () => {
               if (!prepick.enabled || !targetAgent) return null;
               return (
                 <div className="mt-3 flex items-center gap-2 text-[11px] font-mono font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/25 px-3 py-1.5 rounded-xl">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
                   <span>Auto-Hover Ready: {targetAgent}</span>
                 </div>
               );
@@ -377,7 +384,7 @@ const MatchStatusStrip: React.FC<{
             state.isPreviousMatch
               ? 'bg-amber-400'
               : state.phase === 'coregame' || state.phase === 'pregame'
-              ? 'bg-m3-mint animate-pulse'
+              ? 'bg-m3-mint'
               : 'bg-m3-outline'
           }`}
         />
@@ -408,7 +415,7 @@ const MatchStatusStrip: React.FC<{
             className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-[9.5px] font-mono font-bold text-emerald-300 shrink-0"
             title="Pre-Picker armed: hovers this agent instantly in Agent Select, then locks it in after your delay"
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
             <span>Pre-pick: {targetAgent}</span>
           </span>
         );
@@ -557,6 +564,20 @@ const PlayerRow: React.FC<{
       <Lock className="w-2.5 h-2.5" />
     </span>
   );
+  // "Still filling" vs "nothing there": a faint dot while the TRN fill is
+  // queued or in flight, the plain dash once we have a verdict. Kept as quiet
+  // as possible — this is a dense table and both states are already the
+  // majority of cells in a fresh lobby.
+  const trnBlank = (state: LiveMatchPlayer['trnState']) =>
+    state === 'pending' ? (
+      <span title={TRN_PENDING_TOOLTIP} className="inline-flex items-center justify-center">
+        <span className="block h-[3px] w-[3px] rounded-full bg-m3-outline/60" />
+      </span>
+    ) : (
+      <span className="text-m3-outline" title={state === 'unavailable' ? TRN_UNAVAILABLE_TOOLTIP : undefined}>
+        —
+      </span>
+    );
   const party = getPartyStyle(p.partyIndex);
   const flagUrl = getFlagUrl(p.country);
   const countryName = getCountryName(p.country);
@@ -730,7 +751,7 @@ const PlayerRow: React.FC<{
             title={`View ${p.name}'s weapon skins & loadout`}
             aria-label={`View ${p.name}'s loadout`}
           >
-            <Sparkles className="w-2.5 h-2.5 text-purple-300 animate-pulse" />
+            <Sparkles className="w-2.5 h-2.5 text-purple-300" />
             <span>Skins</span>
           </button>
         )}
@@ -742,6 +763,8 @@ const PlayerRow: React.FC<{
         title={
           p.trnScore != null
             ? `Tracker Score: ${p.trnScore} / 1000 — Tier ${scoreTier(p.trnScore).tier}`
+            : p.trnState === 'pending'
+            ? TRN_PENDING_TOOLTIP
             : 'Tracker Score unavailable'
         }
       >
@@ -750,9 +773,7 @@ const PlayerRow: React.FC<{
         ) : locked ? (
           lockCell
         ) : (
-          <span className="w-5 h-5 rounded border border-m3-outline-subtle bg-m3-surface-container flex items-center justify-center text-[8px] font-mono text-m3-outline">
-            —
-          </span>
+          trnBlank(p.trnState)
         )}
       </div>
 
@@ -808,13 +829,13 @@ const PlayerRow: React.FC<{
         ) : locked ? (
           lockCell
         ) : (
-          <span className="text-m3-outline">—</span>
+          trnBlank(p.trnState)
         )}
       </div>
 
       {/* 7. K/D */}
       <div className="text-right font-mono text-[10.5px] font-bold" title="Act-wide K/D">
-        {locked ? lockCell : <span className={kd.color}>{kd.text}</span>}
+        {locked ? lockCell : p.kd == null ? trnBlank(p.trnState) : <span className={kd.color}>{kd.text}</span>}
       </div>
 
       {/* 8. Win % */}
@@ -826,13 +847,13 @@ const PlayerRow: React.FC<{
         ) : locked ? (
           lockCell
         ) : (
-          <span className="text-m3-outline">—</span>
+          trnBlank(p.trnState)
         )}
       </div>
 
       {/* 9. HS % */}
       <div className="text-right font-mono text-[10.5px] text-amber-500" title="Act-wide headshot %">
-        {p.hsPct != null && p.hsPct > 0 ? `${p.hsPct.toFixed(0)}%` : locked ? lockCell : <span className="text-m3-outline">—</span>}
+        {p.hsPct != null && p.hsPct > 0 ? `${p.hsPct.toFixed(0)}%` : locked ? lockCell : trnBlank(p.trnState)}
       </div>
 
       {/* 10. Account level */}

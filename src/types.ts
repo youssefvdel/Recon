@@ -249,17 +249,6 @@ export type TabType =
   | 'accounts'
   | 'dev';
 
-export interface UpdateInfo {
-  has_update: boolean;
-  current_version: string;
-  latest_version: string;
-  release_title: string;
-  release_notes: string;
-  published_at: string;
-  html_url: string;
-  download_url: string | null;
-}
-
 export interface LiveMatchPlayer {
   puuid: string;
   name: string;
@@ -303,6 +292,11 @@ export interface LiveMatchPlayer {
   /** True when TRN answered HTTP 451 CollectorResultStatus::Private for this
    *  Riot ID — dashes are expected, not breakage. */
   isTrnPrivate?: boolean;
+  /** Why the TRN stat cells are empty: 'pending' = the fill is queued or in
+   *  flight, 'unavailable' = we asked and the lookup failed. Undefined means
+   *  TRN is not the reason the cells are empty. Lets the UI say "still
+   *  filling" instead of an unexplained dash. */
+  trnState?: 'pending' | 'unavailable';
 }
 
 export interface LiveMatchState {

@@ -1,6 +1,4 @@
-use std::fs;
 use std::os::windows::process::CommandExt;
-use std::path::PathBuf;
 use std::process::Command;
 use windows::Win32::Graphics::Gdi::{EnumDisplayDevicesW, DISPLAY_DEVICEW};
 use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_SET_VALUE};
@@ -216,32 +214,18 @@ impl Default for SavedGpuSettings {
     }
 }
 
-fn get_gpu_settings_path() -> Option<PathBuf> {
-    if let Ok(app_data) = std::env::var("LOCALAPPDATA") {
-        let dir = PathBuf::from(app_data).join("TrueStretchStudio");
-        let _ = fs::create_dir_all(&dir);
-        Some(dir.join("gpu_settings.json"))
-    } else {
-        Some(PathBuf::from("gpu_settings.json"))
-    }
-}
-
 pub fn load_saved_gpu_settings() -> SavedGpuSettings {
-    if let Some(path) = get_gpu_settings_path() {
-        if let Ok(content) = fs::read_to_string(path) {
-            if let Ok(settings) = serde_json::from_str::<SavedGpuSettings>(&content) {
-                return settings;
-            }
+    if let Some(content) = crate::paths::read_data_file("gpu_settings.json") {
+        if let Ok(settings) = serde_json::from_str::<SavedGpuSettings>(&content) {
+            return settings;
         }
     }
     SavedGpuSettings::default()
 }
 
 pub fn save_gpu_settings(settings: &SavedGpuSettings) {
-    if let Some(path) = get_gpu_settings_path() {
-        if let Ok(content) = serde_json::to_string_pretty(settings) {
-            let _ = fs::write(path, content);
-        }
+    if let Ok(content) = serde_json::to_string_pretty(settings) {
+        let _ = crate::paths::write_data_file("gpu_settings.json", &content);
     }
 }
 

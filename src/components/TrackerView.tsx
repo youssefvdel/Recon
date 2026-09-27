@@ -69,10 +69,7 @@ export const TrackerView: React.FC<{ initialSubTab?: TrackerSubTab; liveRequest?
               <span className="flex items-center gap-1.5">
                 <span>{t.label}</span>
                 {t.id === 'live' && (
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.9)]" />
-                  </span>
+                  <span className="inline-flex rounded-full h-2 w-2 bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.9)]" />
                 )}
               </span>
               <span

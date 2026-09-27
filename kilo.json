@@ -1,0 +1,10 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "skills": {
+    "paths": [".kilo/skills"]
+  },
+  "instructions": ["AGENTS.md"],
+  "permission": {
+    "skill": "allow"
+  }
+}

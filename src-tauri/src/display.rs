@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{channel, Receiver};
@@ -390,58 +389,30 @@ pub fn scan_pressed_non_modifier_key() -> Option<u16> {
     None
 }
 
-fn get_hotkey_storage_path() -> Option<PathBuf> {
-    if let Ok(app_data) = std::env::var("LOCALAPPDATA") {
-        let dir = PathBuf::from(app_data).join("TrueStretchStudio");
-        let _ = fs::create_dir_all(&dir);
-        Some(dir.join("hotkey.txt"))
-    } else {
-        Some(PathBuf::from("hotkey.txt"))
-    }
-}
-
 pub fn save_saved_hotkey(binding: &ShortcutBinding) {
-    if let Some(path) = get_hotkey_storage_path() {
-        let _ = fs::write(path, binding.serialize());
-    }
+    let _ = crate::paths::write_data_file("hotkey.txt", &binding.serialize());
 }
 
 pub fn load_saved_hotkey() -> ShortcutBinding {
-    if let Some(path) = get_hotkey_storage_path() {
-        if let Ok(s) = fs::read_to_string(path) {
-            if let Some(binding) = ShortcutBinding::deserialize(&s) {
-                return binding;
-            }
+    if let Some(s) = crate::paths::read_data_file("hotkey.txt") {
+        if let Some(binding) = ShortcutBinding::deserialize(&s) {
+            return binding;
         }
     }
     ShortcutBinding::f4()
 }
 
-pub fn get_stretched_res_path() -> Option<PathBuf> {
-    if let Ok(app_data) = std::env::var("LOCALAPPDATA") {
-        let dir = PathBuf::from(app_data).join("TrueStretchStudio");
-        let _ = fs::create_dir_all(&dir);
-        Some(dir.join("stretched_res.txt"))
-    } else {
-        Some(PathBuf::from("stretched_res.txt"))
-    }
-}
-
 pub fn save_saved_stretched_res(w: u32, h: u32) {
-    if let Some(path) = get_stretched_res_path() {
-        let _ = fs::write(path, format!("{}:{}", w, h));
-    }
+    let _ = crate::paths::write_data_file("stretched_res.txt", &format!("{}:{}", w, h));
 }
 
 pub fn load_saved_stretched_res(default_w: u32, default_h: u32) -> (u32, u32) {
-    if let Some(path) = get_stretched_res_path() {
-        if let Ok(s) = fs::read_to_string(path) {
-            let parts: Vec<&str> = s.trim().split(':').collect();
-            if parts.len() == 2 {
-                if let (Ok(w), Ok(h)) = (parts[0].parse(), parts[1].parse()) {
-                    if w > 0 && h > 0 {
-                        return (w, h);
-                    }
+    if let Some(s) = crate::paths::read_data_file("stretched_res.txt") {
+        let parts: Vec<&str> = s.trim().split(':').collect();
+        if parts.len() == 2 {
+            if let (Ok(w), Ok(h)) = (parts[0].parse(), parts[1].parse()) {
+                if w > 0 && h > 0 {
+                    return (w, h);
                 }
             }
         }
@@ -1059,11 +1030,8 @@ pub fn get_tool_path(name: &str) -> PathBuf {
             }
         }
     }
-    if let Ok(app_data) = std::env::var("LOCALAPPDATA") {
-        let p = PathBuf::from(app_data)
-            .join("TrueStretchStudio")
-            .join("tools")
-            .join(name);
+    if let Some(dir) = crate::paths::app_data_dir() {
+        let p = dir.join("tools").join(name);
         if p.exists() {
             return p;
         }
@@ -1071,13 +1039,6 @@ pub fn get_tool_path(name: &str) -> PathBuf {
     let p_desk = PathBuf::from(r"C:\Users\Administrator\Desktop\tools").join(name);
     if p_desk.exists() {
         return p_desk;
-    }
-    let p_proj = PathBuf::from(
-        r"C:\Users\Administrator\.gemini\antigravity\scratch\truestretch_tauri\tools",
-    )
-    .join(name);
-    if p_proj.exists() {
-        return p_proj;
     }
 
     PathBuf::from(name)
@@ -1855,25 +1816,11 @@ fn get_monitor_disabled_map() -> std::collections::HashMap<String, (String, bool
 
 /// Last-known resolution cache so disabled monitors keep showing their real
 /// resolution (and a correct aspect ratio) instead of 0x0 / NaN.
-fn get_monitor_res_cache_path() -> Option<PathBuf> {
-    if let Ok(app_data) = std::env::var("LOCALAPPDATA") {
-        let dir = PathBuf::from(app_data).join("TrueStretchStudio");
-        let _ = fs::create_dir_all(&dir);
-        Some(dir.join("monitor_res_cache.json"))
-    } else {
-        Some(PathBuf::from("monitor_res_cache.json"))
-    }
-}
-
 fn load_monitor_res_cache() -> std::collections::HashMap<String, (u32, u32, u32)> {
     let mut out = std::collections::HashMap::new();
-    let path = match get_monitor_res_cache_path() {
-        Some(p) => p,
+    let text = match crate::paths::read_data_file("monitor_res_cache.json") {
+        Some(t) => t,
         None => return out,
-    };
-    let text = match fs::read_to_string(&path) {
-        Ok(t) => t,
-        Err(_) => return out,
     };
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
         if let Some(obj) = json.as_object() {
@@ -1891,15 +1838,14 @@ fn load_monitor_res_cache() -> std::collections::HashMap<String, (u32, u32, u32)
 }
 
 fn save_monitor_res_cache(cache: &std::collections::HashMap<String, (u32, u32, u32)>) {
-    let path = match get_monitor_res_cache_path() {
-        Some(p) => p,
-        None => return,
-    };
     let mut obj = serde_json::Map::new();
     for (k, (w, h, r)) in cache {
         obj.insert(k.clone(), serde_json::json!({ "w": w, "h": h, "r": r }));
     }
-    let _ = fs::write(&path, serde_json::Value::Object(obj).to_string());
+    let _ = crate::paths::write_data_file(
+        "monitor_res_cache.json",
+        &serde_json::Value::Object(obj).to_string(),
+    );
 }
 
 /// Returns true when the devnode currently needs a reboot to complete a
@@ -2360,7 +2306,7 @@ pub fn set_monitor_device_enabled(
     if !is_process_elevated() {
         log::warn!("[display] device {} denied: not elevated", action);
         return Err(
-            "Requires admin: run TrueStretch as administrator to enable/disable monitor devices in Device Manager.".to_string(),
+            "Requires admin: run Recon as administrator to enable/disable monitor devices in Device Manager.".to_string(),
         );
     }
 
@@ -2570,7 +2516,7 @@ pub fn set_monitor_device_enabled(
                             || code.to_lowercase().contains("privilege")
                         {
                             attempt_err = Some(
-                                "Requires admin: run TrueStretch as administrator to enable/disable monitor devices in Device Manager."
+                                "Requires admin: run Recon as administrator to enable/disable monitor devices in Device Manager."
                                     .to_string(),
                             );
                         } else {
@@ -2606,7 +2552,7 @@ pub fn set_monitor_device_enabled(
                                     || code.to_lowercase().contains("privilege")
                                 {
                                     attempt_err = Some(
-                                        "Requires admin: run TrueStretch as administrator to enable/disable monitor devices in Device Manager."
+                                        "Requires admin: run Recon as administrator to enable/disable monitor devices in Device Manager."
                                             .to_string(),
                                     );
                                 } else {
@@ -2763,7 +2709,7 @@ pub fn set_monitor_primary(device_name: &str) -> Result<Vec<MonitorDevice>, Stri
 }
 
 pub fn launch_cru() -> Result<(), String> {
-    Err("CRU is disabled. TrueStretch uses built-in native Win32/GPU display engine.".to_string())
+    Err("CRU is disabled. Recon uses built-in native Win32/GPU display engine.".to_string())
 }
 
 pub fn restart_graphics_driver() -> Result<String, String> {
