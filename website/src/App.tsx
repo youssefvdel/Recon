@@ -499,10 +499,10 @@ export default function App() {
       {/* ========================================================================= */}
       {/* 5. FOOTER                                                                 */}
       {/* ========================================================================= */}
-      <footer className="border-t border-white/[0.08] bg-[#050308] py-10 px-4 sm:px-6 lg:px-8 text-xs font-mono text-zinc-500 z-10">
+      <footer className="border-t border-white/[0.08] bg-[#050308] py-10 px-4 sm:px-6 lg:px-8 text-xs font-mono text-zinc-400 z-10">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <img src="/icon.png" alt="Recon Radar Logo" className="w-6 h-6 object-contain opacity-80" />
+            <img src="/icon.png" alt="" aria-hidden="true" className="w-6 h-6 object-contain opacity-80" />
             <span>RECON // BY YOUSSEF ADEL • ALL RIGHTS RESERVED • SOURCE-AVAILABLE</span>
           </div>
 
@@ -519,7 +519,7 @@ export default function App() {
           </div>
         </div>
 
-        <div className="max-w-7xl mx-auto mt-6 pt-4 border-t border-white/5 text-center text-[10px] text-zinc-600">
+        <div className="max-w-7xl mx-auto mt-6 pt-4 border-t border-white/5 text-center text-[10px] text-zinc-400">
           Recon is not endorsed by Riot Games and does not reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. Valorant is a registered trademark of Riot Games, Inc.
         </div>
       </footer>
