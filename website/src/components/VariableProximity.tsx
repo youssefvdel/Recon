@@ -1,4 +1,4 @@
-import React, { forwardRef, useMemo, useRef, useEffect } from 'react';
+import React, { forwardRef, useCallback, useMemo, useRef, useEffect, useLayoutEffect } from 'react';
 import './VariableProximity.css';
 
 interface Point {
@@ -76,6 +76,85 @@ const VariableProximity = forwardRef<HTMLSpanElement, VariableProximityProps>((p
   const interpolatedSettingsRef = useRef<string[]>([]);
   const mousePositionRef = useMousePositionRef(containerRef);
   const lastPositionRef = useRef<Point>({ x: -9999, y: -9999 });
+
+  /* ---------------------------------------------------------------- */
+  /* Width reservation — the fix for the hover reflow.                  */
+  /* ---------------------------------------------------------------- */
+  /**
+   * Pin every letter's inline-size to the width it occupies at the HEAVIEST
+   * variation state.
+   *
+   * Why this and nothing else: the bolding is driven by `wght`/`opsz`, and in
+   * Roboto Flex a heavier cut has a wider advance — measured on this headline,
+   * wght 500 -> 950 grows a letter by 10.5-17%. Because each letter is its own
+   * `inline-block`, that extra advance used to be handed straight to the line
+   * box: the line got wider than the container, the browser found one word too
+   * many, and it re-wrapped. That single extra line box is what threw the whole
+   * hero around (measured at 1440px: 3 lines at rest -> 4 at full weight, with
+   * the sub-copy and the CTA row sliding down 37px).
+   *
+   * Pinning the advance removes the variable from layout entirely. The line box
+   * is then laid out ONCE, at the widest the text can ever get, and the bolder
+   * glyphs simply grow into space that was already reserved for them. Line
+   * breaks can no longer change, so the line count is identical at rest and at
+   * full hover intensity, at every breakpoint.
+   *
+   * Glyphs are left-anchored in their reserved box rather than centred, which
+   * spreads the surplus as even intra-word tracking instead of dumping it into
+   * the word gaps — the type keeps its word rhythm and never collides, because a
+   * letter's bold glyph exactly fills its own reservation.
+   */
+  const reserveLetterWidths = useCallback(() => {
+    const letters = letterRefs.current.filter(Boolean) as HTMLSpanElement[];
+    if (!letters.length) return;
+
+    /* Snapshot what the proximity loop has written so we hand it back untouched,
+       and drop the pins so the widest state is measured rather than the pin. */
+    const previousSettings = letters.map((el) => el.style.fontVariationSettings);
+    const previousTransition = letters.map((el) => el.style.transition);
+    letters.forEach((el) => {
+      el.style.width = '';
+      el.style.transition = 'none';
+      el.style.fontVariationSettings = toFontVariationSettings;
+    });
+
+    const fontSize = parseFloat(getComputedStyle(letters[0]).fontSize) || 0;
+    const widths = letters.map((el) => el.getBoundingClientRect().width);
+
+    letters.forEach((el, i) => {
+      el.style.fontVariationSettings = previousSettings[i] || fromFontVariationSettings;
+      el.style.transition = previousTransition[i];
+      /* Store the reservation in `em`, NOT `px`. The advance scales linearly with
+         the font-size, so an em pin keeps the reservation exact across every
+         breakpoint (36 / 60 / 72px) and browser zoom without re-measuring — a
+         pixel pin silently goes stale the moment the headline changes size. */
+      el.style.width = fontSize > 0 ? `${widths[i] / fontSize}em` : '';
+    });
+  }, [toFontVariationSettings, fromFontVariationSettings]);
+
+  /* Measure before the first paint so the reserved layout is what shows up. */
+  useLayoutEffect(() => {
+    reserveLetterWidths();
+  }, [reserveLetterWidths]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    /* Fonts settle after first paint, and every advance above was taken from
+       whatever face was actually resolved at that moment — so measure again
+       once the real face is in, or the reservations are the fallback font's. */
+    if (typeof document !== 'undefined' && document.fonts?.ready) {
+      document.fonts.ready
+        .then(() => {
+          if (!cancelled) reserveLetterWidths();
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reserveLetterWidths]);
 
   const parsedSettings = useMemo(() => {
     const parseSettings = (settingsStr: string) =>

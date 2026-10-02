@@ -405,7 +405,12 @@ export default function App() {
 
         <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
         {/* Interactive VariableProximity Hero Title */}
-        <h1 className="hero-title-enter font-display font-medium text-4xl sm:text-6xl lg:text-7xl tracking-tight text-white max-w-5xl mx-auto leading-[1.12] text-balance select-none my-4 sm:my-6">
+        <h1 className="hero-title-enter font-display font-medium text-4xl sm:text-6xl lg:text-7xl tracking-tight text-white max-w-7xl mx-auto leading-[1.12] text-balance select-none my-4 sm:my-6">
+          {/* max-w-7xl (was max-w-5xl): the letters reserve their width at the
+              heaviest weight, so each line always occupies its widest possible
+              box. At the old 1024px cap that pushed the violet line past the
+              edge and orphaned "Recon." onto a fourth line; letting the headline
+              use the full column keeps the exact same three-line composition. */}
           <VariableProximity
             label="Hardware-Level True Stretched Scaling &"
             className="text-white"
@@ -428,7 +433,7 @@ export default function App() {
         </h1>
 
         <p className="hero-sub-enter mt-6 text-base sm:text-lg text-zinc-300 max-w-2xl mx-auto leading-relaxed">
-          Recon is the lightweight <strong className="text-white font-semibold">Valorant tracker</strong> and stretched-resolution toolkit: expand target geometry by <strong className="text-white font-mono tabular-nums">+22.6%</strong> with zero input latency, unmask hidden streamer-mode players, inspect real in-game weapon skins, and run transparent HUD widgets over Valorant.
+          Recon is a <strong className="text-white font-semibold">Valorant tracker</strong> that watches your matches live, plus true stretched resolution — targets get <strong className="text-white font-mono tabular-nums">+22.6%</strong> wider with zero input lag. It names streamer-mode players, shows the weapon skins people actually use, and floats small see-through widgets over the game.
         </p>
 
         {/* CTA Section — CSS entrance (see .hero-cta-enter), never gsap.from */}
