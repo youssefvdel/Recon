@@ -2,10 +2,13 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
+    <!-- Favicons. Order matters: Google Search only rasterises ICO/PNG/JPEG/GIF and
+         cannot render SVG, so the multi-size ICO is declared first and the SVG last.
+         /favicon.ico carries 16/32/48/64/128/256. -->
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48 64x64 128x128 256x256" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icon.png" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
-    <link rel="icon" type="image/png" href="/icon.png" />
-    <link rel="apple-touch-icon" href="/icon.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Recon — Valorant Tracker, Stretched Resolution &amp; In-Game Scout</title>
     <meta
@@ -56,7 +59,7 @@
       "description": "Recon is a lightweight Valorant tracker and competitive utility combining zero-lag True Stretched Resolution, live in-game match scouting, player stats tracking and transparent HUD widgets.",
       "url": "https://reconlab.app/",
       "downloadUrl": "https://github.com/youssefvdel/Recon/releases/latest",
-      "softwareVersion": "0.4.2",
+      "softwareVersion": "0.4.4",
       "keywords": "Valorant tracker, Valorant stretched resolution, Valorant scout, Valorant HUD, Valorant stats tracker, Overwolf alternative",
       "author": {
         "@type": "Person",
@@ -67,6 +70,47 @@
         "https://github.com/youssefvdel/Recon",
         "https://reconlab.app/"
       ]
+    }
+    </script>
+
+    <!-- Brand entity. Ties the name "Recon" to this site so brand queries
+         ("recon app", "recon lab", "recon valorant tracker") can resolve here. -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "@id": "https://reconlab.app/#website",
+      "name": "Recon",
+      "alternateName": [
+        "Recon Lab",
+        "Recon App",
+        "Recon Valorant",
+        "Recon Valorant Tracker",
+        "ReconLab"
+      ],
+      "url": "https://reconlab.app/",
+      "inLanguage": "en-US",
+      "publisher": { "@id": "https://reconlab.app/#organization" }
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "@id": "https://reconlab.app/#organization",
+      "name": "Recon",
+      "alternateName": ["Recon Lab", "Recon App"],
+      "url": "https://reconlab.app/",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://reconlab.app/icon.png"
+      },
+      "sameAs": ["https://github.com/youssefvdel/Recon"],
+      "founder": {
+        "@type": "Person",
+        "name": "Youssef Adel",
+        "url": "https://github.com/youssefvdel"
+      }
     }
     </script>
 
