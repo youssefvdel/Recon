@@ -250,7 +250,13 @@ export default function CRTWarp({
     resizeObserver.observe(container);
     resize();
 
-    const clock = new THREE.Clock();
+    // THREE.Clock is deprecated since r183; Timer is the supported API and
+    // lives in three's core, so it comes from the same namespace.
+    const timer = new THREE.Timer();
+    // Prime it: Clock.getDelta() returned 0 on its first call, so without this
+    // the first rendered frame would see the whole construction-to-first-frame
+    // gap instead of one frame interval.
+    timer.update();
     const visibilityObserver = new IntersectionObserver(([entry]) => {
       visibleRef.current = entry.isIntersecting;
     });
@@ -262,7 +268,11 @@ export default function CRTWarp({
       const interval = 1000 / fpsRef.current;
       if (now - lastFrameRef.current < interval) return;
       lastFrameRef.current = now - ((now - lastFrameRef.current) % interval);
-      const delta = Math.min(clock.getDelta(), 0.1);
+      // Same position as the old clock.getDelta(): only on rendered frames, so
+      // skipped frames keep accumulating into one delta. rAF timestamps share
+      // performance.now()'s time origin, which is what Timer expects.
+      timer.update(now);
+      const delta = Math.min(timer.getDelta(), 0.1);
       if (!pausedRef.current) material.uniforms.uTime.value += delta * material.uniforms.uSpeed.value;
       pointerCurrentRef.current.lerp(pointerTargetRef.current, 0.08);
       material.uniforms.uPointer.value.copy(pointerCurrentRef.current);

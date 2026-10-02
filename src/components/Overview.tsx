@@ -376,7 +376,7 @@ export const Overview: React.FC = () => {
             {/* Combat Highlights */}
             <motion.section variants={rise} custom={7}
               className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 flex flex-col justify-between shadow-m3-1">
-              <h4 className="font-display font-bold text-sm text-m3-on-surface mb-2">Combat Highlights</h4>
+              <h3 className="font-display font-bold text-sm text-m3-on-surface mb-2">Combat Highlights</h3>
               <div className="flex flex-col gap-3 flex-1 justify-around">
                 <div className="flex items-center gap-3">
                   <img src={killsIcon} alt="" className="w-10 h-10 rounded-full shrink-0 shadow-sm" />
@@ -413,7 +413,7 @@ export const Overview: React.FC = () => {
               className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 flex flex-col justify-between shadow-m3-1">
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <h4 className="font-display font-bold text-sm text-m3-on-surface">Top Agent</h4>
+                  <h3 className="font-display font-bold text-sm text-m3-on-surface">Top Agent</h3>
                   {topAgentMeta?.role ? (
                     <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-m3-surface-container-high border border-m3-outline-subtle text-[11px] font-medium text-m3-outline">
                       {topAgentMeta.roleIcon && (
@@ -481,7 +481,7 @@ export const Overview: React.FC = () => {
             <motion.section variants={rise} custom={9}
               className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 flex flex-col justify-between shadow-m3-1">
               <div className="flex items-center justify-between mb-2">
-                <h4 className="font-display font-bold text-sm text-m3-on-surface">Accuracy</h4>
+                <h3 className="font-display font-bold text-sm text-m3-on-surface">Accuracy</h3>
                 <span className="text-xs text-m3-outline font-medium" title={recentHit ? `Last ${recentHit.used} matches` : 'Act-wide from Tracker.gg'}>
                   {accLabel}
                 </span>
@@ -523,7 +523,7 @@ export const Overview: React.FC = () => {
               <motion.section variants={rise} custom={10}
                 className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 flex flex-col justify-between shadow-m3-1">
                 <div className="flex items-center justify-between mb-2">
-                  <h4 className="font-display font-bold text-sm text-m3-on-surface">Previous Acts</h4>
+                  <h3 className="font-display font-bold text-sm text-m3-on-surface">Previous Acts</h3>
                   <span className="text-[10px] text-m3-outline uppercase tracking-wider font-semibold">Competitive History</span>
                 </div>
                 <div className="grid grid-cols-3 gap-2 flex-1 items-center text-center py-1">
@@ -578,7 +578,7 @@ export const Overview: React.FC = () => {
                   background: `linear-gradient(180deg, ${scoreTier(trn.trnScore).color}15 0%, transparent 60%)`,
                 }}>
                 <div>
-                  <h4 className="font-display font-bold text-sm text-m3-on-surface mb-2">Tracker Score</h4>
+                  <h3 className="font-display font-bold text-sm text-m3-on-surface mb-2">Tracker Score</h3>
 
                   <div className="flex items-center gap-2.5 my-1">
                     <ScoreBadge tier={scoreTier(trn.trnScore).tier} size={44} />

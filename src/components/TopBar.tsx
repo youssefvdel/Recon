@@ -151,6 +151,12 @@ export const TopBar: React.FC<TopBarProps> = ({
 }) => {
   const meta = TAB_METADATA[currentTab];
   const Icon = meta.icon;
+  // This title is the view's heading inside the desktop shell, but reconlab.app
+  // mounts this same component inside a page that already owns the document h1 —
+  // a second one there competes with the real page heading. Both tags are
+  // block-level and carry the same utility classes, so the swap is
+  // layout-identical and changes nothing visually.
+  const TitleTag = isTauri() ? 'h1' : 'div';
   const [isMaximized, setIsMaximized] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [trackerOn, setTrackerOn] = useState<boolean>(() => {
@@ -393,9 +399,9 @@ export const TopBar: React.FC<TopBarProps> = ({
           <Icon className="w-4 h-4" />
         </div>
         <div className="truncate">
-          <h1 className="font-display font-bold text-sm sm:text-base text-m3-on-surface leading-tight truncate">
+          <TitleTag className="font-display font-bold text-sm sm:text-base text-m3-on-surface leading-tight truncate">
             {meta.title}
-          </h1>
+          </TitleTag>
         </div>
       </div>
 

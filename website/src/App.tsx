@@ -98,27 +98,11 @@ export default function App() {
     let isMounted = true;
 
     async function fetchLatestRelease() {
-      // 1. First attempt: latest.json directly from GitHub Releases (fastest, no rate limits)
-      try {
-        const res = await fetch(
-          'https://github.com/youssefvdel/Recon/releases/latest/download/latest.json',
-          { cache: 'no-cache' }
-        );
-        if (res.ok) {
-          const data = await res.json();
-          const v = data.version?.startsWith('v') ? data.version : `v${data.version}`;
-          const url = data.platforms?.['windows-x86_64']?.url;
-          if (isMounted && v && url) {
-            setRelease((prev) => ({
-              ...prev,
-              version: v,
-              downloadUrl: url,
-            }));
-          }
-        }
-      } catch {}
-
-      // 2. Second attempt: GitHub REST API to obtain exact asset file size
+      // GitHub REST API only. A direct fetch of the release asset
+      // (releases/latest/download/latest.json) was removed on purpose: GitHub
+      // release-asset downloads never send `Access-Control-Allow-Origin`, so the
+      // browser blocked that request 100% of the time. The API does send
+      // permissive CORS headers.
       try {
         const apiRes = await fetch('https://api.github.com/repos/youssefvdel/Recon/releases/latest');
         if (apiRes.ok) {
