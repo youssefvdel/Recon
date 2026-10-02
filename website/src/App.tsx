@@ -256,24 +256,14 @@ export default function App() {
 
   useGSAP(
     () => {
-      // Cinematic hero text entrance. NOTE: the CTA buttons deliberately do
-      // NOT animate via GSAP — a `from` tween strands inline `opacity: 0` if
-      // the effect tears down mid-flight (invisible buttons). They use the
-      // .hero-cta-enter CSS keyframe instead, whose base style is visible.
-      gsap.from('.gsap-hero-title', {
-        y: 45,
-        opacity: 0,
-        duration: 1.1,
-        ease: 'power3.out',
-      });
-      gsap.from('.gsap-hero-sub', {
-        y: 35,
-        opacity: 0,
-        duration: 1.1,
-        delay: 0.15,
-        ease: 'power3.out',
-      });
-
+      // Cinematic hero entrance is pure CSS (.hero-title-enter,
+      // .hero-sub-enter, .hero-cta-enter). It used to be gsap.from() tweens,
+      // but a `from` tween strands inline `opacity: 0` if the effect tears
+      // down mid-flight — this useGSAP call has no dep array so it re-runs on
+      // every App render (e.g. when fetchLatestRelease resolves), which is
+      // exactly how the hero sub-copy went invisible. CSS keyframes with a
+      // visible base style cannot strand: a dead animation degrades to
+      // visible text, never invisible text.
       // Bento cards staggered entrance on scroll
       gsap.utils.toArray<HTMLElement>('.gsap-bento-card').forEach((card, i) => {
         gsap.from(card, {
@@ -415,7 +405,7 @@ export default function App() {
 
         <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
         {/* Interactive VariableProximity Hero Title */}
-        <h1 className="gsap-hero-title font-display font-medium text-4xl sm:text-6xl lg:text-7xl tracking-tight text-white max-w-5xl mx-auto leading-[1.12] text-balance select-none my-4 sm:my-6">
+        <h1 className="hero-title-enter font-display font-medium text-4xl sm:text-6xl lg:text-7xl tracking-tight text-white max-w-5xl mx-auto leading-[1.12] text-balance select-none my-4 sm:my-6">
           <VariableProximity
             label="Hardware-Level True Stretched Scaling &"
             className="text-white"
@@ -437,7 +427,7 @@ export default function App() {
           />
         </h1>
 
-        <p className="gsap-hero-sub mt-6 text-base sm:text-lg text-zinc-300 max-w-2xl mx-auto leading-relaxed">
+        <p className="hero-sub-enter mt-6 text-base sm:text-lg text-zinc-300 max-w-2xl mx-auto leading-relaxed">
           Recon is the lightweight <strong className="text-white font-semibold">Valorant tracker</strong> and stretched-resolution toolkit: expand target geometry by <strong className="text-white font-mono tabular-nums">+22.6%</strong> with zero input latency, unmask hidden streamer-mode players, inspect real in-game weapon skins, and run transparent HUD widgets over Valorant.
         </p>
 

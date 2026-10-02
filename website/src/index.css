@@ -167,6 +167,40 @@ html.lenis body {
   animation: hero-cta-in 1s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both;
 }
 
+/* Hero title + sub entrance. Same reasoning as above: these used to be
+   gsap.from() tweens, and a mid-flight effect teardown (the useGSAP block
+   re-runs on every App render, e.g. when fetchLatestRelease resolves)
+   stranded inline opacity: 0 on the sub — invisible hero copy. Pure CSS
+   with a visible base style degrades to visible text, never invisible.
+   Timings mirror the old tweens: 1.1s power3.out
+   (≈ cubic-bezier(0.215, 0.61, 0.355, 1)), sub delayed 0.15s. */
+@keyframes hero-title-in {
+  from {
+    opacity: 0;
+    transform: translateY(45px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.hero-title-enter {
+  animation: hero-title-in 1.1s cubic-bezier(0.215, 0.61, 0.355, 1) both;
+}
+@keyframes hero-sub-in {
+  from {
+    opacity: 0;
+    transform: translateY(35px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.hero-sub-enter {
+  animation: hero-sub-in 1.1s cubic-bezier(0.215, 0.61, 0.355, 1) 0.15s both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation-duration: 0.01ms !important;
