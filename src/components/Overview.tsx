@@ -379,7 +379,7 @@ export const Overview: React.FC = () => {
               <h3 className="font-display font-bold text-sm text-m3-on-surface mb-2">Combat Highlights</h3>
               <div className="flex flex-col gap-3 flex-1 justify-around">
                 <div className="flex items-center gap-3">
-                  <img src={killsIcon} alt="" className="w-10 h-10 rounded-full shrink-0 shadow-sm" />
+                  <img src={killsIcon} alt="" aria-hidden="true" className="w-10 h-10 rounded-full shrink-0 shadow-sm" />
                   <div>
                     <div className="text-[11px] font-medium text-m3-outline">Match Kills (Best)</div>
                     <div className="font-display font-extrabold text-lg text-m3-on-surface tabular-nums leading-tight">
@@ -388,7 +388,7 @@ export const Overview: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <img src={firstbloodsIcon} alt="" className="w-10 h-10 rounded-full shrink-0 shadow-sm" />
+                  <img src={firstbloodsIcon} alt="" aria-hidden="true" className="w-10 h-10 rounded-full shrink-0 shadow-sm" />
                   <div>
                     <div className="text-[11px] font-medium text-m3-outline">First Kills / Deaths</div>
                     <div className="font-display font-extrabold text-lg text-m3-on-surface tabular-nums leading-tight">
@@ -397,7 +397,7 @@ export const Overview: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <img src={acesIcon} alt="" className="w-10 h-10 rounded-full shrink-0 shadow-sm" />
+                  <img src={acesIcon} alt="" aria-hidden="true" className="w-10 h-10 rounded-full shrink-0 shadow-sm" />
                   <div>
                     <div className="text-[11px] font-medium text-m3-outline">Aces</div>
                     <div className="font-display font-extrabold text-lg text-m3-on-surface tabular-nums leading-tight">
@@ -417,7 +417,7 @@ export const Overview: React.FC = () => {
                   {topAgentMeta?.role ? (
                     <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-m3-surface-container-high border border-m3-outline-subtle text-[11px] font-medium text-m3-outline">
                       {topAgentMeta.roleIcon && (
-                        <img src={topAgentMeta.roleIcon} alt="" className="w-3 h-3 object-contain opacity-80" />
+                        <img src={topAgentMeta.roleIcon} alt="" aria-hidden="true" className="w-3 h-3 object-contain opacity-80" />
                       )}
                       <span>{topAgentMeta.role}</span>
                     </div>

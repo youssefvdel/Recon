@@ -196,17 +196,27 @@ export default function JohnPorkCall({ onDownload, version }: JohnPorkCallProps)
                 <div className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/10">
                   <picture>
                     <source srcSet="/recon-mark.webp" type="image/webp" />
-                    <img src="/recon-mark.webp" alt="Recon" className="w-6 h-6 object-contain" draggable={false} />
+                    {/* Decorative: the "Recon {version}" label beside it already
+                        names the brand, so the mark is hidden from the tree. */}
+                    <img
+                      src="/recon-mark.webp"
+                      alt=""
+                      aria-hidden="true"
+                      className="w-6 h-6 object-contain"
+                      draggable={false}
+                    />
                   </picture>
                   <span className="font-mono text-xs sm:text-sm font-black uppercase tracking-wider text-white">
                     Recon {version}
                   </span>
                 </div>
-                <span className="font-mono text-xs font-bold text-zinc-500">VS</span>
+                <span className="font-mono text-xs font-bold text-zinc-400">VS</span>
                 <div className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/10">
+                  {/* Decorative: the adjacent "Overwolf" label already names it. */}
                   <img
                     src="/overwolf-logo.png"
-                    alt="Overwolf"
+                    alt=""
+                    aria-hidden="true"
                     className="w-6 h-6 object-contain opacity-85 filter drop-shadow-[0_0_8px_rgba(255,255,255,0.2)]"
                     draggable={false}
                   />
@@ -228,14 +238,14 @@ export default function JohnPorkCall({ onDownload, version }: JohnPorkCallProps)
                     <th className="pb-2 font-bold">Parameter</th>
                     <th className="pb-2 font-bold text-[#a8f5cc]">
                       <span className="inline-flex items-center gap-1.5">
-                        <img src="/recon-mark.webp" alt="" className="w-3.5 h-3.5 object-contain" />
+                        <img src="/recon-mark.webp" alt="" aria-hidden="true" className="w-3.5 h-3.5 object-contain" />
                         <span>Recon</span>
                       </span>
                     </th>
                     <th className="pb-2 font-bold text-red-400 text-right">
                       <span className="inline-flex items-center justify-end gap-1.5">
                         <span>Overwolf</span>
-                        <img src="/overwolf-logo.png" alt="" className="w-3.5 h-3.5 object-contain opacity-75" />
+                        <img src="/overwolf-logo.png" alt="" aria-hidden="true" className="w-3.5 h-3.5 object-contain opacity-75" />
                       </span>
                     </th>
                   </tr>
@@ -362,7 +372,7 @@ export default function JohnPorkCall({ onDownload, version }: JohnPorkCallProps)
             </p>
 
             {dodgeCount > 0 && !accepted && (
-              <div className="mt-2 pt-1 border-t border-white/10 flex items-center justify-between text-[9px] font-mono text-zinc-400">
+              <div className="mt-2 pt-1 border-t border-white/10 flex items-center justify-between text-[9px] font-mono text-[#cfc6ff]">
                 <span>Dodges: {dodgeCount}</span>
                 <span className="text-red-400 font-bold">Refused</span>
               </div>
@@ -372,9 +382,16 @@ export default function JohnPorkCall({ onDownload, version }: JohnPorkCallProps)
           {/* John Pork image sitting flush at the absolute bottom-left corner */}
           <picture>
             <source srcSet="/john-pork.webp" type="image/webp" />
+            {/* Intrinsic size is declared so the browser reserves the box before
+                the bitmap arrives. Both sources are 1:1 (webp 230x230, png
+                1254x1254), so one pair of attributes covers either choice —
+                without it the image pops in and drags the speech bubble down
+                with it, which is pure layout shift. */}
             <img
               src="/john-pork.png"
               alt="Immortal John Pork"
+              width={1254}
+              height={1254}
               className="w-full h-auto object-contain block drop-shadow-[0_20px_60px_rgba(0,0,0,0.95)] filter brightness-105"
               draggable={false}
             />

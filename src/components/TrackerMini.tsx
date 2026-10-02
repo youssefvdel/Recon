@@ -172,6 +172,7 @@ export const TrackerMini: React.FC = () => {
           <img
             src={mini.bannerUrl}
             alt=""
+            aria-hidden="true"
             className="w-full h-full object-cover object-top"
           />
         ) : (

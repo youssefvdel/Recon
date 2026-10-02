@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import ReconApp from '../../../src/App';
@@ -131,7 +131,12 @@ export default function AppWalkthrough() {
   const lastTRef = useRef(0);
   const velRef = useRef(0);
 
-  useEffect(() => {
+  /* Layout effect on purpose: `fit` starts at 1, so the frame would first paint
+     at its full 1210x802 and only afterwards shrink to the real scale — a
+     visible jump that also registers as layout shift. Measuring inside the
+     layout phase corrects the reserved box BEFORE the browser paints, so the
+     frame simply appears at its final size. Resizes stay on the rAF path. */
+  useLayoutEffect(() => {
     let raf = 0;
     const compute = () => {
       const el = containerRef.current;
@@ -156,7 +161,7 @@ export default function AppWalkthrough() {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(compute);
     };
-    schedule();
+    compute();
     /* Fonts settle after first paint and change the header's height. Watch the
        real elements so a late reflow can never leave the frame oversized. */
     const ro = new ResizeObserver(schedule);
@@ -468,7 +473,7 @@ export default function AppWalkthrough() {
             <div ref={headerRef} className="min-h-[110px]">
               <div className="flex items-center gap-2 font-mono text-xs text-[#b6abf7] font-bold uppercase tracking-wider">
                 <span>{current.badge}</span>
-                <span className="text-zinc-600">•</span>
+                <span className="text-zinc-400">•</span>
                 <span className="text-[#a8f5cc]">
                   STEP {activeStep + 1} OF {STEPS.length}
                 </span>
@@ -547,7 +552,7 @@ export default function AppWalkthrough() {
                           ? 'w-8 h-8 text-[12px] bg-[#b6abf7] text-[#2b1d47] shadow-[0_0_18px_rgba(182,171,247,0.7)] scale-110 ring-2 ring-[#b6abf7]/50 ring-offset-2 ring-offset-[#09060d]'
                           : isDone
                             ? 'w-7 h-7 text-[11px] bg-[#221a33] text-[#b6abf7] border border-[#b6abf7]/50 hover:bg-[#2e2345] shadow-[0_0_8px_rgba(182,171,247,0.25)]'
-                            : 'w-7 h-7 text-[11px] bg-[#140e1b] text-zinc-500 border border-white/[0.14] hover:text-white hover:border-white/30'
+                            : 'w-7 h-7 text-[11px] bg-[#140e1b] text-zinc-400 border border-white/[0.14] hover:text-white hover:border-white/30'
                       }`}
                     >
                       {i + 1}
@@ -571,7 +576,7 @@ export default function AppWalkthrough() {
               className="ml-2 flex flex-col items-center justify-center gap-1.5 select-none pointer-events-none"
               style={{ width: SCROLL_HINT_W }}
             >
-              <span className="font-mono text-[9px] uppercase tracking-widest text-[#b6abf7] font-bold">
+              <span className="font-mono text-[9px] uppercase tracking-widest text-[#cfc6ff] font-bold">
                 SCROLL
               </span>
               <div className="h-28 w-[1.5px] bg-gradient-to-b from-[#b6abf7]/80 via-[#a8f5cc] to-transparent rounded-full relative my-1">

@@ -80,7 +80,7 @@ export default function AppPreviewsStack() {
               <span className="font-mono text-xs font-bold text-zinc-300 ml-2">RECON // RESOLUTION ENGINE</span>
             </div>
             <div className="flex items-center gap-2 font-mono text-[11px]">
-              <span className="text-zinc-500">DISPLAY 1:</span>
+              <span className="text-zinc-400">DISPLAY 1:</span>
               <span className="text-[#a8f5cc] font-bold">RTX 3080 • WDDM HARDWARE GDI</span>
             </div>
           </div>
@@ -197,7 +197,7 @@ export default function AppPreviewsStack() {
               <span className="font-mono text-xs font-bold text-zinc-300 ml-2">RECON // LIVE MATCH ROSTER SCOUT</span>
             </div>
             <div className="flex items-center gap-2 font-mono text-[11px]">
-              <span className="text-zinc-500">MAP:</span>
+              <span className="text-zinc-400">MAP:</span>
               <span className="text-white font-bold">LOTUS (COMPETITIVE)</span>
               <span className="text-zinc-500">•</span>
               <span className="text-[#a8f5cc]">SCORE: 9 - 5</span>
@@ -328,7 +328,7 @@ export default function AppPreviewsStack() {
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 font-mono text-xs">
             {/* Col 1: Sidearms */}
             <div className="p-3.5 rounded-xl bg-black/50 border border-white/10 flex flex-col justify-between h-56">
-              <div className="text-[10px] text-zinc-500 uppercase font-bold border-b border-white/5 pb-1">Sidearms</div>
+              <div className="text-[10px] text-zinc-400 uppercase font-bold border-b border-white/5 pb-1">Sidearms</div>
               <div className="space-y-2 my-auto">
                 <div className="p-2 rounded bg-white/5 border border-white/10">
                   <div className="font-bold text-white text-[11px]">Ghost</div>
@@ -339,12 +339,12 @@ export default function AppPreviewsStack() {
                   <div className="text-[10px] text-zinc-400">Prime Classic</div>
                 </div>
               </div>
-              <div className="text-[9.5px] text-zinc-500">Tier 4 Chroma</div>
+              <div className="text-[9.5px] text-zinc-400">Tier 4 Chroma</div>
             </div>
 
             {/* Col 2: SMGs / Shotguns */}
             <div className="p-3.5 rounded-xl bg-black/50 border border-white/10 flex flex-col justify-between h-56">
-              <div className="text-[10px] text-zinc-500 uppercase font-bold border-b border-white/5 pb-1">SMGs</div>
+              <div className="text-[10px] text-zinc-400 uppercase font-bold border-b border-white/5 pb-1">SMGs</div>
               <div className="space-y-2 my-auto">
                 <div className="p-2 rounded bg-white/5 border border-white/10">
                   <div className="font-bold text-white text-[11px]">Spectre</div>
@@ -355,7 +355,7 @@ export default function AppPreviewsStack() {
                   <div className="text-[10px] text-zinc-400">Glitchpop Judge</div>
                 </div>
               </div>
-              <div className="text-[9.5px] text-zinc-500">Level 4 Finisher</div>
+              <div className="text-[9.5px] text-zinc-400">Level 4 Finisher</div>
             </div>
 
             {/* Col 3: Rifles (Flagship) */}
@@ -376,7 +376,7 @@ export default function AppPreviewsStack() {
 
             {/* Col 4: Snipers & Melee */}
             <div className="p-3.5 rounded-xl bg-black/50 border border-white/10 flex flex-col justify-between h-56">
-              <div className="text-[10px] text-zinc-500 uppercase font-bold border-b border-white/5 pb-1">Melee & Snipers</div>
+              <div className="text-[10px] text-zinc-400 uppercase font-bold border-b border-white/5 pb-1">Melee & Snipers</div>
               <div className="space-y-2 my-auto">
                 <div className="p-2 rounded bg-white/5 border border-white/10">
                   <div className="font-bold text-white text-[11px]">Melee</div>
@@ -387,18 +387,23 @@ export default function AppPreviewsStack() {
                   <div className="text-[10px] text-zinc-400">Araxys Operator</div>
                 </div>
               </div>
-              <div className="text-[9.5px] text-zinc-500">Custom Animation</div>
+              <div className="text-[9.5px] text-zinc-400">Custom Animation</div>
             </div>
 
             {/* Col 5: Identity & Spray Wheel */}
             <div className="p-3.5 rounded-xl bg-black/50 border border-white/10 flex flex-col justify-between h-56">
-              <div className="text-[10px] text-zinc-500 uppercase font-bold border-b border-white/5 pb-1">Spray Wheel</div>
+              <div className="text-[10px] text-zinc-400 uppercase font-bold border-b border-white/5 pb-1">Spray Wheel</div>
               <div className="relative w-20 h-20 mx-auto my-auto flex items-center justify-center rounded-full border border-white/10 bg-black/40">
                 <div className="absolute top-1 text-[8.5px] text-zinc-400 font-bold">SALT</div>
                 <div className="absolute right-1 text-[8.5px] text-zinc-400 font-bold">GG</div>
                 <div className="absolute bottom-1 text-[8.5px] text-zinc-400 font-bold">NOOB</div>
                 <div className="absolute left-1 text-[8.5px] text-zinc-400 font-bold">REVIVE</div>
-                <div className="w-6 h-6 rounded-full bg-[#b6abf7]/20 border border-[#b6abf7]/40 flex items-center justify-center text-[9px] text-[#b6abf7]">
+                {/* Dark plate + one step lighter violet. The old #b6abf7 glyph sat on a
+                    translucent chip that never fully covered the stack behind
+                    it, so the text inherited an unpredictable backdrop. With
+                    the 90%-opaque plate the composited backdrop is a fixed
+                    ~#17122c and #cfc6ff clears 11.3:1 — keep the plate. */}
+                <div className="w-6 h-6 rounded-full bg-[#1a1430]/90 border border-[#b6abf7]/50 flex items-center justify-center text-[9px] text-[#cfc6ff]">
                   4x
                 </div>
               </div>
@@ -419,7 +424,7 @@ export default function AppPreviewsStack() {
               <span className="font-mono text-xs font-bold text-zinc-300 ml-2">RECON // TRANSPARENT DWM OVERLAY</span>
             </div>
             <div className="flex items-center gap-2 font-mono text-[11px]">
-              <span className="text-zinc-500">ENGINE:</span>
+              <span className="text-zinc-400">ENGINE:</span>
               <span className="text-[#a8f5cc] font-bold">DirectComposition • Click-Through</span>
             </div>
           </div>
