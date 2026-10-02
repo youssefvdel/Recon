@@ -100,47 +100,6 @@ html.lenis body {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* Recon desktop app mount — scoped overrides so the REAL <ReconApp /> */
-/* fills the walkthrough frame instead of the full browser viewport.   */
-/* The app's own h-screen/w-screen is left untouched for max parity.   */
-/* ------------------------------------------------------------------ */
-.recon-app-mount > div {
-  height: 100% !important;
-  width: 100% !important;
-  min-height: 0 !important;
-}
-
-/* The app root itself carries w-screen/h-screen, which resolve to 100vw/100vh
-   — the whole page, not the frame. Without this the app lays out ~1870px wide
-   inside a 1210px frame and the content looks shifted/clipped. Scoped to the
-   explicit host so it can never clobber the absolutely-positioned overlays
-   (ring, magnifier) that are siblings. */
-.recon-app-host > div {
-  width: 100% !important;
-  height: 100% !important;
-  min-height: 0 !important;
-}
-
-/* The app assumes it owns the page: neutralise page-level rules that
-   would otherwise leak in and shift its layout. */
-.recon-app-mount {
-  container-type: inline-size;
-  isolation: isolate;
-  font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
-}
-
-.recon-app-mount body,
-.recon-app-mount .recon-relative {
-  position: relative;
-}
-
-/* Keep the app's own scrollbars/selection behaviour */
-.recon-app-mount ::selection {
-  background: #4f378b;
-  color: #e8def8;
-}
-
 /* Tactile feedback & focus ring utilities */
 .tap-feedback {
   transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1);

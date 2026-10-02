@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect, lazy, Suspense } from 'react';
 const CRTWarp = lazy(() => import('./components/CRTWarp'));
 import PixelTrail from './components/PixelTrail';
 import VariableProximity from './components/VariableProximity';
-import AppWalkthrough from './components/AppWalkthrough';
 import JohnPorkCall from './components/JohnPorkCall';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
@@ -319,7 +318,7 @@ export default function App() {
       {/* ========================================================================= */}
       <header className="sticky top-0 z-40 backdrop-blur-xl bg-[#09060d]/85 border-b border-white/[0.07]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <a href="#" className="flex items-center gap-3 group">
+          <a href="/" className="flex items-center gap-3 group">
             <div className="relative w-9 h-9 rounded-xl bg-[#140e1b] border border-[#b6abf7]/30 flex items-center justify-center p-1.5 shadow-md group-hover:border-[#b6abf7] transition-colors">
               <img src="/icon.png" alt="Recon Radar Icon" className="w-full h-full object-contain" />
             </div>
@@ -337,7 +336,9 @@ export default function App() {
           </a>
 
           <nav className="hidden md:flex items-center gap-8 text-xs font-mono uppercase tracking-wider text-zinc-400">
-            <a href="#app-walkthrough" className="hover:text-white transition-colors">Demo App</a>
+            <a href="/tracker/" className="hover:text-white transition-colors">Tracker</a>
+            <a href="/stretch/" className="hover:text-white transition-colors">Stretch</a>
+            <a href="/download/" className="hover:text-white transition-colors">Download</a>
             <a href="#john-pork-call" className="hover:text-[#b6abf7] transition-colors flex items-center gap-2">
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
@@ -482,17 +483,12 @@ export default function App() {
       </section>
 
       {/* ========================================================================= */}
-      {/* 3. LIVE RECON DESKTOP APP WALKTHROUGH (PINNED SCROLL DEMO)                 */}
-      {/* ========================================================================= */}
-      <AppWalkthrough />
-
-      {/* ========================================================================= */}
-      {/* 4. IMMORTAL JOHN PORK IS CALLING (INTERACTIVE INCOMING CALL)               */}
+      {/* 3. IMMORTAL JOHN PORK IS CALLING (INTERACTIVE INCOMING CALL)               */}
       {/* ========================================================================= */}
       <JohnPorkCall onDownload={handleDownload} version={release.version} />
 
       {/* ========================================================================= */}
-      {/* 5. FOOTER                                                                 */}
+      {/* 4. FOOTER                                                                 */}
       {/* ========================================================================= */}
       <footer className="border-t border-white/[0.08] bg-[#050308] py-10 px-4 sm:px-6 lg:px-8 text-xs font-mono text-zinc-400 z-10">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
