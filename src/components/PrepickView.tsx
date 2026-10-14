@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { UserCheck, Check, X, Search } from 'lucide-react';
+import { Check, X, Search, Plus } from 'lucide-react';
 import {
   getPrepickConfig,
   setPrepickConfig,
@@ -8,6 +8,9 @@ import {
   type PrepickConfig,
   type ValorantMapInfo,
 } from '../utils/prepick';
+
+/** Role order for the grouped agent picker (in-game roster order). */
+const ROLE_ORDER = ['duelist', 'initiator', 'controller', 'sentinel'];
 
 export const PrepickView: React.FC = () => {
   const [config, setConfig] = useState<PrepickConfig>(() => getPrepickConfig());
@@ -19,6 +22,9 @@ export const PrepickView: React.FC = () => {
   const [activePickerTarget, setActivePickerTarget] = useState<string | null>(null); // 'default' or lowercase mapName
   const [agentSearch, setAgentSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
+  // Map search + splash readiness (blur-up placeholders while big splashes load)
+  const [mapSearch, setMapSearch] = useState('');
+  const [splashReady, setSplashReady] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     let dead = false;
@@ -27,6 +33,16 @@ export const PrepickView: React.FC = () => {
         setMaps(mList);
         setAgentsList(aList);
         setLoading(false);
+        // Idle-preload full splashes so opening the tab later is instant.
+        // requestIdleCallback is absent in some WebViews — setTimeout fallback.
+        const preload = () => {
+          for (const m of mList) {
+            const im = new Image();
+            im.src = m.thumb || m.splash;
+          }
+        };
+        if (typeof requestIdleCallback !== 'undefined') requestIdleCallback(preload);
+        else setTimeout(preload, 1500);
       }
     });
     return () => {
@@ -71,6 +87,12 @@ export const PrepickView: React.FC = () => {
     setActivePickerTarget(null);
   };
 
+  const handleClearAllMaps = () => {
+    const updated: PrepickConfig = { ...config, mapAgents: {} };
+    setConfig(updated);
+    setPrepickConfig(updated);
+  };
+
   const handleClearMapAgent = (e: React.MouseEvent, mapName: string) => {
     e.stopPropagation();
     const key = mapName.toLowerCase();
@@ -82,6 +104,21 @@ export const PrepickView: React.FC = () => {
     };
     setConfig(updated);
     setPrepickConfig(updated);
+  };
+
+  const filteredMaps = useMemo(() => {
+    const q = mapSearch.trim().toLowerCase();
+    if (!q) return maps;
+    return maps.filter((m) => m.name.toLowerCase().includes(q));
+  }, [maps, mapSearch]);
+
+  const markSplashReady = (thumb: string) => {
+    setSplashReady((prev) => {
+      if (prev.has(thumb)) return prev;
+      const next = new Set(prev);
+      next.add(thumb);
+      return next;
+    });
   };
 
   const roles = useMemo(() => {
@@ -100,6 +137,22 @@ export const PrepickView: React.FC = () => {
     });
   }, [agents, roleFilter, agentSearch]);
 
+  // Grouped by role (Duelist → Initiator → Controller → Sentinel) so the
+  // picker scans like the in-game roster instead of one long alphabet.
+  const groupedAgents = useMemo(() => {
+    const groups = new Map<string, typeof filteredAgents>();
+    for (const a of filteredAgents) {
+      const key = (a.role || 'Agent').trim() || 'Agent';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(a);
+    }
+    return [...groups.entries()].sort(([ra], [rb]) => {
+      const ia = ROLE_ORDER.indexOf(ra.toLowerCase());
+      const ib = ROLE_ORDER.indexOf(rb.toLowerCase());
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+  }, [filteredAgents]);
+
   const defaultAgentObj = useMemo(() => {
     return agents.find((a) => a.id.toLowerCase() === config.defaultAgentId.toLowerCase() || a.name.toLowerCase() === config.defaultAgentName.toLowerCase());
   }, [agents, config.defaultAgentId, config.defaultAgentName]);
@@ -113,38 +166,17 @@ export const PrepickView: React.FC = () => {
   return (
     <div className="h-full min-h-0 flex flex-col bg-m3-surface overflow-y-auto custom-scrollbar px-4 sm:px-8 py-5 select-none">
       <div className="max-w-5xl mx-auto w-full space-y-5 pb-12">
-        {/* Top Header Card */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 sm:p-5 rounded-3xl bg-m3-surface-container-low border border-m3-outline-subtle">
-          <div className="flex items-start sm:items-center gap-3.5">
-            <div className="w-11 h-11 rounded-2xl bg-m3-primary/10 border border-m3-primary/30 flex items-center justify-center text-m3-primary shrink-0">
-              <UserCheck className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-base sm:text-lg font-bold text-m3-on-surface font-display">
-                  Agent Safe Pre-Picker
-                </h1>
-                <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-bold bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">
-                  SAFE HOVER ONLY
-                </span>
-              </div>
-              <p className="text-[11px] text-m3-outline mt-0.5">
-                Hovers your preferred agent, per map, the instant Agent Select opens. It never locks the agent in — that stays your call.
-              </p>
-            </div>
-          </div>
-
-          {/* Master Toggle Switch */}
+        {/* Control deck: master toggle + default fallback in one row.
+            Replaces the old header card + fallback banner pair. */}
+        <div className="flex items-center gap-3.5 p-3.5 sm:p-4 rounded-3xl bg-m3-surface-container-low border border-m3-outline-subtle flex-wrap">
           <button
             type="button"
             role="switch"
             aria-checked={config.enabled}
             onClick={handleToggleEnabled}
-            className="flex items-center gap-3 px-3.5 py-2 rounded-2xl bg-m3-surface-container-high hover:bg-m3-surface-container-highest border border-m3-outline-subtle transition-colors cursor-pointer shrink-0"
+            className="flex items-center gap-2.5 shrink-0 cursor-pointer"
+            data-tip={`Auto-hover ${config.enabled ? 'ON' : 'OFF'}`}
           >
-            <span className={`text-[11px] font-mono font-bold tabular-nums uppercase ${config.enabled ? 'text-m3-primary' : 'text-m3-outline'}`}>
-              Auto-Hover {config.enabled ? 'ON' : 'OFF'}
-            </span>
             <div
               className={`w-9 h-5 flex items-center rounded-full p-0.5 transition-colors ${
                 config.enabled ? 'bg-m3-primary' : 'bg-black/40 border border-m3-outline-subtle/70'
@@ -156,45 +188,45 @@ export const PrepickView: React.FC = () => {
                 }`}
               />
             </div>
+            <span className={`text-[11px] font-mono font-bold tabular-nums uppercase ${config.enabled ? 'text-m3-primary' : 'text-m3-outline'}`}>
+              Auto-Hover {config.enabled ? 'ON' : 'OFF'}
+            </span>
           </button>
-        </div>
 
-        {/* Global Fallback Agent Banner */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 sm:p-4 rounded-2xl bg-m3-surface-container-lowest border border-m3-outline-subtle">
-          <div className="flex items-center gap-3">
-            {defaultAgentObj ? (
-              <div className="w-10 h-10 rounded-xl overflow-hidden bg-m3-surface-container-highest border border-m3-primary/40 shrink-0">
-                <img src={defaultAgentObj.icon} alt={defaultAgentObj.name} className="w-full h-full object-cover" />
-              </div>
-            ) : (
-              <div className="w-10 h-10 rounded-xl bg-m3-surface-container-high border border-m3-outline-subtle flex items-center justify-center text-m3-outline shrink-0">
-                <UserCheck className="w-4 h-4" />
-              </div>
-            )}
-            <div>
-              <div className="text-xs font-semibold text-m3-on-surface flex items-center gap-2">
-                <span>Default Fallback Agent</span>
-                <span className="text-[10px] font-normal text-m3-outline">
-                  (Used when a map has no custom agent assigned)
-                </span>
-              </div>
-              <div className="text-[11px] font-mono text-m3-primary font-bold mt-0.5">
-                {config.defaultAgentName ? config.defaultAgentName : 'None selected (click to set)'}
-              </div>
-            </div>
-          </div>
+          <div className="w-px h-9 bg-m3-outline-subtle/60 shrink-0 hidden sm:block" />
 
           <button
             type="button"
             onClick={() => setActivePickerTarget('default')}
-            className="h-8 px-3.5 rounded-xl bg-m3-surface-container-high hover:bg-m3-surface-container-highest border border-m3-outline-subtle text-xs font-semibold text-m3-on-surface hover:text-m3-primary transition-colors cursor-pointer shrink-0"
+            className="flex items-center gap-2.5 min-w-0 cursor-pointer group"
+            data-tip="Set the default fallback agent"
           >
-            {config.defaultAgentName ? 'Change Default' : 'Select Default'}
+            {defaultAgentObj ? (
+              <div className="w-9 h-9 rounded-xl overflow-hidden bg-m3-surface-container-highest border border-m3-primary/40 shrink-0">
+                <img src={defaultAgentObj.icon} alt={defaultAgentObj.name} className="w-full h-full object-cover" />
+              </div>
+            ) : (
+              <div className="w-9 h-9 rounded-xl bg-m3-surface-container-high border border-dashed border-m3-outline-subtle flex items-center justify-center shrink-0 text-m3-outline group-hover:text-m3-primary group-hover:border-m3-primary transition-colors">
+                <Plus className="w-4 h-4" />
+              </div>
+            )}
+            <span className="text-left min-w-0">
+              <span className="block text-[10px] font-semibold uppercase tracking-wider text-m3-outline leading-tight">
+                Default fallback
+              </span>
+              <span className="block text-[13px] font-bold text-m3-on-surface group-hover:text-m3-primary transition-colors leading-tight truncate">
+                {config.defaultAgentName || 'Select agent'}
+              </span>
+            </span>
           </button>
+
+          <span className="ml-auto px-2 py-0.5 rounded-full text-[9px] font-mono font-bold bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 shrink-0">
+            SAFE HOVER ONLY
+          </span>
         </div>
 
         {/* Maps Section Header */}
-        <div className="flex items-center justify-between pt-1">
+        <div className="flex items-center justify-between gap-3 pt-1 flex-wrap">
           <div>
             <h2 className="text-sm font-bold text-m3-on-surface font-display">
               Map-Specific Agent Lineup
@@ -203,21 +235,46 @@ export const PrepickView: React.FC = () => {
               Assign a dedicated agent to hover for each specific map. Click any map card to pick.
             </p>
           </div>
-          <div className="flex items-center gap-1.5 text-[10px] font-mono text-m3-outline bg-m3-surface-container px-2.5 py-1 rounded-full border border-m3-outline-subtle">
-            <span>{Object.keys(config.mapAgents).length} Custom Picks</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 px-2.5 h-8 rounded-xl bg-m3-surface-container border border-m3-outline-subtle">
+              <Search className="w-3.5 h-3.5 text-m3-outline shrink-0" />
+              <input
+                type="text"
+                value={mapSearch}
+                onChange={(e) => setMapSearch(e.target.value)}
+                placeholder="Search maps…"
+                className="w-28 bg-transparent text-xs text-m3-on-surface placeholder:text-m3-outline/60 focus:outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-1.5 text-[10px] font-mono text-m3-outline bg-m3-surface-container px-2.5 py-1 rounded-full border border-m3-outline-subtle">
+              <span>{Object.keys(config.mapAgents).length} Custom Picks</span>
+            </div>
+            {Object.keys(config.mapAgents).length > 0 && (
+              <button
+                type="button"
+                onClick={handleClearAllMaps}
+                className="h-8 px-3 rounded-xl bg-m3-surface-container hover:bg-m3-surface-container-high border border-m3-outline-subtle text-[11px] font-semibold text-m3-outline hover:text-m3-coral transition-colors cursor-pointer"
+              >
+                Reset all
+              </button>
+            )}
           </div>
         </div>
 
         {/* Maps Grid */}
         {loading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {Array.from({ length: 6 }).map((_, i) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {Array.from({ length: 8 }).map((_, i) => (
               <div key={i} className="h-28 rounded-2xl bg-m3-surface-container-high animate-pulse" />
             ))}
           </div>
+        ) : filteredMaps.length === 0 ? (
+          <div className="p-6 rounded-2xl bg-m3-surface-container-low border border-m3-outline-subtle text-center text-xs text-m3-outline">
+            No maps match “{mapSearch}”.
+          </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {maps.map((m) => {
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {filteredMaps.map((m) => {
               const mapKey = m.name.toLowerCase();
               const customPick = config.mapAgents[mapKey];
               const assignedAgent = customPick
@@ -236,18 +293,38 @@ export const PrepickView: React.FC = () => {
                       : 'border-m3-outline-subtle hover:border-m3-outline'
                   }`}
                 >
-                  {/* Map Splash Background */}
+                  {/* Map Splash Background with instant blur-up:
+                      the small map icon paints immediately while the
+                      multi-MB splash fades in over it. */}
+                  {m.icon ? (
+                    <img
+                      src={m.icon}
+                      alt=""
+                      aria-hidden="true"
+                      loading="lazy"
+                      className="absolute inset-0 w-full h-full object-cover blur-md scale-110 opacity-60"
+                    />
+                  ) : null}
                   <img
-                    src={m.splash}
+                    src={m.thumb || m.splash}
                     alt={m.name}
                     loading="lazy"
-                    className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    decoding="async"
+                    onLoad={() => markSplashReady(m.thumb || m.splash)}
+                    // Base 1.03 zoom: several listViewIcon arts ship with a
+                    // 1px white line baked into their top edge (Abyss,
+                    // Summit) — this pushes it outside the clipped card.
+                    className={`absolute inset-0 w-full h-full object-cover scale-[1.03] group-hover:scale-105 transition-all duration-300 ${
+                      splashReady.has(m.thumb || m.splash) ? 'opacity-100' : 'opacity-0'
+                    }`}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/60 to-black/40" />
 
                   {/* Card Content */}
                   <div className="relative z-10 h-full p-3 flex flex-col justify-between">
-                    {/* Top: Map Name + Custom/Default Badge */}
+                    {/* Top: Map Name + Custom badge (only when customized —
+                        unpicked maps show no badge at all, not twelve
+                        copies of "Uses Default") */}
                     <div className="flex items-center justify-between">
                       <span className="font-display font-black text-sm text-white tracking-wide drop-shadow-sm">
                         {m.name}
@@ -261,23 +338,20 @@ export const PrepickView: React.FC = () => {
                             type="button"
                             onClick={(e) => handleClearMapAgent(e, m.name)}
                             className="p-1 rounded bg-black/60 hover:bg-red-500/80 text-white/80 hover:text-white transition-colors cursor-pointer"
-                            title={`Clear custom pick for ${m.name}`}
+                            data-tip={`Clear custom pick for ${m.name}`}
                           >
                             <X className="w-2.5 h-2.5" />
                           </button>
                         </div>
-                      ) : (
-                        <span className="px-1.5 py-0.5 rounded text-[8.5px] font-mono uppercase tracking-wider bg-black/50 border border-white/10 text-white/60">
-                          Uses Default
-                        </span>
-                      )}
+                      ) : null}
                     </div>
 
-                    {/* Bottom: Agent Hover Info */}
+                    {/* Bottom: agent portrait slot. Assigned → face + name;
+                        empty → dashed + slot falling back to the default. */}
                     <div className="flex items-center gap-2 pt-1">
                       {activeAgent ? (
                         <>
-                          <div className={`w-8 h-8 rounded-lg overflow-hidden shrink-0 border ${hasCustom ? 'border-m3-primary shadow-xs' : 'border-white/20'} bg-black/60`}>
+                          <div className={`w-8 h-8 rounded-lg overflow-hidden shrink-0 border bg-black/60 ${hasCustom ? 'border-m3-primary shadow-xs' : 'border-white/20'}`}>
                             <img src={activeAgent.icon} alt={activeAgent.name} className="w-full h-full object-cover" />
                           </div>
                           <div className="min-w-0">
@@ -290,9 +364,14 @@ export const PrepickView: React.FC = () => {
                           </div>
                         </>
                       ) : (
-                        <div className="text-[11px] font-medium text-white/70 italic">
-                          Click to assign an agent…
-                        </div>
+                        <>
+                          <div className="w-8 h-8 rounded-lg border border-dashed border-white/30 bg-black/60 flex items-center justify-center shrink-0 text-white/60">
+                            <Plus className="w-3.5 h-3.5" />
+                          </div>
+                          <div className="text-[11px] font-medium text-white/70 italic">
+                            Click to assign an agent…
+                          </div>
+                        </>
                       )}
                     </div>
                   </div>
@@ -364,10 +443,20 @@ export const PrepickView: React.FC = () => {
               </div>
             </div>
 
-            {/* Agent Grid */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2.5">
-                {filteredAgents.map((ag) => {
+            {/* Agent Grid, grouped by role */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-4 flex flex-col gap-4">
+              {groupedAgents.length === 0 && (
+                <div className="text-center text-xs text-m3-outline py-8">
+                  No agents match “{agentSearch}”.
+                </div>
+              )}
+              {groupedAgents.map(([role, list]) => (
+                <div key={role}>
+                  <div className="text-[10px] font-mono font-bold uppercase tracking-[0.16em] text-m3-outline px-1 mb-1.5">
+                    {role}s
+                  </div>
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2.5">
+                    {list.map((ag) => {
                   const isCurrent =
                     activePickerTarget === 'default'
                       ? ag.id.toLowerCase() === config.defaultAgentId.toLowerCase() || ag.name.toLowerCase() === config.defaultAgentName.toLowerCase()
@@ -401,7 +490,9 @@ export const PrepickView: React.FC = () => {
                     </button>
                   );
                 })}
-              </div>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>

@@ -588,7 +588,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
                 <button
                   onClick={handleInstallUpdate}
                   disabled={installing || autoDownloadingSame || activeInstallBlocker !== null}
-                  title={activeInstallBlocker ?? undefined}
+                  data-tip={activeInstallBlocker ?? undefined}
                   className="px-4 py-1.5 rounded-xl bg-m3-primary hover:bg-m3-primary/90 text-m3-on-primary text-xs font-bold flex items-center gap-2 transition-all shadow-md cursor-pointer active:scale-95 disabled:opacity-50"
                 >
                   {installing ? (
@@ -936,7 +936,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
             <button
               onClick={downloadLogs}
               className="h-8 px-3 rounded-xl bg-m3-surface-container-high hover:bg-m3-surface-container-highest text-m3-on-surface text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="Download recent app logs as recon-logs-*.txt for bug reports"
+              data-tip="Download recent app logs as recon-logs-*.txt for bug reports"
             >
               <Download className="w-3.5 h-3.5" />
               <span>Download logs</span>
@@ -945,7 +945,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
               type="button"
               onClick={flipCrashOptIn}
               className={`h-8 px-3 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border ${crashOn ? 'bg-m3-primary/20 border-m3-primary text-m3-primary' : 'bg-m3-surface-container-high border-transparent text-m3-on-surface-variant hover:text-m3-on-surface'}`}
-              title="Opt in to local crash capture (offers copy-to-clipboard diagnostics, never uploads)"
+              data-tip="Opt in to local crash capture (offers copy-to-clipboard diagnostics, never uploads)"
             >
               <span>Crash reports: {crashOn ? 'ON' : 'OFF'}</span>
             </button>

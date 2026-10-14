@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { AlertTriangle, Check, Gamepad2, Lock, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Check, Gamepad2, Lock, RefreshCw, X } from 'lucide-react';
 import { tierName } from '../utils/tracker';
 import { ScoreBadge, gradeFor, scoreTier, tierColor } from './ScoreBadge';
 import {
@@ -75,7 +75,12 @@ const BigTile: React.FC<{ label: string; value?: string; numeric?: number; decim
   locked = false,
   index,
 }) => {
-  const v = useCountUp(numeric ?? 0, 900, !locked && numeric !== undefined);
+  // Round to displayed precision: recomputed floats (51.05 vs 51.0500001)
+  // across background refreshes must not replay the 0→target tween, or the
+  // tiles visibly count up over and over.
+  const factor = 10 ** decimals;
+  const stable = numeric === undefined ? undefined : Math.round(numeric * factor) / factor;
+  const v = useCountUp(stable ?? 0, 900, !locked && stable !== undefined);
   return (
     <motion.div variants={rise} custom={index}
       className={`rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 flex flex-col gap-1 min-w-0 ${locked ? 'opacity-70' : ''}`}>
@@ -84,7 +89,7 @@ const BigTile: React.FC<{ label: string; value?: string; numeric?: number; decim
         {locked && <Lock className="w-3 h-3" />}
       </span>
       <span className="font-display font-black text-2xl sm:text-3xl text-m3-on-surface tabular-nums truncate mt-0.5">
-        {locked ? (value ?? '—') : numeric !== undefined ? <>{v.toFixed(decimals)}{suffix}</> : (value ?? '—')}
+        {locked ? (value ?? '—') : stable !== undefined ? <>{v.toFixed(decimals)}{suffix}</> : (value ?? '—')}
       </span>
     </motion.div>
   );
@@ -116,6 +121,16 @@ export const Overview: React.FC = () => {
   const [selLoading, setSelLoading] = useState(false);
   const [selError, setSelError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // Floating notice toast: banner text must never live in the layout flow.
+  // Shows once per distinct message. The toast owns its countdown and
+  // dismisses itself; `key={banner}` restarts the timer per message.
+  const [toastVisible, setToastVisible] = useState(false);
+  const lastToastRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!banner || banner === lastToastRef.current) return;
+    lastToastRef.current = banner;
+    setToastVisible(true);
+  }, [banner]);
   // True only for the live act + competitive — the one case where the store's
   // `trn`/`agg` snapshots describe the selection.
   const isDefault = playlist === 'competitive' && !seasonId;
@@ -292,18 +307,6 @@ export const Overview: React.FC = () => {
           </button>
         </div>
       )}
-      {banner && (
-        <div className="p-2.5 rounded-xl bg-m3-primary-container/40 border border-m3-primary/40 text-m3-on-primary-container text-xs font-semibold flex items-center justify-between shrink-0">
-          <div className="flex items-center space-x-2">
-            <Check className="w-3.5 h-3.5 text-m3-primary shrink-0" />
-            <span>{banner}</span>
-          </div>
-          <button onClick={() => setBanner(null)} className="text-m3-primary hover:underline text-xs ml-3 cursor-pointer font-bold shrink-0">
-            Dismiss
-          </button>
-        </div>
-      )}
-
       {/* Header filter bar */}
       <div className="flex items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-3">
@@ -444,10 +447,21 @@ export const Overview: React.FC = () => {
                     </div>
                   </div>
                 ) : (
-                  <div className="text-xs text-m3-outline">No matches recorded</div>
+                  /* Shape-holding placeholder: icon slot + name lines, same
+                     heights as a filled agent row, so the card never shrinks
+                     to a one-liner while agent stats load. */
+                  <div className="flex items-center gap-3" aria-hidden="true">
+                    <div className="w-12 h-12 rounded-lg bg-m3-surface-container-high shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-display font-extrabold text-lg text-m3-outline/40 leading-tight">
+                        —
+                      </div>
+                      <div className="text-xs text-m3-outline/40 mt-0.5">— Matches</div>
+                    </div>
+                  </div>
                 )}
               </div>
-              {topAgent && (
+              {topAgent ? (
                 <div className="grid grid-cols-4 gap-2 pt-3 mt-3 border-t border-m3-outline-subtle/50">
                   <div>
                     <div className="text-[11px] font-semibold text-m3-outline">Win %</div>
@@ -474,6 +488,17 @@ export const Overview: React.FC = () => {
                     </div>
                   </div>
                 </div>
+              ) : (
+                <div className="grid grid-cols-4 gap-2 pt-3 mt-3 border-t border-m3-outline-subtle/50" aria-hidden="true">
+                  {['Win %', 'K/D', 'ADR', 'ACS'].map((label) => (
+                    <div key={label}>
+                      <div className="text-[11px] font-semibold text-m3-outline/40">{label}</div>
+                      <div className="font-display font-bold text-base sm:text-lg text-m3-outline/40 tabular-nums mt-0.5">
+                        —
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </motion.section>
 
@@ -482,7 +507,7 @@ export const Overview: React.FC = () => {
               className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 flex flex-col justify-between shadow-m3-1">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="font-display font-bold text-sm text-m3-on-surface">Accuracy</h3>
-                <span className="text-xs text-m3-outline font-medium" title={recentHit ? `Last ${recentHit.used} matches` : 'Act-wide from Tracker.gg'}>
+                <span className="text-xs text-m3-outline font-medium" data-tip={recentHit ? `Last ${recentHit.used} matches` : 'Act-wide from Tracker.gg'}>
                   {accLabel}
                 </span>
               </div>
@@ -516,18 +541,21 @@ export const Overview: React.FC = () => {
             </motion.section>
           </div>
 
-          {/* Lower Row: Previous Acts & Tracker Score sharing 50/50 */}
+          {/* Lower Row: Previous Acts & Tracker Score sharing 50/50.
+              Both cards always render: when their data is missing (Riot
+              downtime, fresh account) placeholder columns hold the exact
+              geometry so the grid never collapses or reflows. */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 shrink-0">
             {/* Previous Acts (3 compact columns) */}
-            {recentActs.length > 0 && (
-              <motion.section variants={rise} custom={10}
-                className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 flex flex-col justify-between shadow-m3-1">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-display font-bold text-sm text-m3-on-surface">Previous Acts</h3>
-                  <span className="text-[10px] text-m3-outline uppercase tracking-wider font-semibold">Competitive History</span>
-                </div>
-                <div className="grid grid-cols-3 gap-2 flex-1 items-center text-center py-1">
-                  {recentActs.map((s) => {
+            <motion.section variants={rise} custom={10}
+              className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 flex flex-col justify-between shadow-m3-1">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-display font-bold text-sm text-m3-on-surface">Previous Acts</h3>
+                <span className="text-[10px] text-m3-outline uppercase tracking-wider font-semibold">Competitive History</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 flex-1 items-center text-center py-1">
+                {recentActs.length > 0 ? (
+                  recentActs.map((s) => {
                     const isCurrent = s.id.toLowerCase() === profile?.currentSeasonId.toLowerCase();
                     const prev = trnPrev[s.id.toLowerCase()];
                     // "Peak Rating" means the HIGHEST tier reached in that act —
@@ -564,19 +592,43 @@ export const Overview: React.FC = () => {
                         </div>
                       </div>
                     );
-                  })}
-                </div>
-              </motion.section>
-            )}
+                  })
+                ) : (
+                  /* Shape-holding placeholders: same geometry as a filled
+                     column (label, 44px emblem slot, caption, name, K/D
+                     line) so missing history never collapses the card. */
+                  [0, 1, 2].map((i) => (
+                    <div key={`prev-ph-${i}`} className="flex flex-col items-center justify-between h-full py-1" aria-hidden="true">
+                      <span className="text-[11px] font-bold text-m3-outline/40 uppercase tracking-wider">—</span>
+                      <div className="my-1.5 flex items-center justify-center">
+                        <div className="w-11 h-11 rounded-full bg-m3-surface-container-high" />
+                      </div>
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-m3-outline/40">
+                        Peak Rating
+                      </span>
+                      <div className="font-display font-bold text-xs sm:text-sm text-m3-outline/40 leading-tight mt-0.5">
+                        —
+                      </div>
+                      <div className="text-[10px] text-m3-outline/40 mt-1 font-medium">
+                        K/D — Matches —
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </motion.section>
 
-            {/* Tracker Score */}
-            {trn && (
-              <motion.section variants={rise} custom={11}
-                className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 flex flex-col justify-between shadow-m3-1"
-                style={{
-                  borderColor: `${scoreTier(trn.trnScore).color}44`,
-                  background: `linear-gradient(180deg, ${scoreTier(trn.trnScore).color}15 0%, transparent 60%)`,
-                }}>
+            {/* Tracker Score — always rendered; the placeholder mirrors the
+                filled geometry (header, 44px badge + score row, 4 stat
+                columns) so a missing TRN payload never reflows the grid. */}
+            <motion.section variants={rise} custom={11}
+              className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 flex flex-col justify-between shadow-m3-1"
+              style={trn ? {
+                borderColor: `${scoreTier(trn.trnScore).color}44`,
+                background: `linear-gradient(180deg, ${scoreTier(trn.trnScore).color}15 0%, transparent 60%)`,
+              } : undefined}>
+              {trn ? (
+                <>
                 <div>
                   <h3 className="font-display font-bold text-sm text-m3-on-surface mb-2">Tracker Score</h3>
 
@@ -621,11 +673,130 @@ export const Overview: React.FC = () => {
                     );
                   })}
                 </div>
-              </motion.section>
-            )}
+                </>
+              ) : (
+                /* Shape-holding placeholder: header + 44px badge slot + score
+                   row, then the 4 stat columns with identical text sizes,
+                   margins, and separators. */
+                <>
+                  <div aria-hidden="true">
+                    <h3 className="font-display font-bold text-sm text-m3-on-surface mb-2">Tracker Score</h3>
+                    <div className="flex items-center gap-2.5 my-1">
+                      <div className="w-[44px] h-[44px] rounded-full bg-m3-surface-container-high shrink-0" />
+                      <div className="font-display font-black text-3xl text-m3-outline/40 tabular-nums leading-none">
+                        —
+                      </div>
+                      <div className="text-[10px] font-bold text-m3-outline/40 px-2 py-0.5 rounded-md bg-m3-surface-container-high border border-m3-outline-subtle ml-1">
+                        No score yet
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-1 mt-3 pt-2" aria-hidden="true">
+                    {['Round Win %', 'KAST', 'ACS', 'DDΔ/Round'].map((label, i) => (
+                      <React.Fragment key={label}>
+                        {i > 0 && <span className="text-m3-outline-subtle font-bold text-xs px-0.5 select-none">+</span>}
+                        <div className="flex-1 text-center pb-1.5 border-b-2 border-m3-outline-subtle/40">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-m3-outline/40 truncate">
+                            {label}
+                          </div>
+                          <div className="text-[15px] font-mono font-bold text-m3-outline/40 mt-0.5 tabular-nums">
+                            —
+                          </div>
+                          <div className="text-[10px] font-mono font-bold truncate mt-0.5 text-m3-outline/40">
+                            —
+                          </div>
+                        </div>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </>
+              )}
+            </motion.section>
           </div>
         </>
       )}
+      {/* Floating notice toast: fixed overlay with zero layout impact.
+          The countdown ring around the icon depletes over TOAST_MS, then
+          the toast dismisses itself. */}
+      {toastVisible && banner && (
+        <NoticeToast
+          key={banner}
+          message={banner}
+          onClose={() => {
+            setToastVisible(false);
+            setBanner(null);
+          }}
+        />
+      )}
+    </motion.div>
+  );
+};
+
+/** Self-dismissing notice. The card's own outline is the countdown: a
+ *  conic-gradient border that depletes over TOAST_MS, then it dismisses. */
+const TOAST_MS = 8000;
+
+const NoticeToast: React.FC<{ message: string; onClose: () => void }> = ({ message, onClose }) => {
+  const [remain, setRemain] = useState(1);
+  useEffect(() => {
+    let raf = 0;
+    const t0 = performance.now();
+    const tick = (t: number) => {
+      const p = Math.max(0, 1 - (t - t0) / TOAST_MS);
+      setRemain(p);
+      if (p > 0) {
+        raf = requestAnimationFrame(tick);
+      } else {
+        onClose();
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+    // Mount-only: `key={message}` remounts per distinct message, restarting
+    // the countdown. onClose is a stable-enough inline; re-running on its
+    // identity change would restart the timer mid-flight.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Perimeter-based countdown: an SVG rect with a normalized pathLength
+  // depletes at constant border distance. (A conic-gradient sweep moves at
+  // constant ANGLE, so it visibly races through the corners.)
+  const done = 100 - remain * 100;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="fixed bottom-6 right-6 z-50 max-w-sm"
+      data-tip={`Hiding in ${Math.ceil((remain * TOAST_MS) / 1000)}s`}
+    >
+      <div className="relative rounded-2xl p-[2px]">
+        <svg className="pointer-events-none absolute inset-0 h-full w-full" fill="none" aria-hidden="true">
+          <rect
+            style={{ x: 1.5, y: 1.5, width: 'calc(100% - 3px)', height: 'calc(100% - 3px)', rx: 14.5 }}
+            stroke="rgba(255, 255, 255, 0.12)"
+            strokeWidth={2}
+          />
+          <rect
+            style={{ x: 1.5, y: 1.5, width: 'calc(100% - 3px)', height: 'calc(100% - 3px)', rx: 14.5 }}
+            stroke="#d0bcff"
+            strokeWidth={2}
+            strokeLinecap="round"
+            pathLength={100}
+            strokeDasharray={100}
+            strokeDashoffset={done}
+          />
+        </svg>
+        <div className="rounded-[14px] bg-m3-surface-container-high shadow-m3-3 p-3.5 flex items-start gap-2.5">
+          <Check className="w-4 h-4 text-m3-primary shrink-0 mt-0.5" />
+          <p className="text-xs text-m3-on-surface font-medium leading-snug flex-1">{message}</p>
+          <button
+            onClick={onClose}
+            aria-label="Dismiss"
+            className="p-1 -m-1 rounded-lg hover:bg-white/10 text-m3-outline hover:text-m3-on-surface cursor-pointer shrink-0"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
     </motion.div>
   );
 };

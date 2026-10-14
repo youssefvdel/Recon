@@ -423,7 +423,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             type="button"
             onClick={handleGotoLive}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/15 border border-red-400/50 text-red-300 text-[10px] font-mono font-bold cursor-pointer hover:bg-red-500/25 active:scale-95 transition-all"
-            title="Live match in progress — jump to Live Match tab"
+            data-tip="Live match in progress — jump to Live Match tab"
           >
             <span className="inline-flex rounded-full h-1.5 w-1.5 bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.9)]" />
             <span>LIVE</span>
@@ -433,7 +433,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         {!trackerOn ? (
           <div
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-500/15 border border-zinc-400/40 text-zinc-300 text-[10px] font-mono font-bold"
-            title="Tracker kill-switch is OFF (Dev QA page) — TRN requests throw immediately, no network. Distinct from rate-limit cooling."
+            data-tip="Tracker kill-switch is OFF (Dev QA page) — TRN requests throw immediately, no network. Distinct from rate-limit cooling."
           >
             <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
             <span>Tracker OFF</span>
@@ -441,7 +441,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         ) : (
           <div
             className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-m3-surface-container border border-m3-outline-subtle text-[9.5px] font-mono text-m3-outline"
-            title="All external APIs (TRN, Blitz & Riot) are connected and healthy"
+            data-tip="All external APIs (TRN, Blitz & Riot) are connected and healthy"
           >
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
             <span>APIs Ready</span>
@@ -454,7 +454,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             onClick={handleGlobalRefresh}
             disabled={isRefreshing}
             className="w-8 h-8 rounded-xl bg-m3-surface-container border border-m3-outline-subtle text-m3-outline hover:text-m3-on-surface hover:bg-m3-surface-container-high hover:border-m3-outline/40 active:scale-95 transition-all flex items-center justify-center cursor-pointer shadow-xs disabled:opacity-50"
-            title="Refresh all data & sync live game"
+            data-tip="Refresh all data & sync live game"
             aria-label="Refresh all data"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-m3-primary' : ''}`} />
@@ -464,7 +464,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             <button
               onClick={handleOpenDevWindow}
               className="w-8 h-8 rounded-xl bg-m3-surface-container border border-m3-outline-subtle text-m3-primary hover:text-m3-primary hover:bg-m3-surface-container-high hover:border-m3-primary/50 active:scale-95 transition-all flex items-center justify-center cursor-pointer shadow-xs"
-              title="Open Dev Dashboard in new window"
+              data-tip="Open Dev Dashboard in new window"
               aria-label="Open Dev Dashboard in new window"
             >
               <FlaskConical className="w-3.5 h-3.5" />
@@ -479,7 +479,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                 ? 'border-amber-400/80 bg-amber-400/15 text-amber-300'
                 : 'border-m3-outline-subtle text-amber-400/90 hover:text-amber-300 hover:bg-amber-400/10 hover:border-amber-400/40 active:scale-95'
             }`}
-            title="Support Recon on Ko-fi"
+            data-tip="Support Recon on Ko-fi"
             aria-label="Support Recon on Ko-fi"
           >
             <Coffee className="w-3.5 h-3.5 transition-transform group-hover:-rotate-12" />
@@ -488,7 +488,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button
             onClick={handleMinimize}
             className="w-8 h-8 rounded-xl bg-m3-surface-container border border-m3-outline-subtle text-m3-outline hover:text-m3-on-surface hover:bg-m3-surface-container-high hover:border-m3-outline/40 active:scale-95 transition-all flex items-center justify-center cursor-pointer shadow-xs"
-            title="Minimize"
+            data-tip="Minimize"
             aria-label="Minimize"
           >
             <Minus className="w-3.5 h-3.5" />
@@ -496,7 +496,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button
             onClick={handleToggle}
             className="w-8 h-8 rounded-xl bg-m3-surface-container border border-m3-outline-subtle text-m3-outline hover:text-m3-on-surface hover:bg-m3-surface-container-high hover:border-m3-outline/40 active:scale-95 transition-all flex items-center justify-center cursor-pointer shadow-xs"
-            title={isMaximized ? 'Restore' : 'Maximize'}
+            data-tip={isMaximized ? 'Restore' : 'Maximize'}
             aria-label={isMaximized ? 'Restore' : 'Maximize'}
           >
             {isMaximized ? <Copy className="w-3 h-3" /> : <Square className="w-3 h-3" />}
@@ -504,7 +504,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button
             onClick={handleClose}
             className="w-8 h-8 rounded-xl bg-m3-surface-container border border-m3-outline-subtle text-m3-outline hover:text-white hover:bg-rose-600 hover:border-rose-500 active:scale-95 transition-all flex items-center justify-center cursor-pointer shadow-xs"
-            title="Close"
+            data-tip="Close"
             aria-label="Close"
           >
             <X className="w-3.5 h-3.5" />
@@ -539,7 +539,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                   animate={{ x: dodgeOffset.x, y: dodgeOffset.y }}
                   transition={{ type: 'spring', stiffness: 600, damping: 18 }}
                   className="absolute top-2.5 right-2.5 w-6 h-6 rounded-full bg-m3-surface-container border border-m3-outline hover:bg-rose-600 hover:border-rose-500 hover:text-white text-m3-on-surface flex items-center justify-center transition-colors cursor-pointer shadow-sm z-30"
-                  title={dodgeCount < 3 ? "Catch me if you can! 😝" : "Dismiss (snooze 7 days)"}
+                  data-tip={dodgeCount < 3 ? "Catch me if you can! 😝" : "Dismiss (snooze 7 days)"}
                   aria-label="Dismiss"
                 >
                   <X className="w-3.5 h-3.5" />

@@ -328,7 +328,10 @@ export async function getAccountStore(force = false): Promise<AccountStore | nul
           itemId,
           name: hit?.name || 'Unknown skin',
           weaponName,
-          icon: hit && !hit.isDefault ? hit.icon || '' : '',
+          // Small displayIcon first (fast); fullRender fallback covers skins
+          // whose portrait art is missing API-side (e.g. Snowfall Judge —
+          // skin displayIcon empty, chroma fullRender present).
+          icon: hit && !hit.isDefault ? hit.icon || hit.fullRender || '' : '',
           cost: amount,
           currency: cur.label,
           currencyIcon: cur.icon,
@@ -383,7 +386,7 @@ export async function getAccountStore(force = false): Promise<AccountStore | nul
           return {
             itemId,
             name: skinHit?.name || cosHit?.name || 'Unknown item',
-            icon: (skinHit && !skinHit.isDefault ? skinHit.icon : '') || cosHit?.icon || '',
+            icon: (skinHit && !skinHit.isDefault ? skinHit.icon || skinHit.fullRender : '') || cosHit?.icon || '',
             kind: skinHit ? 'skin' : cosHit?.kind ?? 'cosmetic',
             amount: Math.max(1, Number(it?.Item?.Amount ?? 1)),
             price,

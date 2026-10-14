@@ -606,10 +606,30 @@ export function extractPeakTier(seasonsObj: Record<string, any>): number {
   return extractPeakInfo(seasonsObj).tier;
 }
 
-/** Rank + RR + peak + per-season peaks straight from Riot. */
+/** Rank + RR + peak + per-season peaks straight from Riot.
+ *
+ *  Riot error payloads (downtime, 4xx/5xx) are NOT empty data. Without the
+ *  assert below, a 403 SCHEDULED_DOWNTIME response parses as "no rank, no
+ *  games" and the UI shows a fake Unrated — then persists it over the
+ *  last-known-good snapshot. Throw instead so callers keep cached data and
+ *  surface an honest banner. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function assertRiotOk(j: any, what: string): void {
+  const status = Number(j?.httpStatus ?? 0);
+  const code = String(j?.errorCode ?? '');
+  if (code || status >= 400) {
+    const detail = code || `HTTP ${status}`;
+    const msg = String(j?.message ?? '').slice(0, 140);
+    throw new Error(
+      `Riot ${what} unavailable (${detail})${msg ? ` — ${msg}` : ''}`
+    );
+  }
+}
+
 export async function fetchMmrDirect(region: string, name: string, tag: string): Promise<TrackerProfile> {
   const ent = await getEntitlements();
   const j = await riotGet(shardFor(region), `/mmr/v1/players/${ent.puuid}`);
+  assertRiotOk(j, 'MMR');
   const latest = j?.LatestCompetitiveUpdate ?? {};
   const currentSeasonId = String(latest?.SeasonID ?? '').toLowerCase();
   const seasons = j?.QueueSkills?.competitive?.SeasonalInfoBySeasonID ?? {};
@@ -752,6 +772,7 @@ export async function fetchCompetitiveUpdates(
     shardFor(region),
     `/mmr/v1/players/${ent.puuid}/competitiveupdates?startIndex=0&endIndex=${count}${queueParam}`
   );
+  assertRiotOk(j, 'competitive history');
   const list = Array.isArray(j?.Matches) ? j.Matches : [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return list.map((g: any) => ({

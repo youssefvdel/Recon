@@ -16,6 +16,7 @@ import {
   Save,
 } from 'lucide-react';
 import type { ConfigFileInfo, ValorantSection, ValorantVerifyResult } from '../types';
+import { readAccountVideo, writeAccountVideo, type ConfigAccountCtx } from '../utils/accountVideo';
 import {
   fetchValorantConfigs,
   fetchPreferredStretchedRes,
@@ -198,7 +199,7 @@ const DEFS: Record<string, SettingDef> = {
   LastGPUBenchmarkMultiplier: { title: 'GPU Score Multiplier', desc: 'Scaling factor derived from the GPU benchmark.', editor: 'float', group: 'Game-Managed', auto: true },
 };
 
-const GROUP_ORDER = ['Resolution', 'Display', 'Graphics', 'Performance', 'Window & Monitor', 'Engine', 'More Settings'];
+const GROUP_ORDER = ['Resolution', 'Display', 'Graphics', 'Performance', 'Window & Monitor', 'Engine', 'Game-Managed', 'More Settings'];
 
 const GROUP_HINTS: Record<string, string> = {
   Resolution: 'Set once — writes to render, desired and confirmed copies together.',
@@ -207,14 +208,15 @@ const GROUP_HINTS: Record<string, string> = {
   Performance: 'Frame pacing, sync and HDR.',
   'Window & Monitor': 'Where the game window lives.',
   Engine: 'Low-level engine switches.',
+  'Game-Managed': 'Confirmed copies, benchmark caches and audio bookkeeping the game rewrites itself. Editable, but the game may overwrite your value.',
   'More Settings': 'Keys this tool has no description for yet. Raw key shown.',
 };
 
 /**
- * Hands-off keys — never rendered. Confirmed/last-user copies stay in sync
- * automatically whenever the main value is written; benchmark caches and
- * recommendation values are the game's own bookkeeping. Showing them only
- * invites breaking a working file.
+ * Game-managed keys — hidden by default because confirmed/last-user copies
+ * re-sync automatically whenever the main value is written, and benchmark
+ * caches are the game's own bookkeeping. The "Show all" toggle reveals them
+ * in the Game-Managed group (never duplicated into the main groups).
  */
 const HIDDEN_KEYS = new Set([
   'LastConfirmedFullscreenMode',
@@ -350,7 +352,7 @@ const SettingRowEditor: React.FC<{
       <button
         onClick={save}
         disabled={!dirty || saving}
-        title={dirty ? `Write ${draft} to file` : 'No changes'}
+        data-tip={dirty ? `Write ${draft} to file` : 'No changes'}
         className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-all ${
           dirty
             ? 'bg-m3-primary text-m3-on-primary cursor-pointer active:scale-90 shadow-xs'
@@ -459,17 +461,21 @@ const FileCard: React.FC<{
   sections: ValorantSection[];
   verify?: ValorantVerifyResult;
   search: string;
+  showManaged: boolean;
   onBanner: (msg: string) => void;
   onReloadFile: () => void;
   onShowRaw: (cfg: ConfigFileInfo) => void;
-}> = ({ cfg, sections, verify, search, onBanner, onReloadFile, onShowRaw }) => {
+}> = ({ cfg, sections, verify, search, showManaged, onBanner, onReloadFile, onShowRaw }) => {
   const [lock, setLock] = useState(true);
 
   const groups = useMemo(() => {
     const map = new Map<string, { section: string; key: string; value: string; def: SettingDef }[]>();
     for (const sec of sections) {
       for (const row of sec.rows) {
-        if (HIDDEN_KEYS.has(row.key)) continue;
+        const managed = HIDDEN_KEYS.has(row.key);
+        // Managed keys stay hidden unless revealed — and then live ONLY in
+        // the Game-Managed group, never duplicated into the main groups.
+        if (managed && !showManaged) continue;
         const def = defFor(row.key);
         const q = search.trim().toLowerCase();
         if (
@@ -480,12 +486,13 @@ const FileCard: React.FC<{
         ) {
           continue;
         }
-        if (!map.has(def.group)) map.set(def.group, []);
-        map.get(def.group)!.push({ section: sec.name, key: row.key, value: row.value, def });
+        const group = managed ? 'Game-Managed' : def.group;
+        if (!map.has(group)) map.set(group, []);
+        map.get(group)!.push({ section: sec.name, key: row.key, value: row.value, def });
       }
     }
     return GROUP_ORDER.filter((g) => map.has(g)).map((g) => ({ name: g, rows: map.get(g)! }));
-  }, [sections, search]);
+  }, [sections, search, showManaged]);
 
   return (
     <section className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3 flex flex-col gap-2 shrink-0 shadow-m3-1">
@@ -523,7 +530,7 @@ const FileCard: React.FC<{
             <button
               onClick={() => navigator.clipboard?.writeText(cfg.path).catch(() => {})}
               className="shrink-0 hover:text-m3-primary cursor-pointer"
-              title="Copy path"
+              data-tip="Copy path"
             >
               <Copy className="w-2.5 h-2.5" />
             </button>
@@ -625,7 +632,10 @@ const FileCard: React.FC<{
 /* Tab root.                                                           */
 /* ------------------------------------------------------------------ */
 
-export const ValorantConfig: React.FC = () => {
+export const ValorantConfig: React.FC<{
+  account?: ConfigAccountCtx | null;
+  onBackToAccounts?: () => void;
+}> = ({ account = null, onBackToAccounts }) => {
   const [configs, setConfigs] = useState<ConfigFileInfo[]>([]);
   const [sectionsMap, setSectionsMap] = useState<Record<string, ValorantSection[]>>({});
   const [verifyMap, setVerifyMap] = useState<Record<string, ValorantVerifyResult>>({});
@@ -637,6 +647,21 @@ export const ValorantConfig: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
   const [rawView, setRawView] = useState<{ path: string; text: string } | null>(null);
+  const [accountVideo, setAccountVideo] = useState(() =>
+    account ? readAccountVideo(account.id) : null
+  );
+  /* Account scope: lil ga7ed's Video shows only the player-profile file.
+   * The shared WindowsClient defaults hide behind a toggle. */
+  const [showGlobal, setShowGlobal] = useState(!account);
+  /* "Show all" reveals the 21 game-managed keys (confirmed copies,
+   * benchmark caches, audio) in the Game-Managed group. */
+  const [showManaged, setShowManaged] = useState(false);
+  const isGlobalFile = (c: ConfigFileInfo) => c.display_name.startsWith('Global');
+  const hasGlobal = configs.some(isGlobalFile);
+  const visibleConfigs = useMemo(
+    () => (account && !showGlobal ? configs.filter((c) => !isGlobalFile(c)) : configs),
+    [configs, account, showGlobal]
+  );
 
   const loadSections = async (paths: string[]) => {
     const entries: [string, ValorantSection[]][] = await Promise.all(
@@ -727,6 +752,10 @@ export const ValorantConfig: React.FC = () => {
       const ok = results.filter((r) => r.ok && r.verified).length;
       const healthy = Object.values(m).filter((v) => v.is_healthy ?? v.matches).length;
       const fail = results.filter((r) => !r.ok).map((r) => `${r.display_name}: ${r.message}`).join(' | ');
+      if (account && !fail) {
+        writeAccountVideo(account.id, w, h);
+        setAccountVideo({ w, h, at: Date.now() });
+      }
       setBanner(
         fail
           ? `Synced ${ok}/${results.length}. Failures: ${fail}`
@@ -752,7 +781,33 @@ export const ValorantConfig: React.FC = () => {
   const totalRows = Object.values(sectionsMap).reduce((n, secs) => n + secs.reduce((a, s) => a + s.rows.length, 0), 0);
 
   return (
-    <div className="h-full min-h-0 flex flex-col gap-2.5 max-w-6xl mx-auto w-full overflow-y-auto custom-scrollbar pb-2">
+    <div className="h-full min-h-0 flex flex-col gap-2.5 max-w-6xl mx-auto w-full overflow-y-auto custom-scrollbar pb-2 px-4 sm:px-6">
+      {account && (
+        <div className="p-2.5 rounded-xl bg-m3-primary-container/25 border border-m3-primary/50 flex items-center gap-2.5 shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-m3-primary/20 border border-m3-primary/40 flex items-center justify-center text-m3-primary font-display font-black text-sm shrink-0">
+            {(account.label || '?').trim().charAt(0).toUpperCase()}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-bold text-m3-on-surface truncate">
+              Editing video settings for {account.label}
+            </div>
+            <div className="text-[10.5px] text-m3-on-surface-variant leading-snug">
+              One ini per PC — changes apply to this machine's file.
+              {accountVideo
+                ? ` Last set for this account: ${accountVideo.w}×${accountVideo.h}.`
+                : ' No saved resolution for this account yet.'}
+            </div>
+          </div>
+          {onBackToAccounts && (
+            <button
+              onClick={onBackToAccounts}
+              className="h-7 px-3 rounded-full bg-m3-surface-container-high border border-m3-outline-subtle text-[11px] font-semibold text-m3-on-surface hover:border-m3-primary/60 cursor-pointer shrink-0"
+            >
+              Back to accounts
+            </button>
+          )}
+        </div>
+      )}
       {banner && (
         <div className="p-2.5 rounded-xl bg-m3-primary-container/40 border border-m3-primary/40 text-m3-on-primary-container text-xs font-semibold flex items-center justify-between shrink-0">
           <div className="flex items-center space-x-2">
@@ -774,7 +829,7 @@ export const ValorantConfig: React.FC = () => {
             </h3>
           </div>
           <span className="text-[10px] font-mono text-m3-outline">
-            {configs.length} file(s) • {totalRows} settings • {verifiedCount} verified
+            {visibleConfigs.length} file(s) • {totalRows} settings • {verifiedCount} verified
           </span>
         </div>
         <p className="text-[11px] text-m3-on-surface-variant leading-relaxed">
@@ -814,6 +869,30 @@ export const ValorantConfig: React.FC = () => {
               className="w-32 bg-transparent text-[11px] text-m3-on-surface focus:outline-none placeholder:text-m3-outline/50" />
           </div>
           <div className="flex items-center gap-1.5 ml-auto">
+            <button
+              onClick={() => setShowManaged((v) => !v)}
+              data-tip="Confirmed copies, benchmark caches and audio bookkeeping the game rewrites itself"
+              className={`h-7 px-3 rounded-full border text-[11px] font-bold cursor-pointer ${
+                showManaged
+                  ? 'bg-m3-primary-container/40 border-m3-primary/50 text-m3-on-surface'
+                  : 'bg-m3-surface-container-high border-m3-outline-subtle text-m3-outline hover:text-m3-on-surface'
+              }`}
+            >
+              <span>{showManaged ? 'Hide managed' : 'Show all'}</span>
+            </button>
+            {account && hasGlobal && (
+              <button
+                onClick={() => setShowGlobal((v) => !v)}
+                data-tip="The shared WindowsClient launcher defaults — same for every account on this PC"
+                className={`h-7 px-3 rounded-full border text-[11px] font-bold flex items-center gap-1 cursor-pointer ${
+                  showGlobal
+                    ? 'bg-m3-primary-container/40 border-m3-primary/50 text-m3-on-surface'
+                    : 'bg-m3-surface-container-high border-m3-outline-subtle text-m3-outline hover:text-m3-on-surface'
+                }`}
+              >
+                <span>{showGlobal ? 'Hide global defaults' : 'Show global defaults'}</span>
+              </button>
+            )}
             <button onClick={load} disabled={isLoading}
               className="h-7 px-3 rounded-full bg-m3-surface-container-high border border-m3-outline-subtle text-[11px] font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50">
               <RefreshCw className={`w-3 h-3 text-m3-primary ${isLoading ? 'animate-spin' : ''}`} />
@@ -837,18 +916,19 @@ export const ValorantConfig: React.FC = () => {
         </div>
       </section>
 
-      {configs.length === 0 ? (
+      {visibleConfigs.length === 0 ? (
         <div className="p-4 rounded-xl bg-m3-surface-container-high/40 border border-m3-outline-subtle text-center text-[11px] text-m3-on-surface-variant shrink-0">
           No VALORANT configs detected in %LOCALAPPDATA%\VALORANT. Launch VALORANT once, then Rescan.
         </div>
       ) : (
-        configs.map((cfg) => (
+        visibleConfigs.map((cfg) => (
           <FileCard
             key={cfg.path}
             cfg={cfg}
             sections={sectionsMap[cfg.path] ?? []}
             verify={verifyMap[cfg.path]}
             search={search}
+            showManaged={showManaged}
             onBanner={setBanner}
             onReloadFile={() => reloadFile(cfg.path)}
             onShowRaw={handleShowRaw}

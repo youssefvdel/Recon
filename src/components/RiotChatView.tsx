@@ -382,7 +382,7 @@ export const RiotChatView: React.FC = () => {
               onClick={() => loadAll(true)}
               disabled={busy}
               className="w-9 h-9 rounded-xl bg-m3-surface-container-high/60 border border-m3-outline-subtle text-m3-on-surface-variant hover:text-m3-on-surface hover:bg-m3-surface-container-high flex items-center justify-center cursor-pointer transition-colors disabled:opacity-50 shrink-0"
-              title="Refresh friends and conversations"
+              data-tip="Refresh friends and conversations"
               aria-label="Refresh friends and conversations"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin text-m3-primary' : ''}`} />
@@ -435,7 +435,7 @@ export const RiotChatView: React.FC = () => {
                     )
                   }
                   className="h-8 px-2.5 rounded-xl bg-m3-primary/20 border border-m3-primary/40 text-m3-primary text-[11px] font-bold flex items-center gap-1 cursor-pointer hover:bg-m3-primary/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
-                  title="Send a friend request"
+                  data-tip="Send a friend request"
                 >
                   <UserPlus className="w-3.5 h-3.5" />
                   Add
@@ -506,7 +506,7 @@ export const RiotChatView: React.FC = () => {
                           className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-m3-surface ${
                             f.online ? 'bg-m3-mint' : 'bg-m3-outline/60'
                           }`}
-                          title={f.online ? `Online${f.product ? ` • ${productLabel(f.product)}` : ''}` : 'Offline'}
+                          data-tip={f.online ? `Online${f.product ? ` • ${productLabel(f.product)}` : ''}` : 'Offline'}
                         />
                       </div>
                       <button
@@ -532,7 +532,7 @@ export const RiotChatView: React.FC = () => {
                             setNoteDraft(f.note || '');
                           }}
                           className="w-6 h-6 rounded-lg bg-m3-surface-container border border-m3-outline-subtle text-m3-on-surface-variant hover:text-m3-on-surface flex items-center justify-center cursor-pointer"
-                          title="Set a note for this friend"
+                          data-tip="Set a note for this friend"
                         >
                           <Pencil className="w-3 h-3" />
                         </button>
@@ -545,7 +545,7 @@ export const RiotChatView: React.FC = () => {
                               ? 'px-1.5 bg-rose-500 text-white border-rose-400 text-[9px] font-bold opacity-100'
                               : 'w-6 bg-rose-500/20 border-rose-400/40 text-rose-300 hover:bg-rose-500/35 opacity-0 group-hover:opacity-100'
                           }`}
-                          title={armRemove === f.puuid ? 'Click again to remove this friend' : 'Remove friend'}
+                          data-tip={armRemove === f.puuid ? 'Click again to remove this friend' : 'Remove friend'}
                         >
                           {armRemove === f.puuid ? 'Sure?' : <UserMinus className="w-3 h-3" />}
                         </button>
@@ -636,7 +636,7 @@ export const RiotChatView: React.FC = () => {
                       disabled={busy}
                       onClick={() => run(() => addFriend(r.gameName, r.tagLine, r.puuid), () => loadAll(true))}
                       className="h-7 px-2 rounded-lg bg-m3-mint/20 border border-m3-mint/40 text-m3-mint text-[10px] font-bold flex items-center gap-1 cursor-pointer disabled:opacity-40"
-                      title="Accept — sends the reciprocal subscription"
+                      data-tip="Accept — sends the reciprocal subscription"
                     >
                       <Check className="w-3 h-3" />
                       Accept
@@ -646,7 +646,7 @@ export const RiotChatView: React.FC = () => {
                       disabled={busy}
                       onClick={() => run(() => dropFriendRequest(r.puuid), () => loadAll(true))}
                       className="h-7 px-2 rounded-lg bg-rose-500/20 border border-rose-400/40 text-rose-300 text-[10px] font-bold flex items-center gap-1 cursor-pointer disabled:opacity-40"
-                      title="Decline"
+                      data-tip="Decline"
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -676,7 +676,7 @@ export const RiotChatView: React.FC = () => {
                       disabled={busy}
                       onClick={() => run(() => dropFriendRequest(r.puuid), () => loadAll(true))}
                       className="h-7 px-2 rounded-lg border border-m3-outline-subtle text-m3-on-surface-variant text-[10px] font-bold flex items-center gap-1 cursor-pointer disabled:opacity-40"
-                      title="Cancel request"
+                      data-tip="Cancel request"
                     >
                       <Undo2 className="w-3 h-3" />
                       Cancel
@@ -763,7 +763,7 @@ export const RiotChatView: React.FC = () => {
                   {!activeGroup && (
                     <span
                       className={`w-2 h-2 rounded-full ${selected?.online ? 'bg-m3-mint' : 'bg-m3-outline/60'}`}
-                      title={selected?.online ? 'Online' : 'Offline'}
+                      data-tip={selected?.online ? 'Online' : 'Offline'}
                     />
                   )}
                   {activeGroup ? (
@@ -781,7 +781,7 @@ export const RiotChatView: React.FC = () => {
                         ? 'bg-rose-500 text-white border-rose-400'
                         : 'bg-rose-500/20 border-rose-400/40 text-rose-300'
                     }`}
-                    title={armBlock === peer?.puuid ? 'Click again to block' : 'Block this player'}
+                    data-tip={armBlock === peer?.puuid ? 'Click again to block' : 'Block this player'}
                   >
                     <Ban className="w-3 h-3" />
                     {armBlock === peer?.puuid ? 'Sure?' : 'Block'}
@@ -802,7 +802,7 @@ export const RiotChatView: React.FC = () => {
                         ? 'bg-rose-500 text-white border-rose-400'
                         : 'border-m3-outline-subtle text-m3-on-surface-variant'
                     }`}
-                    title={armRemove === peer?.puuid ? 'Click again to remove this friend' : 'Remove friend'}
+                    data-tip={armRemove === peer?.puuid ? 'Click again to remove this friend' : 'Remove friend'}
                   >
                     <Trash2 className="w-3 h-3" />
                     {armRemove === peer?.puuid ? 'Sure?' : ''}

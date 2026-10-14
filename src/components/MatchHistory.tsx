@@ -204,7 +204,7 @@ const MatchRow: React.FC<{
         {/* Rank */}
         <div className="w-8 shrink-0 hidden sm:flex items-center justify-center">
           {rankIcon ? (
-            <img src={rankIcon} alt={r.g.tier} title={r.g.tier} className="w-7 h-7 object-contain" />
+            <img src={rankIcon} alt={r.g.tier} data-tip={r.g.tier} className="w-7 h-7 object-contain" />
           ) : (
             <span className="w-7 h-7" />
           )}
@@ -225,7 +225,7 @@ const MatchRow: React.FC<{
           <span className="text-[9px] font-bold uppercase tracking-wider text-m3-outline">TRS</span>
           <div
             className="flex items-center justify-center h-6 cursor-default"
-            title={
+            data-tip={
               r.trs > 0
                 ? `Tracker Rating Score: ${r.trs} / 1000 — Tier ${scoreTier(r.trs).tier}`
                 : 'Tracker Rating Score unavailable'
@@ -336,7 +336,7 @@ const MatchRow: React.FC<{
                         type="button"
                         onClick={(e) => handleCopyPlayer(e, p)}
                         className="p-0.5 rounded hover:bg-white/10 text-m3-outline hover:text-white transition-colors cursor-pointer shrink-0"
-                        title={copiedKey === (p.puuid || p.name || p.agent) ? 'Copied!' : `Copy ${p.name || p.agent}${p.tag ? '#' + p.tag : ''}`}
+                        data-tip={copiedKey === (p.puuid || p.name || p.agent) ? 'Copied!' : `Copy ${p.name || p.agent}${p.tag ? '#' + p.tag : ''}`}
                       >
                         {copiedKey === (p.puuid || p.name || p.agent) ? (
                           <Check className="w-2.5 h-2.5 text-emerald-400" />

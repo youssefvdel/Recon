@@ -144,7 +144,7 @@ export const HardwareScaling: React.FC<HardwareScalingProps> = ({ gpuInfo }) => 
             onClick={handleAutoConfigure}
             disabled={isApplyingAuto}
             className="px-4 py-2 rounded-full bg-m3-primary hover:bg-m3-primary/90 text-m3-on-primary font-semibold text-xs shadow-xs transition-all flex items-center space-x-2 cursor-pointer disabled:opacity-50 active:scale-[0.98]"
-            title="Automatically apply all recommended scaling and black bar bypass settings"
+            data-tip="Automatically apply all recommended scaling and black bar bypass settings"
           >
             {isApplyingAuto ? (
               <RefreshCw className="w-3.5 h-3.5 text-m3-on-primary animate-spin" />
@@ -219,7 +219,7 @@ export const HardwareScaling: React.FC<HardwareScalingProps> = ({ gpuInfo }) => 
                       ) : (
                         <span
                           className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border border-amber-400/40 bg-amber-400/10 text-amber-400"
-                          title="Recon cannot read this value back from the driver — the vendor controls it"
+                          data-tip="Recon cannot read this value back from the driver — the vendor controls it"
                         >
                           UNVERIFIED
                         </span>

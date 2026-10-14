@@ -326,6 +326,10 @@ export interface RiotPresence {
   game_tag: string;
   product?: string;
   state?: string;
+  /** Live session id (`RC-…`, `LoL-…`). Empty = no active session: the entry
+    * is a stale last-known presence, NOT an online friend. */
+  resource?: string;
+  activePlatform?: string | null;
 }
 
 export async function getPresences(): Promise<RiotPresence[]> {
@@ -334,8 +338,13 @@ export async function getPresences(): Promise<RiotPresence[]> {
 }
 
 /**
- * Friends list + live presence in one pass. Presence only arrives for friends
- * who are online, so a presence entry IS the online signal.
+ * Friends list + live presence in one pass.
+ *
+ * A presence entry alone is NOT the online signal: the endpoint also returns
+ * stale last-known presences for offline friends (empty `resource`, no
+ * `activePlatform`, hours-old `time` — typically fossil `league_of_legends` /
+ * `mobile` states). Only entries with a live session count as online, the
+ * same rule the Riot Client's own list follows.
  */
 export async function getFriendsWithPresence(): Promise<RiotFriend[]> {
   const [friends, presences] = await Promise.all([
@@ -345,11 +354,12 @@ export async function getFriendsWithPresence(): Promise<RiotFriend[]> {
   const byPuuid = new Map(presences.map((p) => [String(p.puuid).toLowerCase(), p]));
   return friends.map((f) => {
     const p = byPuuid.get(String(f.puuid).toLowerCase());
+    const hasSession = !!p && (!!p.resource || p.activePlatform != null);
     return {
       ...f,
-      online: !!p,
-      product: p?.product,
-      state: p?.state,
+      online: hasSession,
+      product: hasSession ? p?.product : undefined,
+      state: hasSession ? p?.state : undefined,
     };
   });
 }

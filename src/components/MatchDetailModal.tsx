@@ -475,7 +475,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                       return (
                         <div
                           key={i}
-                          title={`Round ${i + 1}: ${r.winningTeam} won (${r.roundResult || 'Eliminated'})`}
+                          data-tip={`Round ${i + 1}: ${r.winningTeam} won (${r.roundResult || 'Eliminated'})`}
                           className="w-3.5 h-3.5 flex items-center justify-center shrink-0"
                         >
                           {isWin ? (
@@ -501,7 +501,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                       return (
                         <div
                           key={i}
-                          title={`Round ${i + 1}: ${r.winningTeam} won (${r.roundResult || 'Eliminated'})`}
+                          data-tip={`Round ${i + 1}: ${r.winningTeam} won (${r.roundResult || 'Eliminated'})`}
                           className="w-3.5 h-3.5 flex items-center justify-center shrink-0"
                         >
                           {isWin ? (
@@ -521,7 +521,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              title="Close"
+              data-tip="Close"
               className="w-8 h-8 rounded-xl bg-m3-surface-container-high hover:bg-rose-600 hover:text-white text-m3-outline flex items-center justify-center transition-colors cursor-pointer shrink-0 border border-m3-outline-subtle shadow-xs"
             >
               <X className="w-4 h-4" />
@@ -615,7 +615,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                               {party && (
                                 <div
                                   className={`absolute left-0 top-1 bottom-1 w-1 rounded-r-full ${party.bar}`}
-                                  title="Queued together in party"
+                                  data-tip="Queued together in party"
                                 />
                               )}
                               {p.isMe && !party && (
@@ -654,7 +654,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                                   type="button"
                                   onClick={(e) => copyPlayerRiotId(e, p)}
                                   className="p-1 rounded hover:bg-m3-surface-container-highest text-m3-outline hover:text-m3-on-surface transition-colors cursor-pointer shrink-0"
-                                  title={copiedPuuid === p.puuid ? 'Copied!' : `Copy ${p.displayName}${p.displayTag ? '#' + p.displayTag : ''}`}
+                                  data-tip={copiedPuuid === p.puuid ? 'Copied!' : `Copy ${p.displayName}${p.displayTag ? '#' + p.displayTag : ''}`}
                                   aria-label={`Copy Riot ID for ${p.displayName}`}
                                 >
                                   {copiedPuuid === p.puuid ? (
@@ -775,7 +775,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                               {party ? (
                                 <div
                                   className={`absolute left-0 top-1 bottom-1 w-1 rounded-r-full ${party.bar}`}
-                                  title="Queued together"
+                                  data-tip="Queued together"
                                 />
                               ) : p.isMe ? (
                                 <div className="absolute left-0 top-1 bottom-1 w-[3px] rounded-r-full bg-m3-primary" />
@@ -813,7 +813,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                                   type="button"
                                   onClick={(e) => copyPlayerRiotId(e, p)}
                                   className="p-1 rounded hover:bg-m3-surface-container-highest text-m3-outline hover:text-m3-on-surface transition-colors cursor-pointer shrink-0"
-                                  title={copiedPuuid === p.puuid ? 'Copied!' : `Copy ${p.displayName}${p.displayTag ? '#' + p.displayTag : ''}`}
+                                  data-tip={copiedPuuid === p.puuid ? 'Copied!' : `Copy ${p.displayName}${p.displayTag ? '#' + p.displayTag : ''}`}
                                   aria-label={`Copy Riot ID for ${p.displayName}`}
                                 >
                                   {copiedPuuid === p.puuid ? (
@@ -841,7 +841,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                             <td className="py-1.5 px-1 text-center">
                               <div
                                 className="flex items-center justify-center cursor-default"
-                                title={
+                                data-tip={
                                   p.trs > 0
                                     ? `Tracker Score: ${p.trs} / 1000 — Tier ${scoreTier(p.trs).tier}`
                                     : 'Tracker Score unavailable'
@@ -972,7 +972,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                               {party ? (
                                 <div
                                   className={`absolute left-0 top-1 bottom-1 w-1 rounded-r-full ${party.bar}`}
-                                  title="Queued together"
+                                  data-tip="Queued together"
                                 />
                               ) : p.isMe ? (
                                 <div className="absolute left-0 top-1 bottom-1 w-[3px] rounded-r-full bg-m3-primary" />
@@ -1010,7 +1010,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                                   type="button"
                                   onClick={(e) => copyPlayerRiotId(e, p)}
                                   className="p-1 rounded hover:bg-m3-surface-container-highest text-m3-outline hover:text-m3-on-surface transition-colors cursor-pointer shrink-0"
-                                  title={copiedPuuid === p.puuid ? 'Copied!' : `Copy ${p.displayName}${p.displayTag ? '#' + p.displayTag : ''}`}
+                                  data-tip={copiedPuuid === p.puuid ? 'Copied!' : `Copy ${p.displayName}${p.displayTag ? '#' + p.displayTag : ''}`}
                                   aria-label={`Copy Riot ID for ${p.displayName}`}
                                 >
                                   {copiedPuuid === p.puuid ? (
@@ -1038,7 +1038,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                             <td className="py-1.5 px-1 text-center">
                               <div
                                 className="flex items-center justify-center cursor-default"
-                                title={
+                                data-tip={
                                   p.trs > 0
                                     ? `Tracker Score: ${p.trs} / 1000 — Tier ${scoreTier(p.trs).tier}`
                                     : 'Tracker Score unavailable'
@@ -1121,7 +1121,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                       </div>
                       <div className="grid grid-cols-[1fr_auto_1fr] items-stretch">
                         <div className="flex flex-col items-center gap-1 p-3 bg-m3-mint/10">
-                          <button type="button" onClick={() => openPlayer(c.pair.a)} className="cursor-pointer" title={c.pair.a.displayName}>
+                          <button type="button" onClick={() => openPlayer(c.pair.a)} className="cursor-pointer" data-tip={c.pair.a.displayName}>
                             {c.pair.a.agIcon ? (
                               <img src={c.pair.a.agIcon} alt={c.pair.a.agent} className="w-10 h-10 rounded-xl object-cover border border-m3-outline-subtle bg-m3-surface-container-highest" />
                             ) : (
@@ -1138,7 +1138,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                           <span className="font-display font-black text-[11px] text-m3-outline">VS</span>
                         </div>
                         <div className="flex flex-col items-center gap-1 p-3 bg-m3-coral/10">
-                          <button type="button" onClick={() => openPlayer(c.pair.b)} className="cursor-pointer" title={c.pair.b.displayName}>
+                          <button type="button" onClick={() => openPlayer(c.pair.b)} className="cursor-pointer" data-tip={c.pair.b.displayName}>
                             {c.pair.b.agIcon ? (
                               <img src={c.pair.b.agIcon} alt={c.pair.b.agent} className="w-10 h-10 rounded-xl object-cover border border-m3-outline-subtle bg-m3-surface-container-highest" />
                             ) : (

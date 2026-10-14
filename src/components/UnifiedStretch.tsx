@@ -470,7 +470,7 @@ export const UnifiedStretch: React.FC<UnifiedStretchProps> = ({
           </button>
           <button
             onClick={() => setShowHotkeyModal(true)}
-            title="Change the global hotkey"
+            data-tip="Change the global hotkey"
             className="h-7 px-3 rounded-full border border-m3-primary/50 bg-m3-primary-container/40 hover:bg-m3-primary-container/70 text-m3-primary text-[10px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
           >
             <Keyboard className="w-3.5 h-3.5" />
@@ -575,7 +575,7 @@ export const UnifiedStretch: React.FC<UnifiedStretchProps> = ({
                 type="button"
                 onClick={handleCopyStretch}
                 disabled={!stretchSensInput}
-                title="Copy stretch sensitivity"
+                data-tip="Copy stretch sensitivity"
                 className="absolute right-1.5 w-6 h-6 rounded flex items-center justify-center text-m3-outline hover:text-m3-primary hover:bg-m3-surface-container-high transition-colors disabled:opacity-0 cursor-pointer"
               >
                 {copiedStretch ? (

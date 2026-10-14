@@ -1596,7 +1596,7 @@ export const DevDashboard: React.FC = () => {
               }
             }}
             className="px-3 py-1.5 rounded-xl text-xs font-bold border border-amber-400/40 bg-amber-400/15 text-amber-300 hover:bg-amber-400/25 active:scale-95 cursor-pointer transition-all flex items-center gap-1.5 shadow-xs"
-            title="Trigger Clove Ko-fi popup on the main window"
+            data-tip="Trigger Clove Ko-fi popup on the main window"
           >
             <Coffee className="w-3.5 h-3.5 text-amber-400" />
             <span>Trigger Clove Ko-fi Popup</span>
@@ -1605,7 +1605,7 @@ export const DevDashboard: React.FC = () => {
             type="button"
             onClick={() => debugSimulateCrash()}
             className="px-3 py-1.5 rounded-xl text-xs font-bold border border-m3-outline-subtle bg-m3-surface-container-low text-m3-outline hover:text-m3-on-surface cursor-pointer transition-colors"
-            title="Stage a crash offer without touching the opt-in flag (verifies the CrashOffer UI)"
+            data-tip="Stage a crash offer without touching the opt-in flag (verifies the CrashOffer UI)"
           >
             Simulate crash offer
           </button>
@@ -1664,7 +1664,7 @@ export const DevDashboard: React.FC = () => {
               onClick={() => void runAllSmoke()}
               disabled={smokeRunning}
               className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-m3-primary/20 border border-m3-primary/50 text-m3-primary hover:bg-m3-primary/30 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 cursor-pointer"
-              title="Every check, sequentially — these touch real system state (overlay show/hide, focus)"
+              data-tip="Every check, sequentially — these touch real system state (overlay show/hide, focus)"
             >
               <Play className="w-3 h-3 shrink-0" />
               <span>{smokeRunning ? 'Running…' : `Run all (${SMOKE_CHECK_COUNT})`}</span>
@@ -1720,13 +1720,13 @@ export const DevDashboard: React.FC = () => {
                           <span className="shrink-0 text-[10px] font-mono text-zinc-500 tabular-nums">{r.ms}ms</span>
                           <span
                             className="flex-1 min-w-0 truncate text-[10px] font-mono text-zinc-400"
-                            title={r.summary}
+                            data-tip={r.summary}
                           >
                             {r.summary}
                           </span>
                           <span
                             className="shrink-0 text-[9px] font-mono text-zinc-600 tabular-nums"
-                            title={`run #${r.runs} at ${new Date(r.at).toLocaleTimeString()}`}
+                            data-tip={`run #${r.runs} at ${new Date(r.at).toLocaleTimeString()}`}
                           >
                             #{r.runs} {new Date(r.at).toLocaleTimeString()}
                           </span>
@@ -1760,7 +1760,7 @@ export const DevDashboard: React.FC = () => {
             type="button"
             onClick={() => setTrnLogOpen((v) => !v)}
             className="flex items-center gap-1.5 cursor-pointer text-left"
-            title={trnLogOpen ? 'Collapse trace' : 'Expand trace'}
+            data-tip={trnLogOpen ? 'Collapse trace' : 'Expand trace'}
             aria-expanded={trnLogOpen}
           >
             <ChevronDown className={`w-4 h-4 text-m3-outline transition-transform ${trnLogOpen ? '' : '-rotate-90'}`} />
@@ -1804,7 +1804,7 @@ export const DevDashboard: React.FC = () => {
                   key={f.id}
                   type="button"
                   aria-pressed={trnLogFilter === f.id}
-                  title={f.hint}
+                  data-tip={f.hint}
                   onClick={() => setTrnLogFilter(f.id)}
                   className={`px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold border cursor-pointer transition-colors ${
                     trnLogFilter === f.id
@@ -1817,7 +1817,7 @@ export const DevDashboard: React.FC = () => {
               ))}
               <span
                 className="ml-auto text-[10px] font-mono text-m3-outline tabular-nums"
-                title="Over the whole held window, not the filtered view — this is the is-it-spamming answer"
+                data-tip="Over the whole held window, not the filtered view — this is the is-it-spamming answer"
               >
                 {trnLogSummary.total} lines · {trnLogSummary.fetches} wire · {trnLogSummary.memos} memo saved ·{' '}
                 {trnLogSummary.cacheHits} cache hit · {trnLogSummary.cacheMisses} cache miss · {trnLogSummary.failures} fail ·{' '}
@@ -1846,7 +1846,7 @@ export const DevDashboard: React.FC = () => {
                   return (
                     <div key={r.seq} className="flex items-center gap-2 px-1 rounded hover:bg-white/[0.04] min-w-0">
                       {/* Epoch stays in the tooltip so a row can be matched against the terminal. */}
-                      <span className="w-12 shrink-0 text-right text-zinc-500 tabular-nums" title={r.ms > 0 ? String(r.ms) : undefined}>
+                      <span className="w-12 shrink-0 text-right text-zinc-500 tabular-nums" data-tip={r.ms > 0 ? String(r.ms) : undefined}>
                         {formatTrnRel(r.ms, trnLogNewest)}
                       </span>
                       <span
@@ -1859,7 +1859,7 @@ export const DevDashboard: React.FC = () => {
                           {r.status}
                         </span>
                       )}
-                      <span className="flex-1 min-w-0 truncate text-zinc-300" title={r.path ?? r.raw}>
+                      <span className="flex-1 min-w-0 truncate text-zinc-300" data-tip={r.path ?? r.raw}>
                         {r.label || <span className="text-zinc-600">—</span>}
                       </span>
                       <span className="w-12 shrink-0 text-right text-zinc-400 tabular-nums">{r.elapsed !== undefined ? `${r.elapsed}ms` : ''}</span>

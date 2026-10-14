@@ -16,7 +16,41 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+
+/// One step of a long account operation, pushed to the UI so the 10–20s
+/// kill/save/swap/relaunch ritual is legible instead of dead silence.
+#[derive(serde::Serialize, Clone)]
+struct AccountsProgress {
+    op: String,
+    step: String,
+    detail: String,
+}
+
+fn emit_progress(app: &tauri::AppHandle, op: &str, step: &str, detail: &str) {
+    let _ = app.emit(
+        "recon:accounts-progress",
+        AccountsProgress { op: op.to_string(), step: step.to_string(), detail: detail.to_string() },
+    );
+}
+
+/// Total sealed bytes under a snapshot root (ID tag excluded).
+fn snapshot_bytes(snap: &Path) -> u64 {
+    let mut total = 0u64;
+    let mut stack = vec![snap.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if entry.file_name() != ID_FILE {
+                total += std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+            }
+        }
+    }
+    total
+}
 
 /// Session locations relative to `<localappdata>/Riot Games/Riot Client/`.
 /// Missing entries are skipped, never errors.
@@ -135,6 +169,9 @@ pub struct AccountMeta {
     /// Millis timestamps — plain numbers over the bridge.
     pub saved_at: i64,
     pub last_used: i64,
+    /// Sealed bytes on disk for this snapshot (0 = unknown / legacy).
+    #[serde(default)]
+    pub snapshot_bytes: u64,
     /// Fingerprint of the live session files at snapshot time. The tick
     /// re-snapshots whenever this drifts = the client flushed new tokens.
     #[serde(default)]
@@ -650,6 +687,7 @@ fn snapshot_current(
     // seal every file at rest (reference vault parity). Both idempotent.
     std::fs::write(snap.join(ID_FILE), id.as_str()).map_err(|e| e.to_string())?;
     seal_snapshot_files(&snap)?;
+    let bytes = snapshot_bytes(&snap);
     let is_new = !vault.accounts.iter().any(|m| m.id == id);
     let _ = is_new;
     let meta = AccountMeta {
@@ -658,6 +696,7 @@ fn snapshot_current(
         tag_line,
         puuid: String::new(),
         saved_at: now,
+        snapshot_bytes: bytes,
         // Background refreshes renew credentials only; the "used" stamp is
         // for real manual saves and switches.
         last_used: vault
@@ -785,9 +824,11 @@ pub async fn account_switch(app: tauri::AppHandle, id: String) -> Result<SwitchR
         let exe = find_client_exe()?;
         let game_was_running =
             process_running("VALORANT.exe") || process_running("VALORANT-Win64-Shipping.exe");
+        emit_progress(&app, "switch", "kill", "Closing Riot Client so its files unlock…");
         kill_clients();
         // Auto-save whoever was signed in — post-kill files are the freshest.
         // Identity unresolvable (already logged out) → skip, keep the snapshot.
+        emit_progress(&app, "switch", "save", "Parking the current login in the vault…");
         let auto_saved = snapshot_current(&app, &live, now, true).is_ok();
         // Cross-wire guard: the snapshot must tag itself with this id.
         // Legacy (untagged) snapshots restore without the check.
@@ -797,6 +838,7 @@ pub async fn account_switch(app: tauri::AppHandle, id: String) -> Result<SwitchR
         }
         // Stage (decrypt) fully BEFORE touching live, then clear + write.
         let (files, dirs) = stage_snapshot(&snap)?;
+        emit_progress(&app, "switch", "restore", "Swapping the saved session into place…");
         write_staged(&live, &files, &dirs)?;
         let mut vault = load_vault(&app);
         let auto_start = vault.auto_start;
@@ -806,11 +848,13 @@ pub async fn account_switch(app: tauri::AppHandle, id: String) -> Result<SwitchR
         vault.accounts.sort_by(|a, b| b.last_used.cmp(&a.last_used));
         store_vault(&app, &vault)?;
         let relaunched = if auto_start {
+            emit_progress(&app, "switch", "relaunch", "Waking the client on the swapped account…");
             launch_client_detached(&exe)?;
             true
         } else {
             false
         };
+        emit_progress(&app, "switch", "done", "Switched.");
         Ok(SwitchResult { ok: true, auto_saved, game_was_running, relaunched })
     })
     .await
@@ -864,16 +908,21 @@ pub async fn account_add_new(app: tauri::AppHandle) -> Result<bool, String> {
         let live = riot_client_dir()?;
         let now = now_millis();
         let exe = find_client_exe()?;
+        emit_progress(&app, "add", "kill", "Closing Riot Client so its files unlock…");
         kill_clients();
+        emit_progress(&app, "add", "save", "Parking the current login in the vault…");
         let saved_prev = snapshot_current(&app, &live, now, true).is_ok();
+        emit_progress(&app, "add", "clear", "Wiping the live session for a blank login…");
         clear_live(&live);
         let mut vault = load_vault(&app);
         let auto_start = vault.auto_start;
         vault.last_seen = None;
         store_vault(&app, &vault)?;
         if auto_start {
+            emit_progress(&app, "add", "relaunch", "Opening a fresh login screen — sign in there…");
             launch_client_detached(&exe)?;
         }
+        emit_progress(&app, "add", "done", "Fresh login screen ready.");
         Ok(saved_prev)
     })
     .await

@@ -23,7 +23,7 @@
  * Three traps are load-bearing and each one alone breaks the screen:
  *
  *  1. `Items` is keyed by WEAPON UUID (Classic 29a0cfab-…, Vandal 9c82e19d-…),
- *     not an opaque socket id. All 20 weapon UUIDs were confirmed against the
+ *     not an opaque socket id. All 21 weapon UUIDs were confirmed against the
  *     content API.
  *  2. The equipped value is NOT `Items[key].ID` (that is the weapon's default
  *     entry). It lives in the fixed SKIN_SOCKET below, and that value may be a
@@ -43,7 +43,7 @@
  * ---------------------------------------------------------------------------
  */
 
-const CATALOG_KEY = 'recon_weapon_catalog_v5';
+const CATALOG_KEY = 'recon_weapon_catalog_v7';
 const API = 'https://valorant-api.com/v1';
 
 /** The socket holding the equipped weapon skin. Fixed across patches so far. */
@@ -98,6 +98,7 @@ export const ARSENAL_COLUMNS: ColumnDef[] = [
           { id: '42da8ccc-40d5-affc-beec-15aa47b42eda', name: 'SHORTY' },
           { id: '44d4e95c-4157-0037-81b2-17841bf2e8e3', name: 'FRENZY' },
           { id: '1baa85b4-4c70-1284-64bb-6481dfc3bb4e', name: 'GHOST' },
+          { id: '410b2e0b-4ceb-1321-1727-20858f7f3477', name: 'BANDIT' },
           { id: 'e336c6b8-418d-9340-d77f-7a9e4cfe0702', name: 'SHERIFF' },
         ],
       },
@@ -122,7 +123,7 @@ export const ARSENAL_COLUMNS: ColumnDef[] = [
       },
     ],
   },
-  // Column 3: RIFLES (4 items) & MELEE (1 item)
+  // Column 3: RIFLES (5 items) & MELEE (1 item)
   {
     sections: [
       {
@@ -130,6 +131,7 @@ export const ARSENAL_COLUMNS: ColumnDef[] = [
         weapons: [
           { id: 'ae3de142-4d85-2547-dd26-4e90bed35cf7', name: 'BULLDOG' },
           { id: '4ade7faa-4cf1-8376-95ef-39884480959b', name: 'GUARDIAN' },
+          { id: '8db0a1bf-4a50-832a-4566-faaaa6d250ca', name: 'WARDEN' },
           { id: 'ee8e8d15-496b-07ac-e5f6-8fae5d4c7b1a', name: 'PHANTOM' },
           { id: '9c82e19d-4575-0200-1a81-3eacf00cf872', name: 'VANDAL' },
         ],
@@ -166,10 +168,10 @@ export const ARSENAL_COLUMNS: ColumnDef[] = [
 
 /** Canonical top-to-bottom weapon order, matching the collection screen. */
 export const WEAPON_ORDER = [
-  'Classic', 'Shorty', 'Frenzy', 'Ghost', 'Sheriff',
+  'Classic', 'Shorty', 'Frenzy', 'Ghost', 'Bandit', 'Sheriff',
   'Stinger', 'Spectre',
   'Bucky', 'Judge',
-  'Bulldog', 'Guardian', 'Phantom', 'Vandal',
+  'Bulldog', 'Guardian', 'Warden', 'Phantom', 'Vandal',
   'Melee',
   'Marshal', 'Outlaw', 'Operator',
   'Ares', 'Odin',
@@ -205,8 +207,13 @@ export interface WeaponCatalog {
   /**
    * Any equipped-socket UUID -> resolved art. Holds chroma UUIDs, skin UUIDs
    * and skin-level UUIDs, because the payload does not promise which it sends.
+   *
+   * `icon` is the chroma/skin displayIcon; `fullRender` is the full variant
+   * gun render and ALWAYS wins for equipped chromas — displayIcon can be a
+   * swatch, a base-variant render, or missing, which is how the viewer ended
+   * up painting base skins under "Variant X" labels.
    */
-  skinIndex: Record<string, { weaponUuid: string; name: string; icon: string; isDefault: boolean }>;
+  skinIndex: Record<string, { weaponUuid: string; name: string; icon: string; fullRender: string; isDefault: boolean }>;
   sprays: Record<string, Cosmetic>;
   flex: Record<string, Cosmetic>;
   /** Buddy uuid -> art. The buddy socket is absent when nothing is equipped. */
@@ -379,7 +386,7 @@ export async function loadWeaponCatalog(): Promise<WeaponCatalog> {
       const skinIcon = def
         ? canonical3dRender
         : String(s.displayIcon ?? s.chromas?.[0]?.displayIcon ?? '') || canonical3dRender;
-      const entry = { weaponUuid: uuid, name: skinName, icon: skinIcon, isDefault: def };
+      const entry = { weaponUuid: uuid, name: skinName, icon: skinIcon, fullRender: '', isDefault: def };
       skinIndex[String(s.uuid).toLowerCase()] = entry;
       // Chromas inherit the parent skin's identity and art; their positions
       // and raw labels are recorded separately for variant display.
@@ -414,17 +421,21 @@ export async function loadWeaponCatalog(): Promise<WeaponCatalog> {
     const cu = String(c.uuid).toLowerCase();
     const name = String(c.displayName ?? '');
     const icon = String(c.displayIcon ?? '');
+    const full = String(c.fullRender ?? '');
     if (name && !chromaNames[cu]) chromaNames[cu] = name;
-    if (!icon) continue;
     const existing = skinIndex[cu];
     if (existing) {
       // NEVER overwrite a default skin with an X placeholder icon from skinchromas!
       if (!existing.isDefault) {
-        skinIndex[cu] = { ...existing, icon };
+        skinIndex[cu] = {
+          ...existing,
+          icon: icon || existing.icon,
+          fullRender: full || existing.fullRender,
+        };
       }
-    } else {
+    } else if (icon || full) {
       const def = isDefaultSkinName(name);
-      skinIndex[cu] = { weaponUuid: '', name, icon: def ? '' : icon, isDefault: def };
+      skinIndex[cu] = { weaponUuid: '', name, icon: def ? '' : icon, fullRender: def ? '' : full, isDefault: def };
     }
   }
 
@@ -517,6 +528,12 @@ export function parseLoadoutEntry(entry: any, catalog: WeaponCatalog): PlayerLoa
 
     const skinHit = skinUuid ? catalog.skinIndex[skinUuid] : undefined;
     const chromaHit = chromaUuid ? catalog.skinIndex[chromaUuid] : undefined;
+    if (import.meta.env.DEV && (skinUuid || chromaUuid) && !skinHit && !chromaHit) {
+      // eslint-disable-next-line no-console
+      console.debug(
+        `[loadout] unresolved equipped art for ${keyLc.slice(0, 8)}…: skin=${skinUuid || '—'} chroma=${chromaUuid || '—'}`
+      );
+    }
     // Name: the PARENT skin first. Chroma displayNames are raw internal labels
     // ("Neptune Odin Level 3 / (Variant 1 Black)", sometimes just "Ghost")
     // and must never stand in for the skin name.
@@ -533,14 +550,18 @@ export function parseLoadoutEntry(entry: any, catalog: WeaponCatalog): PlayerLoa
       skinName = chromaHit.name;
       isDefault = false;
     }
-    // Art: the equipped variant render when known, else the skin render,
-    // else the canonical weapon render (never the grey-X placeholder).
+    // Art: the equipped VARIANT's full render first — chroma displayIcons can
+    // be swatches, base-variant renders, or missing, which painted base skins
+    // under "Variant X" labels. Then the skin render, then the canonical
+    // weapon render (never the grey-X placeholder).
+    const chromaFull = chromaHit && !chromaHit.isDefault ? chromaHit.fullRender || '' : '';
     const icon =
-      chromaHit && !chromaHit.isDefault && chromaHit.icon
+      chromaFull ||
+      (chromaHit && !chromaHit.isDefault && chromaHit.icon
         ? chromaHit.icon
         : skinHit && !skinHit.isDefault && skinHit.icon
           ? skinHit.icon
-          : weapon.icon;
+          : weapon.icon);
     const skinId = chromaUuid || skinUuid;
     const variantLabel = variantLabelOf(catalog.chromaNames[chromaUuid] ?? '');
     const level = levelUuid ? catalog.levelIndex[levelUuid] ?? 0 : 0;
@@ -606,7 +627,10 @@ export function parseLoadouts(raw: any, catalog: WeaponCatalog): PlayerLoadout[]
  * Pick the loadout belonging to a lobby player.
  *
  * Precedence, strongest first:
- *   1. `Subject` (PUUID) — exact, immune to ordering changes.
+ *   1. `Subject` (PUUID) — exact, immune to ordering changes. Compared
+ *      dash-insensitively: Riot emits PUUIDs with and without dashes
+ *      depending on the endpoint, and a strict compare silently misses
+ *      teammates.
  *   2. `CharacterID` — fine in Competitive/Unrated where agents are unique, but
  *      Deathmatch and Swiftplay can field duplicates.
  *   3. Array position — the payload array is parallel to the match's player
@@ -619,13 +643,14 @@ export function resolveLoadoutForPlayer(
   all: PlayerLoadout[],
   opts: { puuid?: string; characterId?: string; index?: number }
 ): { loadout: PlayerLoadout | null; ambiguous: boolean } {
-  const puuid = str(opts.puuid).toLowerCase();
+  const norm = (s: string): string => str(s).toLowerCase().replace(/-/g, '');
+  const puuid = norm(opts.puuid ?? '');
   if (puuid) {
     // Exact-key miss is terminal: falling through to agent or positional
     // matching here can return a DIFFERENT player's loadout with
     // ambiguous:false (unique-agent case). Weaker keys apply only when no
     // puuid was supplied at all.
-    const hit = all.find((l) => l.subject.toLowerCase() === puuid);
+    const hit = all.find((l) => norm(l.subject) === puuid);
     return hit ? { loadout: hit, ambiguous: false } : { loadout: null, ambiguous: false };
   }
 

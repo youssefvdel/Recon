@@ -10,7 +10,7 @@ export const ServerChip: FC<{ serverName?: string }> = ({ serverName }) => {
   return (
     <span
       className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-m3-surface-container-high border border-m3-outline-subtle text-[10px] font-mono font-bold text-m3-on-surface-variant shrink-0"
-      title={`Match server: ${serverName}`}
+      data-tip={`Match server: ${serverName}`}
     >
       <Globe className="w-3 h-3 text-m3-mint" />
       <span>{serverName}</span>

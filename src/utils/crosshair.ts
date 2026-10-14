@@ -294,8 +294,11 @@ export function profileAdv(state: CrosshairState, idx: number): AdvState {
   const ads = p.ads ?? p.aDS ?? {};
   const adsInner = ads.innerLines ?? ads.InnerLines ?? {};
   const sniper = p.sniper ?? p.Sniper ?? {};
-  const on = (v: unknown): boolean => v === true;
-  const onByDefault = (v: unknown): boolean => v !== false;
+  // Strict `=== true` misses cloud payloads that carry 1/0 or "true"/"false"
+  // (a false-negative here silently drops outlines, dots and error toggles
+  // from the preview while the game shows them).
+  const on = (v: unknown): boolean => v === true || v === 1 || v === 'true';
+  const onByDefault = (v: unknown): boolean => v !== false && v !== 0 && v !== 'false';
   return {
     outlines: on(primary.bHasOutline),
     outlineOpacity: clampNum(gval(primary, 'outlineOpacity', 'OutlineOpacity'), 0, 1, 1),

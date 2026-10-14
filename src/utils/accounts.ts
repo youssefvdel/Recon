@@ -17,6 +17,15 @@ export interface AccountMeta {
   saved_at: number;
   /** Millis epoch. */
   last_used: number;
+  /** Sealed snapshot bytes on disk (0 = unknown / legacy). */
+  snapshot_bytes?: number;
+}
+
+/** One step of a long switch/add operation, pushed by Rust. */
+export interface AccountsProgress {
+  op: string;
+  step: string;
+  detail: string;
 }
 
 export interface SwitchResult {

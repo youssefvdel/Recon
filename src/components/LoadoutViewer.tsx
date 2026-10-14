@@ -49,7 +49,7 @@ const WeaponCard: React.FC<{
   return (
     <div
       className={`flex-1 min-h-0 bg-m3-surface-container-low hover:bg-m3-surface-container-high border border-m3-outline-subtle/70 hover:border-m3-primary/60 rounded-xl transition-all duration-200 overflow-hidden flex flex-col justify-between p-1.5 select-none shadow-m3-1 hover:shadow-m3-2 group relative ${className}`}
-      title={`${slot.weaponName} • ${slot.skinName}${subLine ? ` • ${subLine}` : ''}${slot.buddyName ? ` • Buddy: ${slot.buddyName}` : ''}`}
+      data-tip={`${slot.weaponName} • ${slot.skinName}${subLine ? ` • ${subLine}` : ''}${slot.buddyName ? ` • Buddy: ${slot.buddyName}` : ''}`}
     >
       {/* Centered weapon artwork */}
       <div className="flex-1 min-h-0 flex items-center justify-center p-0.5 relative">
@@ -68,7 +68,7 @@ const WeaponCard: React.FC<{
           <img
             src={slot.buddyIcon}
             alt={slot.buddyName}
-            title={slot.buddyName ? `Buddy: ${slot.buddyName}` : 'Gun buddy'}
+            data-tip={slot.buddyName ? `Buddy: ${slot.buddyName}` : 'Gun buddy'}
             loading="lazy"
             className="absolute top-0 right-0 w-10 h-10 rounded-full object-cover border border-m3-outline-subtle bg-m3-surface-container-high shadow-md"
           />
@@ -83,7 +83,7 @@ const WeaponCard: React.FC<{
           </span>
           <div className="flex items-center gap-1 shrink-0">
             {subLine && (
-              <span className="text-[8px] font-mono font-bold text-amber-300/90 truncate" title={subLine}>
+              <span className="text-[8px] font-mono font-bold text-amber-300/90 truncate" data-tip={subLine}>
                 {subLine}
               </span>
             )}
@@ -96,7 +96,7 @@ const WeaponCard: React.FC<{
           className={`text-[10px] font-semibold tracking-wide truncate max-w-full ${
             slot.isDefaultSkin ? 'text-m3-on-surface-variant/80' : 'text-m3-primary'
           }`}
-          title={slot.skinName}
+          data-tip={slot.skinName}
         >
           {slot.skinName}
         </span>
@@ -187,7 +187,7 @@ const ExpressionsWheel: React.FC<{ items: EquippedExpression[] }> = ({ items }) 
         <div
           key={i}
           className={`absolute ${slot.pos} w-[31%] h-[31%] max-w-14 max-h-14 rounded-full bg-m3-surface-container-high border-1.5 border-m3-outline-subtle hover:border-m3-primary hover:shadow-m3-2 flex items-center justify-center overflow-hidden shadow-md transition-all group cursor-pointer`}
-          title={slot.item?.name ? `${slot.label}: ${slot.item.name}` : `${slot.label} (Empty)`}
+          data-tip={slot.item?.name ? `${slot.label}: ${slot.item.name}` : `${slot.label} (Empty)`}
         >
           {slot.item?.icon ? (
             <img
@@ -206,15 +206,16 @@ const ExpressionsWheel: React.FC<{ items: EquippedExpression[] }> = ({ items }) 
 };
 
 /* ------------------------------------------------------------------ */
-/* 19 Live Weapons Slot Definitions (Canonical Valorant Collection)   */
+/* 21 Live Weapons Slot Definitions (Canonical Valorant Collection)   */
 /* ------------------------------------------------------------------ */
 
 const SLOTS = {
-  // Col 1: SIDEARMS (5 live weapons)
+  // Col 1: SIDEARMS (6 live weapons)
   CLASSIC: { id: '29a0cfab-485b-f5d5-779a-b59f85e204a8', name: 'CLASSIC' },
   SHORTY: { id: '42da8ccc-40d5-affc-beec-15aa47b42eda', name: 'SHORTY' },
   FRENZY: { id: '44d4e95c-4157-0037-81b2-17841bf2e8e3', name: 'FRENZY' },
   GHOST: { id: '1baa85b4-4c70-1284-64bb-6481dfc3bb4e', name: 'GHOST' },
+  BANDIT: { id: '410b2e0b-4ceb-1321-1727-20858f7f3477', name: 'BANDIT' },
   SHERIFF: { id: 'e336c6b8-418d-9340-d77f-7a9e4cfe0702', name: 'SHERIFF' },
 
   // Col 2: SMGS & SHOTGUNS
@@ -226,6 +227,7 @@ const SLOTS = {
   // Col 3: RIFLES & MELEE
   BULLDOG: { id: 'ae3de142-4d85-2547-dd26-4e90bed35cf7', name: 'BULLDOG' },
   GUARDIAN: { id: '4ade7faa-4cf1-8376-95ef-39884480959b', name: 'GUARDIAN' },
+  WARDEN: { id: '8db0a1bf-4a50-832a-4566-faaaa6d250ca', name: 'WARDEN' },
   PHANTOM: { id: 'ee8e8d15-496b-07ac-e5f6-8fae5d4c7b1a', name: 'PHANTOM' },
   VANDAL: { id: '9c82e19d-4575-0200-1a81-3eacf00cf872', name: 'VANDAL' },
   MELEE: { id: '2f59173c-4bed-b6c3-2191-dea9b58be9c7', name: 'MELEE' },
@@ -412,36 +414,38 @@ export const LoadoutViewer: React.FC<{
                 <WeaponCard slot={getSlot(SLOTS.SHORTY)} />
                 <WeaponCard slot={getSlot(SLOTS.FRENZY)} />
                 <WeaponCard slot={getSlot(SLOTS.GHOST)} />
+                <WeaponCard slot={getSlot(SLOTS.BANDIT)} />
                 <WeaponCard slot={getSlot(SLOTS.SHERIFF)} />
               </div>
             </div>
 
-            {/* Column 2: SMGS & SHOTGUNS (2 SMGs + 2 Shotguns) */}
+            {/* Column 2: SMGS, SHOTGUNS & MELEE (2 + 2 + 1, melee at the bottom) */}
             <div className="h-full min-h-0 flex flex-col min-w-0">
               <CategoryHeader title="SMGS" className="mb-1.5 shrink-0" />
-              <div className="flex-1 min-h-0 flex flex-col gap-1.5">
+              <div className="flex-[2] min-h-0 flex flex-col gap-1.5">
                 <WeaponCard slot={getSlot(SLOTS.STINGER)} />
                 <WeaponCard slot={getSlot(SLOTS.SPECTRE)} />
               </div>
               <CategoryHeader title="SHOTGUNS" className="mt-2 mb-1.5 shrink-0" />
-              <div className="flex-1 min-h-0 flex flex-col gap-1.5">
+              <div className="flex-[2] min-h-0 flex flex-col gap-1.5">
                 <WeaponCard slot={getSlot(SLOTS.BUCKY)} />
                 <WeaponCard slot={getSlot(SLOTS.JUDGE)} />
-              </div>
-            </div>
-
-            {/* Column 3: RIFLES & MELEE (4 Rifles + 1 Melee) */}
-            <div className="h-full min-h-0 flex flex-col min-w-0">
-              <CategoryHeader title="RIFLES" className="mb-1.5 shrink-0" />
-              <div className="flex-[4] min-h-0 flex flex-col gap-1.5">
-                <WeaponCard slot={getSlot(SLOTS.BULLDOG)} />
-                <WeaponCard slot={getSlot(SLOTS.GUARDIAN)} />
-                <WeaponCard slot={getSlot(SLOTS.PHANTOM)} />
-                <WeaponCard slot={getSlot(SLOTS.VANDAL)} />
               </div>
               <CategoryHeader title="MELEE" className="mt-2 mb-1.5 shrink-0" />
               <div className="flex-[1] min-h-0 flex flex-col gap-1.5">
                 <WeaponCard slot={getSlot(SLOTS.MELEE)} />
+              </div>
+            </div>
+
+            {/* Column 3: RIFLES (5 Rifles) */}
+            <div className="h-full min-h-0 flex flex-col min-w-0">
+              <CategoryHeader title="RIFLES" className="mb-1.5 shrink-0" />
+              <div className="flex-[5] min-h-0 flex flex-col gap-1.5">
+                <WeaponCard slot={getSlot(SLOTS.BULLDOG)} />
+                <WeaponCard slot={getSlot(SLOTS.GUARDIAN)} />
+                <WeaponCard slot={getSlot(SLOTS.WARDEN)} />
+                <WeaponCard slot={getSlot(SLOTS.PHANTOM)} />
+                <WeaponCard slot={getSlot(SLOTS.VANDAL)} />
               </div>
             </div>
 

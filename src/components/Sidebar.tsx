@@ -1,15 +1,14 @@
 import { useEffect, useState } from 'react';
 import {
-  Cpu,
-  Monitor,
-  Settings,
-  TrendingUp,
-  FileCode2,
-  ShoppingBag,
-  Crosshair,
-  Users,
-  UserCheck,
-  MessageSquare,
+  Cpu, 
+  Monitor, 
+  Settings, 
+  TrendingUp, 
+  ShoppingBag, 
+  Crosshair, 
+  Users, 
+  UserCheck, 
+  MessageSquare, 
 } from 'lucide-react';
 import type { DisplayInfo, GpuInfo, TabType } from '../types';
 import { getConversations } from '../utils/riotChat';
@@ -93,14 +92,9 @@ const UTILITY_TABS: SidebarTab[] = [
   },
 ];
 
-/* Config group — stretch setup, Valorant config editor, and GPU scaling. */
-const CONFIG_TABS: SidebarTab[] = [
-  {
-    id: 'game_config',
-    label: 'Game Config',
-    icon: FileCode2,
-  },
-];
+/* Config group — the Valorant config editor now lives under each account
+ * (Accounts → Video). No sidebar entry; the tab stays reachable by navigation. */
+const CONFIG_TABS: SidebarTab[] = [];
 
 /* Application Settings group — software updater, auto-start, system tray. */
 const SETTINGS_TABS: SidebarTab[] = [
@@ -204,7 +198,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             type="button"
             onClick={() => onSelectTab('settings')}
-            title={hasUpdate ? "New update available — click to open Settings" : `Recon v${appVer}`}
+            data-tip={hasUpdate ? "New update available — click to open Settings" : `Recon v${appVer}`}
             className={`shrink-0 relative px-2.5 py-0.5 text-[10px] font-mono font-semibold rounded-full flex items-center gap-1.5 transition-all cursor-pointer ${
               hasUpdate
                 ? 'text-m3-on-primary bg-m3-primary shadow-sm hover:opacity-90'
@@ -306,7 +300,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {shortGpu && (
             <div
               className="flex items-center gap-1.5 text-[11px] text-m3-on-surface-variant pt-2 border-t border-m3-outline-subtle/60 min-w-0"
-              title={gpuInfo?.name}
+              data-tip={gpuInfo?.name}
             >
               <Cpu className="w-3.5 h-3.5 text-m3-outline shrink-0" />
               <span className="truncate font-medium min-w-0 leading-relaxed">

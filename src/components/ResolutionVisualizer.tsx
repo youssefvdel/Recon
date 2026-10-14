@@ -41,7 +41,7 @@ function SafeAgentIcon({ src, alt }: { src: string; alt: string }) {
     return (
       <span
         aria-label={alt}
-        title={`${alt} (image missing: ${src} - save file to public${src})`}
+        data-tip={`${alt} (image missing: ${src} - save file to public${src})`}
         className="w-7 h-7 rounded-full bg-m3-primary-container text-m3-on-primary-container text-xs font-bold flex items-center justify-center shrink-0"
       >
         {alt.charAt(0).toUpperCase()}
@@ -67,7 +67,7 @@ function SafeAgentPortrait({ src, alt, className }: { src: string; alt: string; 
   }, [src]);
   if (failed) {
     return (
-      <div className={`${className} flex items-center justify-center`} title={`${alt} (image missing: ${src})`}>
+      <div className={`${className} flex items-center justify-center`} data-tip={`${alt} (image missing: ${src})`}>
         <div className="w-24 h-28 rounded-2xl bg-m3-primary-container/40 border border-m3-primary/30 flex flex-col items-center justify-center gap-1 pointer-events-none">
           <span className="text-4xl font-display font-extrabold text-m3-primary leading-none">
             {alt.charAt(0).toUpperCase()}
@@ -276,7 +276,7 @@ export const ResolutionVisualizer: React.FC<ResolutionVisualizerProps> = ({
                 <button
                   key={agent.id}
                   onClick={() => setSelectedAgent(agent)}
-                  title={`${agent.name} (${agent.role})`}
+                  data-tip={`${agent.name} (${agent.role})`}
                   aria-label={`Preview ${agent.name}`}
                   className={`w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer shrink-0 ${
                     isSelected
@@ -301,7 +301,7 @@ export const ResolutionVisualizer: React.FC<ResolutionVisualizerProps> = ({
                   ? 'bg-m3-primary text-m3-on-primary font-semibold shadow-xs'
                   : 'text-m3-outline hover:text-m3-on-surface font-medium'
               }`}
-              title="Side-by-Side Comparison (Native vs Stretched)"
+              data-tip="Side-by-Side Comparison (Native vs Stretched)"
             >
               <Columns className="w-3.5 h-3.5" />
               <span>Side-by-Side</span>
@@ -313,7 +313,7 @@ export const ResolutionVisualizer: React.FC<ResolutionVisualizerProps> = ({
                   ? 'bg-m3-primary text-m3-on-primary font-semibold shadow-xs'
                   : 'text-m3-outline hover:text-m3-on-surface font-medium'
               }`}
-              title="Single Monitor View"
+              data-tip="Single Monitor View"
             >
               <Square className="w-3.5 h-3.5" />
               <span>Single</span>

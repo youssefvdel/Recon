@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { UtilityView } from './components/UtilityView';
-import { SettingsView } from './components/SettingsView';
+import { ValorantConfig } from './components/ValorantConfig';
+import type { ConfigAccountCtx } from './utils/accountVideo';
 import { AppSettingsView } from './components/AppSettingsView';
 import { TrackerView } from './components/TrackerView';
 import { StoreView } from './components/StoreView';
@@ -13,6 +14,7 @@ import { PrepickView } from './components/PrepickView';
 import { AccountsView } from './components/AccountsView';
 import { DevDashboard } from './components/DevDashboard';
 import { OverlayView } from './components/OverlayView';
+import { TooltipHost } from './components/ReconTooltip';
 import type { DisplayInfo, ShortcutBinding, GpuInfo, TabType } from './types';
 import { logger } from './utils/logger';
 import { resolveInitialTab } from './utils/tabRestore';
@@ -98,6 +100,10 @@ export const App: React.FC = () => {
       return 'overview';
     }
   });
+
+  /* Account chosen on the Accounts tab whose video settings are being edited
+   * in Game Config. Cleared when leaving (Back button / tab switch away). */
+  const [configAccount, setConfigAccount] = useState<ConfigAccountCtx | null>(null);
 
   useEffect(() => {
     try {
@@ -373,23 +379,34 @@ export const App: React.FC = () => {
   };
 
   if (isOverlay) {
-    return <OverlayView />;
+    return (
+      <>
+        <OverlayView />
+        <TooltipHost />
+      </>
+    );
   }
 
   if (isDevWindow) {
     return (
       <div className="h-screen w-screen bg-m3-surface text-m3-on-surface flex flex-col overflow-hidden selection:bg-m3-primary-container selection:text-m3-on-primary-container antialiased font-sans">
         <DevDashboard />
+        <TooltipHost />
       </div>
     );
   }
 
   return (
     <div className="h-screen w-screen bg-m3-surface text-m3-on-surface flex overflow-hidden selection:bg-m3-primary-container selection:text-m3-on-primary-container antialiased font-sans">
+      <TooltipHost />
       {/* Left Sidebar Navigation */}
       <Sidebar
         currentTab={effectiveTab}
-        onSelectTab={setCurrentTab}
+        onSelectTab={(tab) => {
+          // Sidebar entry = plain editor, never a stale account banner.
+          if (tab === 'game_config') setConfigAccount(null);
+          setCurrentTab(tab);
+        }}
         displayInfo={displayInfo}
         gpuInfo={gpuInfo}
         hasUpdate={hasUpdate}
@@ -441,33 +458,46 @@ export const App: React.FC = () => {
 
                 {currentTab === 'prepick' && <PrepickView />}
 
-                {currentTab === 'accounts' && <AccountsView />}
+                {currentTab === 'accounts' && (
+                  <AccountsView
+                    onEditConfig={(account) => {
+                      setConfigAccount(account);
+                      setCurrentTab('game_config');
+                    }}
+                  />
+                )}
 
                 {currentTab === 'dev' && IS_DEV && (
                   <DevDashboard />
                 )}
 
-                {(currentTab === 'switcher' || currentTab === 'visualizer' || currentTab === 'borderless') && (
+                {(currentTab === 'switcher' || currentTab === 'visualizer' || currentTab === 'borderless' || currentTab === 'gpu') && (
                   <UtilityView
-                    initialSubTab={currentTab === 'visualizer' ? 'visualizer' : 'switcher'}
+                    initialSubTab={
+                      currentTab === 'visualizer' ? 'visualizer' : currentTab === 'gpu' ? 'gpu' : 'switcher'
+                    }
                     displayInfo={displayInfo}
+                    gpuInfo={gpuInfo}
                     shortcut={shortcut}
                     preferredStretched={preferredStretched}
                     onToggle={handleToggle}
                     onApplyResolution={handleApplyResolution}
                     onSaveShortcut={handleSaveShortcut}
+                    onStretchResChanged={(w, h) => setPreferredStretched([w, h])}
+                    onRefreshDisplayInfo={loadAllTelemetry}
+                    onOpenControlPanel={handleOpenControlPanel}
                     isLoading={isLoading}
                   />
                 )}
 
-                {(currentTab === 'game_config' || currentTab === 'valorant' || currentTab === 'gpu') && (
-                  <SettingsView
-                    initialSubTab={currentTab === 'valorant' ? 'valorant' : currentTab === 'gpu' ? 'gpu' : 'setup'}
-                    displayInfo={displayInfo}
-                    gpuInfo={gpuInfo}
-                    onStretchResChanged={(w, h) => setPreferredStretched([w, h])}
-                    onRefreshDisplayInfo={loadAllTelemetry}
-                    onOpenControlPanel={handleOpenControlPanel}
+                {(currentTab === 'game_config' || currentTab === 'valorant') && (
+                  <ValorantConfig
+                    key={configAccount ? `acct-${configAccount.id}` : 'plain'}
+                    account={configAccount}
+                    onBackToAccounts={() => {
+                      setConfigAccount(null);
+                      setCurrentTab('accounts');
+                    }}
                   />
                 )}
 

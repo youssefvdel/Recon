@@ -243,7 +243,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 type="button"
                 onClick={handleRestoreRemoved}
                 className="text-[10px] font-mono text-m3-primary hover:underline flex items-center gap-1 cursor-pointer"
-                title="Restore all hidden resolutions"
+                data-tip="Restore all hidden resolutions"
               >
                 <RotateCcw className="w-2.5 h-2.5" />
                 <span>Restore ({removedResolutions.length} hidden)</span>
@@ -302,7 +302,7 @@ export const Settings: React.FC<SettingsProps> = ({
                             }
                           }}
                           className="w-4 h-4 rounded-full flex items-center justify-center text-m3-outline hover:text-red-400 hover:bg-red-400/15 transition-colors cursor-pointer shrink-0 opacity-40 group-hover/card:opacity-100"
-                          title={`Remove ${mode.width}×${mode.height} from list`}
+                          data-tip={`Remove ${mode.width}×${mode.height} from list`}
                         >
                           <X className="w-3 h-3" />
                         </span>

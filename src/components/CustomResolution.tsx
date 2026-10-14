@@ -507,7 +507,7 @@ export const CustomResolution: React.FC<CustomResolutionProps> = ({
             onClick={handleResetOverrides}
             disabled={isAdding || isTesting}
             className="h-8 px-3 rounded-full bg-m3-surface-container-high hover:bg-m3-surface-container-highest border border-m3-outline-subtle text-m3-on-surface hover:text-red-300 font-semibold text-xs transition-colors flex items-center space-x-1.5 active:scale-95 disabled:opacity-50 cursor-pointer"
-            title="Remove all custom EDID overrides on this monitor and restore factory timings"
+            data-tip="Remove all custom EDID overrides on this monitor and restore factory timings"
           >
             <RotateCcw className="w-3.5 h-3.5 text-m3-outline" />
             <span>Reset Overrides</span>
@@ -516,7 +516,7 @@ export const CustomResolution: React.FC<CustomResolutionProps> = ({
             onClick={handleAddMode}
             disabled={isAdding || isTesting}
             className="h-8 px-4 rounded-full bg-m3-primary hover:bg-m3-primary/90 text-m3-on-primary font-bold text-xs shadow-xs transition-all flex items-center space-x-1.5 active:scale-95 disabled:opacity-50 cursor-pointer"
-            title="Add mode via EDID override to GPU driver and run 15-second test"
+            data-tip="Add mode via EDID override to GPU driver and run 15-second test"
           >
             {isAdding ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />

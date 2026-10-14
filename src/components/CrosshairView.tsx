@@ -257,7 +257,7 @@ const PreviewStrip: React.FC<{
           value={wallName}
           onChange={(e) => pickWall(e.target.value)}
           className="max-w-44 truncate text-[11px] font-medium bg-m3-surface-container-high border border-m3-outline-subtle rounded-lg px-2 py-1 text-m3-on-surface cursor-pointer focus:outline-none focus:border-m3-primary"
-          title="Preview backdrop"
+          data-tip="Preview backdrop"
         >
           {WALL_OPTIONS.map((m) => (
             <option key={m.name} value={m.name}>
@@ -290,7 +290,7 @@ const PreviewStrip: React.FC<{
                 setIsRenaming(false);
               }}
               className="p-1 rounded text-emerald-400 hover:bg-m3-surface-container-high cursor-pointer"
-              title="Save name"
+              data-tip="Save name"
             >
               <Check className="w-3 h-3" />
             </button>
@@ -298,7 +298,7 @@ const PreviewStrip: React.FC<{
               type="button"
               onClick={() => setIsRenaming(false)}
               className="p-1 rounded text-m3-outline hover:text-m3-on-surface hover:bg-m3-surface-container-high cursor-pointer"
-              title="Cancel"
+              data-tip="Cancel"
             >
               <X className="w-3 h-3" />
             </button>
@@ -328,7 +328,7 @@ const PreviewStrip: React.FC<{
                 setIsAdding(false);
               }}
               className="p-1 rounded text-emerald-400 hover:bg-m3-surface-container-high cursor-pointer"
-              title="Create profile"
+              data-tip="Create profile"
             >
               <Check className="w-3 h-3" />
             </button>
@@ -336,7 +336,7 @@ const PreviewStrip: React.FC<{
               type="button"
               onClick={() => setIsAdding(false)}
               className="p-1 rounded text-m3-outline hover:text-m3-on-surface hover:bg-m3-surface-container-high cursor-pointer"
-              title="Cancel"
+              data-tip="Cancel"
             >
               <X className="w-3 h-3" />
             </button>
@@ -347,7 +347,7 @@ const PreviewStrip: React.FC<{
               value={profileIdx}
               onChange={(e) => pickProfile(Number(e.target.value))}
               className="max-w-40 truncate text-[11px] font-medium bg-m3-surface-container-high border border-m3-outline-subtle rounded-lg px-2 py-1 text-m3-on-surface cursor-pointer focus:outline-none focus:border-m3-primary"
-              title="Crosshair profile"
+              data-tip="Crosshair profile"
             >
               {state.profileNames.map((n, i) => (
                 <option key={i} value={i}>
@@ -364,7 +364,7 @@ const PreviewStrip: React.FC<{
                 setIsRenaming(true);
               }}
               className="p-1 rounded-lg text-m3-outline hover:text-m3-on-surface hover:bg-m3-surface-container-high transition-colors cursor-pointer shrink-0"
-              title="Rename crosshair"
+              data-tip="Rename crosshair"
             >
               <Pencil className="w-3 h-3" />
             </button>
@@ -376,7 +376,7 @@ const PreviewStrip: React.FC<{
                 setIsAdding(true);
               }}
               className="p-1 rounded-lg text-m3-outline hover:text-m3-on-surface hover:bg-m3-surface-container-high transition-colors cursor-pointer shrink-0"
-              title="Add / clone crosshair"
+              data-tip="Add / clone crosshair"
             >
               <Plus className="w-3.5 h-3.5" />
             </button>
@@ -397,7 +397,7 @@ const PreviewStrip: React.FC<{
                     ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
                     : 'text-m3-outline hover:text-red-400 hover:bg-m3-surface-container-high'
                 }`}
-                title={confirmDelete ? 'Click again to confirm delete' : 'Delete crosshair profile'}
+                data-tip={confirmDelete ? 'Click again to confirm delete' : 'Delete crosshair profile'}
               >
                 <Trash2 className="w-3 h-3" />
               </button>
@@ -624,7 +624,7 @@ export const CrosshairView: React.FC = () => {
               onClick={load}
               disabled={loading}
               className="p-1 rounded-full text-m3-outline hover:text-m3-on-surface hover:bg-m3-surface-container-high transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-              title="Reload from client"
+              data-tip="Reload from client"
               aria-label="Reload from client"
             >
               <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />

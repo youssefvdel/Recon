@@ -692,7 +692,7 @@ fn get_autostart_enabled() -> Result<bool, String> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let run = hkcu.open_subkey_with_flags("Software\\Microsoft\\Windows\\CurrentVersion\\Run", KEY_READ)
         .map_err(|e| format!("Failed to open Run key: {}", e))?;
-    match run.get_value::<String, _>("Aspect") {
+    match run.get_value::<String, _>("Recon") {
         Ok(_) => Ok(true),
         Err(_) => Ok(false),
     }
@@ -715,10 +715,13 @@ fn set_autostart_enabled(enabled: bool) -> Result<bool, String> {
         } else {
             format!("\"{}\"", exe_path.to_string_lossy())
         };
-        run.set_value("Aspect", &exe_str)
+        run.set_value("Recon", &exe_str)
             .map_err(|e| format!("Failed to set registry value: {}", e))?;
+        // Drop the legacy pre-rename entry so the app doesn't boot twice.
+        let _ = run.delete_value("Aspect");
     } else {
         let _ = run.delete_value("Aspect");
+        let _ = run.delete_value("Recon");
     }
     Ok(enabled)
 }
@@ -1139,8 +1142,8 @@ pub fn run() {
             }
 
             // Create System Tray Menu
-            let show_i = MenuItem::with_id(app, "show", "Show Aspect", true, None::<&str>)?;
-            let quit_i = MenuItem::with_id(app, "quit", "Quit Aspect", true, None::<&str>)?;
+            let show_i = MenuItem::with_id(app, "show", "Show Recon", true, None::<&str>)?;
+            let quit_i = MenuItem::with_id(app, "quit", "Quit Recon", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
 
             if let Some(icon) = app.default_window_icon() {
@@ -1148,7 +1151,7 @@ pub fn run() {
                     .icon(icon.clone())
                     .menu(&menu)
                     .show_menu_on_left_click(false)
-                    .tooltip("Aspect • Stretched Resolution & Utility")
+                    .tooltip("Recon • Valorant Companion")
                     .on_menu_event(|app, event| match event.id.as_ref() {
                         "quit" => {
                             app.exit(0);

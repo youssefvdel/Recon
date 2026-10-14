@@ -423,7 +423,7 @@ export const TrackerMaps: React.FC = () => {
                                 <img
                                   src={ag.icon}
                                   alt={ag.name}
-                                  title={ag.name}
+                                  data-tip={ag.name}
                                   className="w-7 h-7 rounded-md object-cover bg-m3-surface-container-high border border-m3-outline-subtle"
                                 />
                               ) : (

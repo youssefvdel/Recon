@@ -11,11 +11,10 @@
 //! a rollback.
 //!
 //! ponytail: `%APPDATA%` roams on domain-joined machines, and
-//! `monitor_res_cache.json`, `stretched_res.txt` and `hotkey.txt` are
-//! machine-specific — on a roaming profile they can follow the user to a
-//! machine with different monitors. Acceptable for a personal gaming PC; a
-//! future split into Roaming-vs-Local data is a conscious choice, not an
-//! accident.
+//! `monitor_res_cache.json` and `settings.json` are machine-specific — on a
+//! roaming profile they can follow the user to a machine with different
+//! monitors. Acceptable for a personal gaming PC; a future split into
+//! Roaming-vs-Local data is a conscious choice, not an accident.
 
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -382,9 +382,11 @@ fn write_config_inner(
     let engine_sec = bare_section("[/Script/Engine.GameUserSettings]");
     ini.set(engine_sec, "bUseDesiredScreenHeight", "True");
 
-    // Scalability Groups: Ensure 100% 3D Render Resolution Scale
+    // Scalability Groups: Ensure 100% 3D Render Resolution Scale.
+    // Plain `100`: the game never writes this key itself, and the 6-decimal
+    // `100.000000` form made the client drop render scale on some machines.
     let scal_sec = bare_section("[ScalabilityGroups]");
-    ini.set(scal_sec, "sg.ResolutionQuality", "100.000000");
+    ini.set(scal_sec, "sg.ResolutionQuality", "100");
 
     // Write unlocked first so verification reads the real bytes.
     store_ini(path, &ini, perms.clone(), false)?;
@@ -886,7 +888,7 @@ mod tests {
         // Verify Engine section bUseDesiredScreenHeight = True
         let raw = fs::read_to_string(&p).unwrap();
         assert!(raw.contains("bUseDesiredScreenHeight=True") || raw.contains("bUseDesiredScreenHeight = True"));
-        assert!(raw.contains("sg.ResolutionQuality=100.000000") || raw.contains("sg.ResolutionQuality = 100.000000"));
+        assert!(raw.contains("sg.ResolutionQuality=100") || raw.contains("sg.ResolutionQuality = 100"));
 
         // Clean up readonly before removal
         let mut perms = fs::metadata(&p).unwrap().permissions();

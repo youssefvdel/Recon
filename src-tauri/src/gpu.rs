@@ -761,11 +761,26 @@ pub fn get_gpu_settings_report() -> GpuSettingsReport {
     }
 }
 
-fn set_hklm_dword(subkey_path: &str, value_name: &str, val: u32) {
+fn set_hklm_dword(subkey_path: &str, value_name: &str, val: u32) -> bool {
+    // Verified write: without elevation create_subkey fails and the old code
+    // swallowed it, so toggles reported success while nothing landed.
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     if let Ok((key, _)) = hklm.create_subkey(subkey_path) {
-        let _ = key.set_value(value_name, &val);
+        if key.set_value(value_name, &val).is_ok() {
+            if let Ok(back) = key.get_value::<u32, _>(value_name) {
+                return back == val;
+            }
+        }
     }
+    false
+}
+
+/// Elevation hint appended whenever an HKLM/driver write doesn't stick.
+fn admin_hint(what: &str) -> String {
+    format!(
+        "{} didn't stick (no admin rights): relaunch Recon as administrator and toggle again.",
+        what
+    )
 }
 
 fn set_hkcu_dword(subkey_path: &str, value_name: &str, val: u32) {
@@ -813,7 +828,15 @@ pub fn apply_single_gpu_setting(id: &str, value: bool) -> Result<GpuSettingsRepo
     match id {
         "full_screen_scaling" => {
             saved.full_screen_scaling = value;
-            let _ = crate::display::set_display_scaling_mode(value);
+            // CCD is the change that actually takes effect — propagate its
+            // error instead of reporting success while nothing moved.
+            crate::display::set_display_scaling_mode(value).map_err(|e| {
+                if crate::display::is_process_elevated() {
+                    e
+                } else {
+                    admin_hint("Display scaling")
+                }
+            })?;
 
             // Global WDDM scaling in GraphicsDrivers\Configuration — the value
             // Windows itself honours. No vendor keys (see LEGACY_VENDOR_VALUES).
@@ -824,11 +847,20 @@ pub fn apply_single_gpu_setting(id: &str, value: bool) -> Result<GpuSettingsRepo
             ) {
                 apply_scaling_recursive(&config_root, wddm_scaling_value(value));
             }
+            if read_active_windows_scaling().map(|(v, _)| v) != Some(wddm_scaling_value(value)) {
+                return Err(admin_hint("WDDM scaling registry"));
+            }
         }
         "gpu_scaling_engine" => {
             saved.gpu_scaling_engine = value;
             if value {
-                let _ = crate::display::apply_gpu_scaling_stretched();
+                crate::display::apply_gpu_scaling_stretched().map_err(|e| {
+                    if crate::display::is_process_elevated() {
+                        e
+                    } else {
+                        admin_hint("GPU scaling engine")
+                    }
+                })?;
             }
             // "Perform scaling on: GPU" is a driver mode owned by the GPU
             // vendor's own API (ADL / NVAPI / IGCL) — never a registry DWORD.
@@ -836,7 +868,7 @@ pub fn apply_single_gpu_setting(id: &str, value: bool) -> Result<GpuSettingsRepo
         }
         "override_game_scaling" => {
             saved.override_game_scaling = value;
-            let _ = crate::game_config::set_letterbox_all(!value);
+            let _ = crate::game_config::set_letterbox_all(value);
             set_hkcu_dword(
                 r"Software\Microsoft\DirectX\UserGpuPreferences",
                 "DisableDXGIWindowedStereo",
@@ -851,20 +883,28 @@ pub fn apply_single_gpu_setting(id: &str, value: bool) -> Result<GpuSettingsRepo
                 "DirectFlipEnabled",
                 reg_val,
             );
-            set_hklm_dword(
+            if !set_hklm_dword(
                 r"SOFTWARE\Microsoft\Windows\DWM",
                 "DirectFlipEnabled",
                 reg_val,
-            );
+            ) {
+                return Err(admin_hint("DWM DirectFlip (machine-wide)"));
+            }
         }
         "integer_scaling_bypass" => {
             saved.integer_scaling_bypass = value;
+            // OFF finally has an off-ramp: back to aspect-ratio (4). The old
+            // code wrote fullscreen (3) regardless of the toggle position.
+            let target = wddm_scaling_value(value);
             let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
             if let Ok(config_root) = hklm.open_subkey_with_flags(
                 r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Configuration",
                 KEY_READ | KEY_SET_VALUE,
             ) {
-                apply_scaling_recursive(&config_root, WDDM_SCALING_FULLSCREEN);
+                apply_scaling_recursive(&config_root, target);
+            }
+            if read_active_windows_scaling().map(|(v, _)| v) != Some(target) {
+                return Err(admin_hint("WDDM scaling registry"));
             }
             // Integer scaling is an Adrenalin / NVIDIA-CP feature; the WDDM
             // stretch above is what removes the bars for us.
@@ -905,7 +945,7 @@ pub fn auto_configure_all_gpu_settings() -> Result<(String, GpuSettingsReport), 
         .unwrap_or_else(|_| "Full-Screen scaling applied".into());
 
     // 2. Disable letterboxing across all configs
-    let config_count = crate::game_config::set_letterbox_all(false).unwrap_or(0);
+    let config_count = crate::game_config::set_letterbox_all(true).unwrap_or(0);
 
     // 3. DWM DirectFlip + revocable per-user D3D preference
     set_hkcu_dword(r"Software\Microsoft\Windows\DWM", "DirectFlipEnabled", 1);

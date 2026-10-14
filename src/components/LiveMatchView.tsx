@@ -3,6 +3,7 @@ import {
   Shield,
   Radio,
   Lock,
+  Eye,
   EyeOff,
   Swords,
   Users,
@@ -346,7 +347,7 @@ export const LiveMatchView: React.FC = () => {
         />
       ) : effectiveState?.isRange ? (
         <PlayerTable
-          title="The Range — Practice"
+          data-tip="The Range — Practice"
           accent="mint"
           players={teams.yours}
           tierIcons={tierIcons}
@@ -357,7 +358,7 @@ export const LiveMatchView: React.FC = () => {
       ) : (
         <div className="flex flex-col justify-start gap-2.5 shrink-0">
           <PlayerTable
-            title="Your Team"
+            data-tip="Your Team"
             accent="primary"
             players={teams.yours}
             tierIcons={tierIcons}
@@ -368,7 +369,7 @@ export const LiveMatchView: React.FC = () => {
 
           {effectiveState?.phase === 'coregame' || effectiveState?.isPreviousMatch || teams.theirs.length > 0 ? (
             <PlayerTable
-              title="Enemy Team"
+              data-tip="Enemy Team"
               accent="coral"
               players={teams.theirs}
               tierIcons={tierIcons}
@@ -450,7 +451,7 @@ const MatchStatusStrip: React.FC<{
         return (
           <span
             className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-[9.5px] font-mono font-bold text-emerald-300 shrink-0"
-            title="Pre-Picker armed: hovers this agent instantly in Agent Select, then locks it in after your delay"
+            data-tip="Pre-Picker armed: hovers this agent instantly in Agent Select, then locks it in after your delay"
           >
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
             <span>Pre-pick: {targetAgent}</span>
@@ -509,7 +510,7 @@ const MatchStatusStrip: React.FC<{
 /* Player table — mirrors the Agent Select widget's columns            */
 /* ------------------------------------------------------------------ */
 
-const GRID = 'grid grid-cols-[1fr_64px_28px_70px_68px_42px_38px_42px_38px_34px] items-center gap-x-1.5';
+const GRID = 'grid grid-cols-[1fr_52px_64px_28px_70px_68px_42px_38px_42px_38px_34px] items-center gap-x-1.5';
 
 const ACCENTS: Record<string, { tag: string; border: string }> = {
   primary: { tag: 'bg-m3-primary/15 text-m3-primary border-m3-primary/30', border: 'border-m3-primary/25' },
@@ -552,14 +553,15 @@ const PlayerTable: React.FC<{
         className={`${GRID} px-2 pb-0.5 text-[8.5px] font-mono uppercase tracking-wider text-m3-outline border-b border-m3-outline-subtle shrink-0`}
       >
         <span>Player</span>
-        <span className="text-center" title="Equipped weapon skins & cosmetics">Skins</span>
-        <span className="text-center" title="Tracker Score tier">TS</span>
+        <span className="text-center" data-tip="External tracker pages for this player">Links</span>
+        <span className="text-center" data-tip="Equipped weapon skins & cosmetics">Skins</span>
+        <span className="text-center" data-tip="Tracker Score tier">TS</span>
         <span className="text-left pl-1">Rank</span>
-        <span className="text-left pl-1" title="Peak rank — the act it was earned in is shown under the emblem">Peak</span>
-        <span className="text-right" title="Act-wide average combat score — the column this board is sorted by">ACS</span>
-        <span className="text-right" title="Act-wide K/D (Riot exposes no live kill data)">K/D</span>
-        <span className="text-right" title="Act-wide win rate">Win%</span>
-        <span className="text-right" title="Act-wide headshot %">HS%</span>
+        <span className="text-left pl-1" data-tip="Peak rank — the act it was earned in is shown under the emblem">Peak</span>
+        <span className="text-right" data-tip="Act-wide average combat score — the column this board is sorted by">ACS</span>
+        <span className="text-right" data-tip="Act-wide K/D (Riot exposes no live kill data)">K/D</span>
+        <span className="text-right" data-tip="Act-wide win rate">Win%</span>
+        <span className="text-right" data-tip="Act-wide headshot %">HS%</span>
         <span className="text-right">Lvl</span>
       </div>
 
@@ -599,7 +601,7 @@ const PlayerRow: React.FC<{
   // users read "locked", not "broken". Rank/peak/level are Riot-local and stay.
   const locked = p.isTrnPrivate === true;
   const lockCell = (
-    <span title={TRN_PRIVATE_TOOLTIP} className="inline-flex items-center justify-center text-zinc-500">
+    <span data-tip={TRN_PRIVATE_TOOLTIP} className="inline-flex items-center justify-center text-zinc-500">
       <Lock className="w-2.5 h-2.5" />
     </span>
   );
@@ -609,11 +611,11 @@ const PlayerRow: React.FC<{
   // majority of cells in a fresh lobby.
   const trnBlank = (state: LiveMatchPlayer['trnState']) =>
     state === 'pending' ? (
-      <span title={TRN_PENDING_TOOLTIP} className="inline-flex items-center justify-center">
+      <span data-tip={TRN_PENDING_TOOLTIP} className="inline-flex items-center justify-center">
         <span className="block h-[3px] w-[3px] rounded-full bg-m3-outline/60" />
       </span>
     ) : (
-      <span className="text-m3-outline" title={state === 'unavailable' ? TRN_UNAVAILABLE_TOOLTIP : undefined}>
+      <span className="text-m3-outline" data-tip={state === 'unavailable' ? TRN_UNAVAILABLE_TOOLTIP : undefined}>
         —
       </span>
     );
@@ -634,7 +636,7 @@ const PlayerRow: React.FC<{
 
   return (
     <div
-      className={`${GRID} h-10 shrink-0 relative overflow-hidden rounded-xl border px-2.5 py-1 transition-colors ${
+      className={`${GRID} h-10 shrink-0 relative rounded-xl border px-2.5 py-1 transition-colors ${
         party
           ? `${party.bg} border-m3-outline-subtle/40`
           : p.isMe
@@ -678,7 +680,7 @@ const PlayerRow: React.FC<{
             <img
               src={flagUrl}
               alt={p.country || ''}
-              title={countryName ? `Country: ${countryName} (${p.country})` : `Country: ${p.country}`}
+              data-tip={countryName ? `Country: ${countryName} (${p.country})` : `Country: ${p.country}`}
               className="absolute -bottom-0.5 -right-0.5 w-3 h-2 object-cover rounded-[1.5px] border border-m3-surface shadow-xs"
             />
           )}
@@ -689,12 +691,30 @@ const PlayerRow: React.FC<{
             {party && (
               <span
                 className={`w-1.5 h-1.5 rounded-full ${party.bar} shrink-0 shadow-xs`}
-                title={`Queued together in ${party.name}`}
+                data-tip={`Queued together in ${party.name}`}
               />
+            )}
+            {/* Incognito eye: icon only, parked left of the name. Open eye =
+                Recon unmasked it; closed eye = Riot still hiding it. The
+                explanation rides the global themed tooltip (portaled, so no
+                clipping from the scroll container). */}
+            {p.isIncognito && (
+              <span
+                className="flex items-center shrink-0 text-amber-300 cursor-help"
+                data-tip={
+                  p.nameResolved
+                    ? 'Riot hides player names during live matches — Recon revealed this one.'
+                    : 'Riot hides this player during live matches — it appears automatically after the game.'
+                }
+                data-tip-title={p.nameResolved ? 'Name unmasked' : 'Hidden name'}
+                data-tip-tone="amber"
+              >
+                {p.nameResolved ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+              </span>
             )}
             <span
               className="font-display font-bold text-[11.5px] text-m3-on-surface truncate"
-              title={`${p.name}${p.tag ? '#' + p.tag : ''}`}
+              data-tip={`${p.name}${p.tag ? '#' + p.tag : ''}`}
             >
               {p.name}
             </span>
@@ -706,59 +726,20 @@ const PlayerRow: React.FC<{
                 type="button"
                 onClick={handleCopyRiotId}
                 className="p-0.5 rounded hover:bg-white/10 text-m3-outline hover:text-white cursor-pointer transition-colors shrink-0"
-                title={copied ? 'Copied!' : `Copy ${p.name}#${p.tag}`}
+                data-tip={copied ? 'Copied!' : `Copy ${p.name}#${p.tag}`}
               >
                 {copied ? <Check className="w-2.5 h-2.5 text-m3-mint" /> : <Copy className="w-2.5 h-2.5" />}
               </button>
-            )}
-            {p.name && p.tag && !p.name.startsWith('Player ') && (
-              <div className="flex items-center gap-1 ml-0.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openExternalUrl(trackerUrls.trn);
-                  }}
-                  className="px-1 py-px rounded text-[7px] font-mono font-bold bg-white/5 hover:bg-[#b6abf7]/25 hover:text-[#b6abf7] border border-white/10 text-zinc-400 cursor-pointer transition-colors"
-                  title={`Search ${p.name}#${p.tag} on Tracker.gg (TRN)`}
-                >
-                  TRN
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openExternalUrl(trackerUrls.blitz);
-                  }}
-                  className="px-1 py-px rounded text-[7px] font-mono font-bold bg-white/5 hover:bg-red-500/25 hover:text-red-300 border border-white/10 text-zinc-400 cursor-pointer transition-colors"
-                  title={`Search ${p.name}#${p.tag} on Blitz.gg`}
-                >
-                  Blitz
-                </button>
-              </div>
             )}
             {p.isMe && (
               <span className="px-1 py-px rounded bg-m3-primary text-m3-on-primary text-[7.5px] font-black uppercase shrink-0">
                 You
               </span>
             )}
-            {p.isIncognito && (
-              <span
-                className="flex items-center gap-0.5 px-1 py-px rounded bg-amber-400/15 text-amber-300 border border-amber-400/30 text-[7.5px] font-mono font-bold uppercase shrink-0"
-                title={
-                  p.nameResolved
-                    ? 'Name hidden in Valorant — unmasked by Recon from account UUID'
-                    : 'Riot hides this name during live matches — revealed automatically after the game'
-                }
-              >
-                <EyeOff className="w-2.5 h-2.5" />
-                {p.nameResolved ? 'Unmasked' : 'Hidden'}
-              </span>
-            )}
             {p.isTrnPrivate && (
               <span
                 className="flex items-center px-1 py-px rounded bg-white/5 text-zinc-400 border border-white/10 shrink-0"
-                title={TRN_PRIVATE_TOOLTIP}
+                data-tip={TRN_PRIVATE_TOOLTIP}
               >
                 <Lock className="w-2.5 h-2.5" />
               </span>
@@ -770,7 +751,7 @@ const PlayerRow: React.FC<{
             </span>
             {p.agentRole && <span className="truncate">• {p.agentRole}</span>}
             {countryName && (
-              <span className="text-zinc-300 font-medium truncate" title={`Nationality: ${countryName} (${p.country})`}>
+              <span className="text-zinc-300 font-medium truncate" data-tip={`Nationality: ${countryName} (${p.country})`}>
                 • {countryName}
               </span>
             )}
@@ -778,7 +759,39 @@ const PlayerRow: React.FC<{
         </div>
       </div>
 
-      {/* 2. Skins / Loadout button — between Player and TS so it pops out */}
+      {/* 2. External links — TRN stacked over Blitz, own column next to Skins */}
+      <div className="flex flex-col items-stretch justify-center gap-0.5 min-w-0">
+        {p.name && p.tag && !p.name.startsWith('Player ') ? (
+          <>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                openExternalUrl(trackerUrls.trn);
+              }}
+              className="w-full px-1 py-px rounded text-[7px] font-mono font-bold bg-white/5 hover:bg-[#b6abf7]/25 hover:text-[#b6abf7] border border-white/10 text-zinc-400 cursor-pointer transition-colors text-center"
+              data-tip={`Search ${p.name}#${p.tag} on Tracker.gg (TRN)`}
+            >
+              TRN
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                openExternalUrl(trackerUrls.blitz);
+              }}
+              className="w-full px-1 py-px rounded text-[7px] font-mono font-bold bg-white/5 hover:bg-red-500/25 hover:text-red-300 border border-white/10 text-zinc-400 cursor-pointer transition-colors text-center"
+              data-tip={`Search ${p.name}#${p.tag} on Blitz.gg`}
+            >
+              Blitz
+            </button>
+          </>
+        ) : (
+          <span className="text-center text-m3-outline/40 text-[9px]" aria-hidden="true">—</span>
+        )}
+      </div>
+
+      {/* 3. Skins / Loadout button — between Links and TS so it pops out */}
       <div className="flex items-center justify-center">
         {onShowLoadout && (
           <button
@@ -787,7 +800,7 @@ const PlayerRow: React.FC<{
               onShowLoadout(p);
             }}
             className="h-6 px-2.5 rounded-lg bg-gradient-to-r from-purple-500/20 to-purple-600/30 hover:from-purple-500/35 hover:to-purple-600/50 border border-purple-400/40 hover:border-purple-300 text-purple-100 hover:text-white transition-all flex items-center justify-center gap-1.5 text-[9.5px] font-bold font-display shadow-xs hover:shadow-[0_0_8px_rgba(192,132,252,0.4)] cursor-pointer active:scale-95 shrink-0"
-            title={`View ${p.name}'s weapon skins & loadout`}
+            data-tip={`View ${p.name}'s weapon skins & loadout`}
             aria-label={`View ${p.name}'s loadout`}
           >
             <Sparkles className="w-2.5 h-2.5 text-purple-300" />
@@ -796,10 +809,10 @@ const PlayerRow: React.FC<{
         )}
       </div>
 
-      {/* 3. Tracker Score badge — unified 20px size, right next to Rank */}
+      {/* 4. Tracker Score badge — unified 20px size, right next to Rank */}
       <div
         className="flex items-center justify-center"
-        title={
+        data-tip={
           p.trnScore != null
             ? `Tracker Score: ${p.trnScore} / 1000 — Tier ${scoreTier(p.trnScore).tier}`
             : p.trnState === 'pending'
@@ -816,8 +829,8 @@ const PlayerRow: React.FC<{
         )}
       </div>
 
-      {/* 4. Current rank: icon on left (20px), text on right (rank + RR) */}
-      <div className="flex items-center gap-1.5 min-w-0" title={rankTooltip(p, actLabel)}>
+      {/* 5. Current rank: icon on left (20px), text on right (rank + RR) */}
+      <div className="flex items-center gap-1.5 min-w-0" data-tip={rankTooltip(p, actLabel)}>
         {rankIcon ? (
           <img src={rankIcon} alt={p.rank} className="w-5 h-5 object-contain shrink-0" />
         ) : (
@@ -837,10 +850,10 @@ const PlayerRow: React.FC<{
         </div>
       </div>
 
-      {/* 5. Peak rank: icon on left (20px), text on right (peak + act) */}
+      {/* 6. Peak rank: icon on left (20px), text on right (peak + act) */}
       <div
         className="flex items-center gap-1.5 min-w-0"
-        title={p.peakTier > 0 ? `Peak ${p.peakRank}${actLabel ? ` (${shortAct(actLabel)})` : ''}` : 'Peak unavailable'}
+        data-tip={p.peakTier > 0 ? `Peak ${p.peakRank}${actLabel ? ` (${shortAct(actLabel)})` : ''}` : 'Peak unavailable'}
       >
         {peakIcon ? (
           <img src={peakIcon} alt={p.peakRank} className="w-5 h-5 object-contain opacity-90 shrink-0" />
@@ -859,8 +872,8 @@ const PlayerRow: React.FC<{
         </div>
       </div>
 
-      {/* 6. ACS — the sort key, so it reads first among the numbers */}
-      <div className="text-right font-mono text-[10.5px] font-bold" title="Act-wide average combat score">
+      {/* 7. ACS — the sort key, so it reads first among the numbers */}
+      <div className="text-right font-mono text-[10.5px] font-bold" data-tip="Act-wide average combat score">
         {p.acs != null ? (
           <span className={p.acs >= 200 ? 'text-m3-primary' : p.acs >= 150 ? 'text-m3-on-surface' : 'text-m3-outline'}>
             {p.acs}
@@ -872,13 +885,13 @@ const PlayerRow: React.FC<{
         )}
       </div>
 
-      {/* 7. K/D */}
-      <div className="text-right font-mono text-[10.5px] font-bold" title="Act-wide K/D">
+      {/* 8. K/D */}
+      <div className="text-right font-mono text-[10.5px] font-bold" data-tip="Act-wide K/D">
         {locked ? lockCell : p.kd == null ? trnBlank(p.trnState) : <span className={kd.color}>{kd.text}</span>}
       </div>
 
-      {/* 8. Win % */}
-      <div className="text-right font-mono text-[10.5px]" title="Act-wide win rate">
+      {/* 9. Win % */}
+      <div className="text-right font-mono text-[10.5px]" data-tip="Act-wide win rate">
         {p.winPct != null ? (
           <span className={p.winPct >= 50 ? 'text-m3-mint font-semibold' : 'text-rose-400'}>
             {p.winPct.toFixed(0)}%
@@ -890,13 +903,13 @@ const PlayerRow: React.FC<{
         )}
       </div>
 
-      {/* 9. HS % */}
-      <div className="text-right font-mono text-[10.5px] text-amber-500" title="Act-wide headshot %">
+      {/* 10. HS % */}
+      <div className="text-right font-mono text-[10.5px] text-amber-500" data-tip="Act-wide headshot %">
         {p.hsPct != null && p.hsPct > 0 ? `${p.hsPct.toFixed(0)}%` : locked ? lockCell : trnBlank(p.trnState)}
       </div>
 
-      {/* 10. Account level */}
-      <div className="text-right font-mono text-[9.5px] text-m3-outline" title="Account level">
+      {/* 11. Account level */}
+      <div className="text-right font-mono text-[9.5px] text-m3-outline" data-tip="Account level">
         {p.accountLevel > 0 ? p.accountLevel : '—'}
       </div>
     </div>

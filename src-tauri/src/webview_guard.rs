@@ -75,8 +75,10 @@ fn disk_has_webview2() -> bool {
 #[cfg(windows)]
 fn show_missing_runtime_dialog() {
     use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::Shell::{ShellExecuteW, SW_SHOWNORMAL};
-    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        MessageBoxW, MB_ICONERROR, MB_OK, SW_SHOWNORMAL,
+    };
     use windows::core::{w, PCWSTR};
 
     unsafe {

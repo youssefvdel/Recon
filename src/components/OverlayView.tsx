@@ -990,7 +990,7 @@ export const OverlayView: React.FC = () => {
               });
             }}
             className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-m3-surface-container-high/60 hover:bg-m3-surface-container-highest border border-m3-outline-subtle/55 text-m3-on-surface-variant hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors"
-            title="Center Agent Select in middle of screen"
+            data-tip="Center Agent Select in middle of screen"
           >
             <Move className="w-3.5 h-3.5 text-m3-primary" />
             <span>Center Agent Select</span>
@@ -1000,7 +1000,7 @@ export const OverlayView: React.FC = () => {
             type="button"
             onClick={() => saveConfig(getDefaultOverlayConfig())}
             className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-m3-surface-container-high/60 hover:bg-m3-surface-container-highest border border-m3-outline-subtle/55 text-m3-on-surface-variant hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors"
-            title="Reset all widget positions to defaults"
+            data-tip="Reset all widget positions to defaults"
           >
             <RotateCcw className="w-3.5 h-3.5 text-m3-on-surface-variant" />
             <span>Reset All</span>
@@ -1357,7 +1357,7 @@ export const OverlayView: React.FC = () => {
                       saveConfig({ ...config, showLobby: false });
                     }}
                     className="w-5 h-5 rounded-lg bg-red-500/30 hover:bg-red-500/50 border border-red-500/40 text-red-200 hover:text-white flex items-center justify-center cursor-pointer transition-colors"
-                    title="Remove Scoreboard from screen"
+                    data-tip="Remove Scoreboard from screen"
                   >
                     <X className="w-3.5 h-3.5 stroke-[2.5]" />
                   </button>
@@ -1366,7 +1366,7 @@ export const OverlayView: React.FC = () => {
               <div
                 onPointerDown={(e) => startResize('lobby', e)}
                 className="absolute -bottom-1 -right-1 w-5 h-5 rounded-br-2xl bg-m3-primary/90 hover:bg-m3-primary cursor-nwse-resize flex items-center justify-center text-[11px] text-m3-on-primary font-black select-none shadow-md z-10"
-                title="Drag to resize HUD widget"
+                data-tip="Drag to resize HUD widget"
               >
                 ↘
               </div>
@@ -1400,7 +1400,7 @@ export const OverlayView: React.FC = () => {
                         ? 'bg-m3-mint/15 text-m3-mint border-m3-mint/30'
                         : 'bg-m3-coral/15 text-m3-coral border-m3-coral/30'
                     }`}
-                    title={`Starting side: ${matchState.startingSide}`}
+                    data-tip={`Starting side: ${matchState.startingSide}`}
                   >
                     {matchState.startingSide === 'Defense' ? (
                       <Shield className="w-2.5 h-2.5" />
@@ -1420,14 +1420,14 @@ export const OverlayView: React.FC = () => {
 
             {/* Column Titles */}
             <div className="grid grid-cols-[18px_22px_26px_24px_minmax(32px,1fr)_minmax(30px,1fr)_minmax(32px,1fr)_minmax(32px,1fr)] items-center gap-x-1.5 px-2 text-[8.5px] font-mono text-m3-on-surface-variant uppercase tracking-wider border-b border-m3-outline-subtle/55 pb-1 shrink-0 whitespace-nowrap">
-              <span className="text-center" title="Tracker Score tier">TS</span>
-              <span className="text-center" title="Agent">Agent</span>
+              <span className="text-center" data-tip="Tracker Score tier">TS</span>
+              <span className="text-center" data-tip="Agent">Agent</span>
               <span className="text-center">Rank</span>
               <span className="text-center">Peak</span>
-              <span className="text-right" title="Act-wide average combat score — the column this board is sorted by">ACS</span>
+              <span className="text-right" data-tip="Act-wide average combat score — the column this board is sorted by">ACS</span>
               <span className="text-right">K/D</span>
-              <span className="text-right" title="Act-wide win rate">Win%</span>
-              <span className="text-right" title="Act-wide headshot %">HS%</span>
+              <span className="text-right" data-tip="Act-wide win rate">Win%</span>
+              <span className="text-right" data-tip="Act-wide headshot %">HS%</span>
             </div>
 
             {/* Vertical Compact Teams / Player Stack */}
@@ -1515,7 +1515,7 @@ export const OverlayView: React.FC = () => {
                       saveConfig({ ...config, showPregame: false });
                     }}
                     className="w-5 h-5 rounded-lg bg-red-500/30 hover:bg-red-500/50 border border-red-500/40 text-red-200 hover:text-white flex items-center justify-center cursor-pointer transition-colors"
-                    title="Remove Agent Select from screen"
+                    data-tip="Remove Agent Select from screen"
                   >
                     <X className="w-3.5 h-3.5 stroke-[2.5]" />
                   </button>
@@ -1524,7 +1524,7 @@ export const OverlayView: React.FC = () => {
               <div
                 onPointerDown={(e) => startResize('pregame', e)}
                 className="absolute -bottom-1 -right-1 w-5 h-5 rounded-br-2xl bg-m3-primary/90 hover:bg-m3-primary cursor-nwse-resize flex items-center justify-center text-[11px] text-m3-on-primary font-black select-none shadow-md z-10"
-                title="Drag to resize HUD widget"
+                data-tip="Drag to resize HUD widget"
               >
                 ↘
               </div>
@@ -1549,7 +1549,7 @@ export const OverlayView: React.FC = () => {
                 {(queueLabel(matchState?.queueId) || matchState?.mode) && (
                   <span
                     className="text-[10px] font-mono text-m3-on-surface-variant truncate"
-                    title={matchState?.queueId ? `Queue: ${matchState.queueId}` : undefined}
+                    data-tip={matchState?.queueId ? `Queue: ${matchState.queueId}` : undefined}
                   >
                     • {queueLabel(matchState?.queueId) || matchState?.mode}
                   </span>
@@ -1643,7 +1643,7 @@ export const OverlayView: React.FC = () => {
                       saveConfig({ ...config, showTopAgents: false });
                     }}
                     className="w-5 h-5 rounded-lg bg-red-500/30 hover:bg-red-500/50 border border-red-500/40 text-red-200 hover:text-white flex items-center justify-center cursor-pointer transition-colors"
-                    title="Remove Map Agents from screen"
+                    data-tip="Remove Map Agents from screen"
                   >
                     <X className="w-3.5 h-3.5 stroke-[2.5]" />
                   </button>
@@ -1652,7 +1652,7 @@ export const OverlayView: React.FC = () => {
               <div
                 onPointerDown={(e) => startResize('topAgents', e)}
                 className="absolute -bottom-1 -right-1 w-5 h-5 rounded-br-2xl bg-m3-primary/90 hover:bg-m3-primary cursor-nwse-resize flex items-center justify-center text-[11px] text-m3-on-primary font-black select-none shadow-md z-10"
-                title="Drag to resize HUD widget"
+                data-tip="Drag to resize HUD widget"
               >
                 ↘
               </div>
@@ -1686,7 +1686,7 @@ export const OverlayView: React.FC = () => {
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => setViewMode(showMetaPicks ? 'personal' : 'blitz')}
                   className="px-2 py-0.5 rounded-full bg-m3-surface-container-high/60 hover:bg-m3-surface-container-highest border border-m3-outline-subtle/55 text-m3-on-surface-variant hover:text-white text-[9px] font-mono font-bold uppercase shrink-0 transition-colors flex items-center gap-1 cursor-pointer"
-                  title="Toggle between your own agent stats and rank recommended picks"
+                  data-tip="Toggle between your own agent stats and rank recommended picks"
                 >
                   {showMetaPicks ? (
                     <span>Your Agents ({personalListCount})</span>
@@ -1780,17 +1780,17 @@ export const OverlayView: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="text-center" title="Games sampled from Blitz">
+                      <div className="text-center" data-tip="Games sampled from Blitz">
                         <span className="px-1.5 py-0.5 rounded bg-m3-primary/25 text-m3-primary border border-m3-primary/30 text-[8px] font-mono font-bold uppercase">
                           {b.matches >= 1000 ? `${(b.matches / 1000).toFixed(1)}k` : b.matches} G
                         </span>
                       </div>
 
-                      <div className="text-right font-mono text-[10px] font-bold text-m3-mint tabular-nums whitespace-nowrap" title="Lobby Win Rate">
+                      <div className="text-right font-mono text-[10px] font-bold text-m3-mint tabular-nums whitespace-nowrap" data-tip="Lobby Win Rate">
                         {b.winRate}%
                       </div>
 
-                      <div className="text-right font-mono text-[9px] text-m3-on-surface-variant font-medium tabular-nums whitespace-nowrap" title="Pick Rate">
+                      <div className="text-right font-mono text-[9px] text-m3-on-surface-variant font-medium tabular-nums whitespace-nowrap" data-tip="Pick Rate">
                         {b.pickRate}%
                       </div>
                     </div>
@@ -1870,21 +1870,21 @@ export const OverlayView: React.FC = () => {
                       {/* Matches on this map */}
                       <div
                         className="flex flex-col items-end leading-none font-mono"
-                        title={`${stat.wins} Wins - ${stat.losses} Losses on ${activeMapName}`}
+                        data-tip={`${stat.wins} Wins - ${stat.losses} Losses on ${activeMapName}`}
                       >
                         <span className="text-[10px] font-bold text-m3-on-surface">{stat.matches}G</span>
                         <span className="text-[8px] text-m3-on-surface-variant mt-0.5">{stat.wins}W-{stat.losses}L</span>
                       </div>
 
                       {/* Win % */}
-                      <div className="text-right font-mono text-[10px] font-bold tabular-nums whitespace-nowrap" title="Win Rate">
+                      <div className="text-right font-mono text-[10px] font-bold tabular-nums whitespace-nowrap" data-tip="Win Rate">
                         <span className={stat.winPct >= 50 ? 'text-m3-mint' : 'text-m3-on-surface-variant'}>
                           {stat.winPct.toFixed(1)}%
                         </span>
                       </div>
 
                       {/* K/D — TRN's map segment has no K/D, so only local games can fill it */}
-                      <div className="text-right font-mono text-[10px] font-bold tabular-nums whitespace-nowrap" title="K/D Ratio (last-20 local games)">
+                      <div className="text-right font-mono text-[10px] font-bold tabular-nums whitespace-nowrap" data-tip="K/D Ratio (last-20 local games)">
                         {stat.kd > 0 ? (
                           <span className={kdColor}>{kd}</span>
                         ) : (
@@ -1893,7 +1893,7 @@ export const OverlayView: React.FC = () => {
                       </div>
 
                       {/* HS% */}
-                      <div className="text-right font-mono text-[10px] text-amber-200/90 font-medium tabular-nums whitespace-nowrap" title="Headshot %">
+                      <div className="text-right font-mono text-[10px] text-amber-200/90 font-medium tabular-nums whitespace-nowrap" data-tip="Headshot %">
                         {stat.hsPct > 0 ? `${stat.hsPct.toFixed(0)}%` : <span className="text-m3-outline/70">—</span>}
                       </div>
                     </div>
@@ -1943,10 +1943,10 @@ export const OverlayView: React.FC = () => {
                               {b.matches >= 1000 ? `${(b.matches / 1000).toFixed(1)}k` : b.matches}g
                             </span>
                           </div>
-                          <span className="text-right font-mono text-[10px] font-bold text-m3-mint tabular-nums whitespace-nowrap" title="Win rate">
+                          <span className="text-right font-mono text-[10px] font-bold text-m3-mint tabular-nums whitespace-nowrap" data-tip="Win rate">
                             {b.winRate}%
                           </span>
-                          <span className="text-right font-mono text-[9px] text-m3-on-surface-variant tabular-nums whitespace-nowrap" title="Pick rate">
+                          <span className="text-right font-mono text-[9px] text-m3-on-surface-variant tabular-nums whitespace-nowrap" data-tip="Pick rate">
                             {b.pickRate}%
                           </span>
                         </div>
@@ -2000,7 +2000,7 @@ export const OverlayView: React.FC = () => {
                   saveConfig({ ...config, showPrepick: false });
                 }}
                 className="w-5 h-5 rounded-lg bg-red-500/30 hover:bg-red-500/50 border border-red-500/40 text-red-200 hover:text-white flex items-center justify-center cursor-pointer transition-colors"
-                title="Remove Pre-Pick badge from screen"
+                data-tip="Remove Pre-Pick badge from screen"
               >
                 <X className="w-3.5 h-3.5 stroke-[2.5]" />
               </button>
@@ -2052,7 +2052,7 @@ const PregameTeamColumn: React.FC<{
     <div className="flex flex-col gap-1.5 pointer-events-none select-none">
       {/* Table Column Headers: Score badge, Player, Rank, Peak, K/D, Win%, HS% */}
       <div className="grid grid-cols-[26px_1fr_40px_40px_48px_50px_48px] items-center px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-m3-on-surface-variant border-b border-m3-outline-subtle/55 whitespace-nowrap">
-        <span className="text-center" title="Tracker Score tier">TS</span>
+        <span className="text-center" data-tip="Tracker Score tier">TS</span>
         <span>Player</span>
         <span className="text-center">Rank</span>
         <span className="text-center">Peak</span>
@@ -2072,7 +2072,7 @@ const PregameTeamColumn: React.FC<{
           // (Name `privLocked`: `locked` above already means agent lock-in.)
           const privLocked = p.isTrnPrivate === true;
           const privLockCell = (
-            <span title={TRN_PRIVATE_TOOLTIP} className="inline-flex items-center justify-center text-zinc-500">
+            <span data-tip={TRN_PRIVATE_TOOLTIP} className="inline-flex items-center justify-center text-zinc-500">
               <LockIcon className="w-2.5 h-2.5" />
             </span>
           );
@@ -2112,7 +2112,7 @@ const PregameTeamColumn: React.FC<{
               {/* Tracker Score badge (hex tier emblem, never a raw number) */}
               <div
                 className="flex items-center justify-center shrink-0"
-                title={
+                data-tip={
                   p.trnScore != null
                     ? `Tracker Score: ${p.trnScore} / 1000 — Tier ${scoreTier(p.trnScore).tier}`
                     : 'Tracker Score unavailable'
@@ -2153,7 +2153,7 @@ const PregameTeamColumn: React.FC<{
                     <img
                       src={flagUrl}
                       alt={p.country || ''}
-                      title={countryName ? `Country: ${countryName} (${p.country})` : `Country: ${p.country}`}
+                      data-tip={countryName ? `Country: ${countryName} (${p.country})` : `Country: ${p.country}`}
                       draggable={false}
                       onError={(e) => {
                         (e.currentTarget as HTMLElement).style.display = 'none';
@@ -2168,10 +2168,10 @@ const PregameTeamColumn: React.FC<{
                     {party && (
                       <span
                         className={`w-2 h-2 rounded-full ${party.bar} shrink-0 shadow-xs`}
-                        title={`Queued together in ${party.name}`}
+                        data-tip={`Queued together in ${party.name}`}
                       />
                     )}
-                    <span className="font-bold text-[12.5px] text-m3-on-surface truncate" title={`${p.name}${p.tag ? '#' + p.tag : ''}`}>
+                    <span className="font-bold text-[12.5px] text-m3-on-surface truncate" data-tip={`${p.name}${p.tag ? '#' + p.tag : ''}`}>
                       {p.name}
                     </span>
                     {p.isMe && (
@@ -2182,7 +2182,7 @@ const PregameTeamColumn: React.FC<{
                     {p.isIncognito && (
                       <span
                         className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-300 border border-amber-400/30 text-[7.5px] font-mono font-bold uppercase shrink-0"
-                        title={
+                        data-tip={
                           p.nameResolved
                             ? 'Name Hidden in Valorant (Unmasked by Recon)'
                             : 'Riot hides this name during live matches — revealed automatically after the game'
@@ -2195,7 +2195,7 @@ const PregameTeamColumn: React.FC<{
                     {p.isTrnPrivate && (
                       <span
                         className="flex items-center px-1 py-px rounded bg-white/5 text-zinc-400 border border-white/10 shrink-0"
-                        title={TRN_PRIVATE_TOOLTIP}
+                        data-tip={TRN_PRIVATE_TOOLTIP}
                       >
                         <LockIcon className="w-2.5 h-2.5" />
                       </span>
@@ -2222,7 +2222,7 @@ const PregameTeamColumn: React.FC<{
               {/* Current Rank emblem + live RR */}
               <div
                 className="flex flex-col items-center justify-center leading-none"
-                title={rankTooltip(p, seasons?.[p.peakSeasonId?.toLowerCase() ?? ''])}
+                data-tip={rankTooltip(p, seasons?.[p.peakSeasonId?.toLowerCase() ?? ''])}
               >
                 {icon ? (
                   <img src={icon} alt="" draggable={false} className="w-[22px] h-[22px] object-contain shrink-0" />
@@ -2239,7 +2239,7 @@ const PregameTeamColumn: React.FC<{
               {/* Peak Rank emblem + the act it was reached in */}
               <div
                 className="flex flex-col items-center justify-center leading-none"
-                title={`Peak: ${p.peakRank}${
+                data-tip={`Peak: ${p.peakRank}${
                   seasons?.[p.peakSeasonId?.toLowerCase() ?? '']
                     ? ` — ${seasons[p.peakSeasonId!.toLowerCase()]}`
                     : ''
@@ -2258,12 +2258,12 @@ const PregameTeamColumn: React.FC<{
               </div>
 
               {/* K/D */}
-              <div className="text-right font-mono text-[11px] font-bold tabular-nums whitespace-nowrap" title="K/D Ratio">
+              <div className="text-right font-mono text-[11px] font-bold tabular-nums whitespace-nowrap" data-tip="K/D Ratio">
                 {privLocked ? privLockCell : <span className={kd.color}>{kd.text}</span>}
               </div>
 
               {/* Win % */}
-              <div className="text-right font-mono text-[11px] font-semibold tabular-nums whitespace-nowrap" title="Act Win Rate">
+              <div className="text-right font-mono text-[11px] font-semibold tabular-nums whitespace-nowrap" data-tip="Act Win Rate">
                 {p.winPct != null ? (
                   <span className={p.winPct >= 50 ? 'text-m3-mint' : 'text-m3-on-surface-variant'}>
                     {p.winPct}%
@@ -2276,7 +2276,7 @@ const PregameTeamColumn: React.FC<{
               </div>
 
               {/* HS % */}
-              <div className="text-right font-mono text-[11px] tabular-nums whitespace-nowrap" title="Headshot %">
+              <div className="text-right font-mono text-[11px] tabular-nums whitespace-nowrap" data-tip="Headshot %">
                 {p.hsPct != null ? (
                   <span className="text-amber-200/90 font-medium">{p.hsPct}%</span>
                 ) : privLocked ? (
@@ -2314,7 +2314,7 @@ const VerticalSquadColumn: React.FC<{
       // Private TRN profile: stat cells show a lock, not dashes.
       const privLocked = p.isTrnPrivate === true;
       const privLockCell = (
-        <span title={TRN_PRIVATE_TOOLTIP} className="inline-flex items-center justify-center text-zinc-500">
+        <span data-tip={TRN_PRIVATE_TOOLTIP} className="inline-flex items-center justify-center text-zinc-500">
           <LockIcon className="w-2.5 h-2.5" />
         </span>
       );
@@ -2323,11 +2323,11 @@ const VerticalSquadColumn: React.FC<{
       // animation — this grid repaints on every 2.5s tick.
       const trnBlank = (state: LiveMatchPlayer['trnState']) =>
         state === 'pending' ? (
-          <span title={TRN_PENDING_TOOLTIP} className="inline-flex items-center justify-center">
+          <span data-tip={TRN_PENDING_TOOLTIP} className="inline-flex items-center justify-center">
             <span className="block h-[3px] w-[3px] rounded-full bg-m3-outline/50" />
           </span>
         ) : (
-          <span className="text-m3-outline/70" title={state === 'unavailable' ? TRN_UNAVAILABLE_TOOLTIP : undefined}>
+          <span className="text-m3-outline/70" data-tip={state === 'unavailable' ? TRN_UNAVAILABLE_TOOLTIP : undefined}>
             —
           </span>
         );
@@ -2338,7 +2338,7 @@ const VerticalSquadColumn: React.FC<{
       return (
         <div
           key={p.puuid}
-          title={`${p.name}${p.tag ? '#' + p.tag : ''} • ${p.agentName}${countryName ? ` • ${countryName}` : ''}`}
+          data-tip={`${p.name}${p.tag ? '#' + p.tag : ''} • ${p.agentName}${countryName ? ` • ${countryName}` : ''}`}
           className={`relative overflow-hidden grid grid-cols-[18px_22px_26px_24px_minmax(32px,1fr)_minmax(30px,1fr)_minmax(32px,1fr)_minmax(32px,1fr)] items-center gap-x-1.5 h-[28px] px-2 rounded-lg border text-xs transition-colors shrink-0 whitespace-nowrap min-w-0 ${
             party
               ? `${party.bg} border-m3-outline-subtle/55`
@@ -2367,7 +2367,7 @@ const VerticalSquadColumn: React.FC<{
           {/* Tracker Score tier badge */}
           <div
             className="flex items-center justify-center shrink-0"
-            title={
+            data-tip={
               p.trnScore != null
                 ? `Tracker Score: ${p.trnScore} / 1000 — Tier ${scoreTier(p.trnScore).tier}`
                 : p.isTrnPrivate
@@ -2409,7 +2409,7 @@ const VerticalSquadColumn: React.FC<{
               <img
                 src={flagUrl}
                 alt={p.country || ''}
-                title={countryName ? `Country: ${countryName} (${p.country})` : `Country: ${p.country}`}
+                data-tip={countryName ? `Country: ${countryName} (${p.country})` : `Country: ${p.country}`}
                 draggable={false}
                 onError={(e) => {
                   (e.currentTarget as HTMLElement).style.display = 'none';
@@ -2420,13 +2420,13 @@ const VerticalSquadColumn: React.FC<{
             {party && (
               <span
                 className={`absolute -top-0.5 -left-0.5 w-1.5 h-1.5 rounded-full ${party.bar} shadow-xs border border-black/60`}
-                title={`Queued together in ${party.name}`}
+                data-tip={`Queued together in ${party.name}`}
               />
             )}
           </div>
 
           {/* Current Rank emblem + live RR */}
-          <div className="flex flex-col items-center justify-center leading-none" title={rankTooltip(p)}>
+          <div className="flex flex-col items-center justify-center leading-none" data-tip={rankTooltip(p)}>
             {icon ? (
               <img src={icon} alt="" draggable={false} className="w-4 h-4 object-contain shrink-0" />
             ) : (
@@ -2440,7 +2440,7 @@ const VerticalSquadColumn: React.FC<{
           </div>
 
           {/* Peak Rank (Icon only) */}
-          <div className="flex items-center justify-center" title={`Peak: ${p.peakRank}`}>
+          <div className="flex items-center justify-center" data-tip={`Peak: ${p.peakRank}`}>
             {peakIcon ? (
               <img src={peakIcon} alt="" draggable={false} className="w-3.5 h-3.5 object-contain opacity-75 shrink-0" />
             ) : (
@@ -2451,7 +2451,7 @@ const VerticalSquadColumn: React.FC<{
           {/* ACS — the sort key, so it reads first among the numbers */}
           <div
             className="text-right font-mono text-[10px] font-bold tabular-nums leading-none"
-            title="Act-wide average combat score"
+            data-tip="Act-wide average combat score"
           >
             {p.acs != null ? (
               <span className={p.acs >= 200 ? 'text-m3-primary' : p.acs >= 150 ? 'text-m3-on-surface' : 'text-m3-on-surface-variant'}>
@@ -2465,12 +2465,12 @@ const VerticalSquadColumn: React.FC<{
           </div>
 
           {/* KD */}
-          <div className="text-right font-mono text-[10px] tabular-nums whitespace-nowrap" title="Act-wide K/D">
+          <div className="text-right font-mono text-[10px] tabular-nums whitespace-nowrap" data-tip="Act-wide K/D">
             {privLocked ? privLockCell : p.kd == null ? trnBlank(p.trnState) : <span className={kd.color}>{kd.text}</span>}
           </div>
 
           {/* Act-wide win rate */}
-          <div className="text-right font-mono text-[10px] tabular-nums whitespace-nowrap" title="Act-wide win rate">
+          <div className="text-right font-mono text-[10px] tabular-nums whitespace-nowrap" data-tip="Act-wide win rate">
             {p.winPct != null ? (
               <span className={p.winPct >= 50 ? 'text-m3-mint font-semibold' : 'text-rose-400'}>
                 {p.winPct.toFixed(0)}%
@@ -2483,7 +2483,7 @@ const VerticalSquadColumn: React.FC<{
           </div>
 
           {/* Act-wide headshot % */}
-          <div className="text-right font-mono text-[10px] text-amber-200/90 tabular-nums whitespace-nowrap" title="Act-wide headshot %">
+          <div className="text-right font-mono text-[10px] text-amber-200/90 tabular-nums whitespace-nowrap" data-tip="Act-wide headshot %">
             {p.hsPct != null && p.hsPct > 0 ? `${p.hsPct.toFixed(0)}%` : privLocked ? privLockCell : trnBlank(p.trnState)}
           </div>
         </div>

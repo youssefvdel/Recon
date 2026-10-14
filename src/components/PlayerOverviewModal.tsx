@@ -195,7 +195,7 @@ export const PlayerOverviewModal: React.FC<Props> = ({
                       type="button"
                       onClick={handleCopyRiotId}
                       className="p-1 rounded-md hover:bg-white/10 text-m3-outline hover:text-white cursor-pointer transition-colors"
-                      title={copied ? 'Copied!' : `Copy ${player.name}#${player.tag}`}
+                      data-tip={copied ? 'Copied!' : `Copy ${player.name}#${player.tag}`}
                     >
                       {copied ? <Check className="w-3.5 h-3.5 text-m3-mint" /> : <Copy className="w-3.5 h-3.5" />}
                     </button>
@@ -235,7 +235,7 @@ export const PlayerOverviewModal: React.FC<Props> = ({
                     type="button"
                     onClick={() => openExternalUrl(trackerUrls.trn)}
                     className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-white/5 hover:bg-[#b6abf7]/25 hover:text-[#b6abf7] border border-white/10 text-zinc-300 transition-colors cursor-pointer"
-                    title="Open on Tracker.gg (TRN)"
+                    data-tip="Open on Tracker.gg (TRN)"
                   >
                     TRN
                   </button>
@@ -243,7 +243,7 @@ export const PlayerOverviewModal: React.FC<Props> = ({
                     type="button"
                     onClick={() => openExternalUrl(trackerUrls.blitz)}
                     className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-white/5 hover:bg-red-500/25 hover:text-red-300 border border-white/10 text-zinc-300 transition-colors cursor-pointer"
-                    title="Open on Blitz.gg"
+                    data-tip="Open on Blitz.gg"
                   >
                     Blitz
                   </button>
@@ -403,7 +403,7 @@ export const PlayerOverviewModal: React.FC<Props> = ({
             ) : isPrivate ? (
               <div className="p-6 rounded-2xl bg-m3-surface-container-low border border-m3-outline-subtle text-center text-xs text-m3-outline flex flex-col items-center gap-2">
                 <Lock className="w-5 h-5 text-zinc-400" />
-                <span title={TRN_PRIVATE_TOOLTIP}>Private tracker profile — sign in on tracker.gg to make it public.</span>
+                <span data-tip={TRN_PRIVATE_TOOLTIP}>Private tracker profile — sign in on tracker.gg to make it public.</span>
               </div>
             ) : (
               <div className="p-6 rounded-2xl bg-m3-surface-container-low border border-m3-outline-subtle text-center text-xs text-m3-outline">
