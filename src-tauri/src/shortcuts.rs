@@ -74,7 +74,7 @@ pub fn load_shortcuts() -> Vec<QuickShortcut> {
         is_removable: false,
     }];
 
-    if let Some(content) = crate::paths::read_data_file("shortcuts.txt") {
+    if let Some(content) = crate::settings::load_shortcuts_raw() {
         for line in content.lines() {
             let clean_line = line.trim().trim_start_matches('\u{feff}');
             let parts: Vec<&str> = clean_line.split('|').collect();
@@ -116,5 +116,5 @@ pub fn save_shortcuts(shortcuts: &[QuickShortcut]) {
             s.is_removable
         ));
     }
-    let _ = crate::paths::write_data_file("shortcuts.txt", &lines.join("\r\n"));
+    crate::settings::save_shortcuts_raw(&lines.join("\r\n"));
 }

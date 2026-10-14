@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://127.0.0.1:5173",
-    "beforeDevCommand": "bun run dev",
+    "beforeDevCommand": "bun run dev:ui",
     "beforeBuildCommand": "bun run build:ui"
   },
   "app": {
@@ -45,6 +45,12 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      }
+    },
     "publisher": "Youssef Adel",
     "copyright": "Copyright \u00a9 2026 Youssef Adel. All rights reserved.",
     "category": "Utility",

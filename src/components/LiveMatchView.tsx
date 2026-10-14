@@ -31,7 +31,7 @@ import {
   type PlayerLoadout,
 } from '../utils/loadout';
 import { LoadoutViewer } from './LoadoutViewer';
-import { useTrackerData } from '../hooks/useTrackerData';
+import { useSeasonNames } from '../hooks/useTrackerData';
 import { ScoreBadge, scoreTier } from './ScoreBadge';
 import { ServerChip } from './ServerChip';
 import {
@@ -83,8 +83,10 @@ export const LiveMatchView: React.FC = () => {
   const [tierIcons, setTierIcons] = useState<Record<number, string>>({});
   const prevStateRef = useRef<LiveMatchState | null>(null);
 
-  // Act labels for the peak-act caption under the peak emblem.
-  const { seasonNames } = useTrackerData();
+  // Act labels for the peak-act caption under the peak emblem. Scoped
+  // subscription: the full tracker store emits on every background TRN
+  // enrichment, and this view needs nothing else from it.
+  const seasonNames = useSeasonNames();
 
   const loadState = useCallback(async () => {
     try {
@@ -247,17 +249,52 @@ export const LiveMatchView: React.FC = () => {
   const isLobbyWaiting = !isLive && !(effectiveState as LiveMatchState | null)?.isPreviousMatch;
 
   // Your team / enemy team, with Deathmatch flattened into one FFA board.
-  const teams = useMemo(
-    () =>
-      effectiveState
-        ? splitTeams({
-            isDeathmatch: effectiveState.isDeathmatch,
-            blueTeam: effectiveState.blueTeam,
-            redTeam: effectiveState.redTeam,
-          })
-        : { yours: [], theirs: [], isFfa: false },
-    [effectiveState]
-  );
+  // Row order is frozen per match: re-sorting by ACS on every render made
+  // rows jump each time a player's TRN stats staggered in through the serial
+  // gate. Order is established once per lobby (ACS-desc as known then);
+  // newcomers append at the end, and a new matchId re-freezes. The freeze
+  // lives in state (adjusted during render, the React-sanctioned pattern) so
+  // no refs are touched mid-render.
+  const matchKey = effectiveState
+    ? `${effectiveState.isPreviousMatch ? 'prev' : 'live'}:${effectiveState.matchId}`
+    : 'idle';
+  const [frozenOrder, setFrozenOrder] = useState<{ key: string; order: string[] }>({
+    key: '',
+    order: [],
+  });
+  if (matchKey !== frozenOrder.key) {
+    const seed = [...(effectiveState?.blueTeam ?? []), ...(effectiveState?.redTeam ?? [])]
+      .sort(byAcsDesc)
+      .map((p) => p.puuid.toLowerCase());
+    setFrozenOrder({ key: matchKey, order: seed });
+  }
+  const teams = useMemo(() => {
+    const base = effectiveState
+      ? splitTeams({
+          isDeathmatch: effectiveState.isDeathmatch,
+          blueTeam: effectiveState.blueTeam,
+          redTeam: effectiveState.redTeam,
+        })
+      : { yours: [], theirs: [], isFfa: false };
+    const rank = new Map(frozenOrder.order.map((id, i) => [id, i]));
+    // Late joiners (e.g. an incognito unmask swapping identity mid-lobby)
+    // append at the end, sorted by name for determinism, instead of
+    // re-sorting everyone around them.
+    const place = (list: LiveMatchPlayer[]) => {
+      const known: LiveMatchPlayer[] = [];
+      const fresh: LiveMatchPlayer[] = [];
+      for (const p of list) {
+        (rank.has(p.puuid.toLowerCase()) ? known : fresh).push(p);
+      }
+      known.sort(
+        (a, b) =>
+          (rank.get(a.puuid.toLowerCase()) ?? 0) - (rank.get(b.puuid.toLowerCase()) ?? 0)
+      );
+      fresh.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      return [...known, ...fresh];
+    };
+    return { yours: place(base.yours), theirs: place(base.theirs), isFfa: base.isFfa };
+  }, [effectiveState, frozenOrder]);
 
   return (
     <div className="h-full min-h-0 flex flex-col justify-start gap-2.5 max-w-6xl mx-auto w-full overflow-hidden px-6 pt-3 pb-6 select-none">
@@ -527,7 +564,9 @@ const PlayerTable: React.FC<{
       </div>
 
       <div className="flex flex-col gap-1.5 overflow-hidden shrink-0">
-        {[...players].sort(byAcsDesc).map((p) => (
+        {/* Rendered in the parent's frozen per-match order — never re-sorted
+            here, or rows jump as TRN stats stagger in. */}
+        {players.map((p) => (
           <PlayerRow
             key={p.puuid}
             p={p}

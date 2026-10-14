@@ -987,4 +987,26 @@ export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
   }
 }
 
+export async function getStartMinimized(): Promise<boolean> {
+  if (!isTauri()) {
+    return localStorage.getItem('aspect_start_minimized') !== 'false';
+  }
+  try {
+    return await invoke<boolean>('get_start_minimized');
+  } catch {
+    return true;
+  }
+}
+
+export async function setStartMinimized(enabled: boolean): Promise<boolean> {
+  if (!isTauri()) {
+    localStorage.setItem('aspect_start_minimized', enabled ? 'true' : 'false');
+    return enabled;
+  }
+  try {
+    return await invoke<boolean>('set_start_minimized', { enabled });
+  } catch {
+    return false;
+  }
+}
 

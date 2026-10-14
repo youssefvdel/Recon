@@ -14,6 +14,8 @@ mod trn_cache;
 mod trn_proxy;
 mod window_manager;
 mod updater;
+mod webview_guard;
+mod settings;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -312,7 +314,7 @@ fn get_windows() -> Result<Vec<window_manager::WindowInfo>, String> {
 #[tauri::command]
 fn set_auto_borderless(enabled: bool) -> Result<(), String> {
     AUTO_BORDERLESS_ENABLED.store(enabled, Ordering::Relaxed);
-    let _ = paths::write_data_file("auto_borderless.txt", if enabled { "1" } else { "0" });
+    crate::settings::set_auto_borderless(enabled);
     Ok(())
 }
 
@@ -701,16 +703,44 @@ fn set_autostart_enabled(enabled: bool) -> Result<bool, String> {
     use winreg::enums::*;
     use winreg::RegKey;
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let (run, _) = hkcu.create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run")
+    let (run, _) = hkcu.create_subkey("Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run")
         .map_err(|e| format!("Failed to open Run key for write: {}", e))?;
     if enabled {
         let exe_path = std::env::current_exe()
             .map_err(|e| format!("Cannot get current exe path: {}", e))?;
-        let exe_str = format!("\"{}\"", exe_path.to_string_lossy());
+        // Boot lands in the tray when the start-minimized pref is on
+        // (default): the flag is read back in setup to hide the window.
+        let exe_str = if start_minimized_enabled() {
+            format!("\"{}\" --minimized", exe_path.to_string_lossy())
+        } else {
+            format!("\"{}\"", exe_path.to_string_lossy())
+        };
         run.set_value("Aspect", &exe_str)
             .map_err(|e| format!("Failed to set registry value: {}", e))?;
     } else {
         let _ = run.delete_value("Aspect");
+    }
+    Ok(enabled)
+}
+
+/// Start-minimized pref for boot launches. Lives in settings.json (not
+/// localStorage) so the backend can honor it before any window exists.
+/// Default ON: a login launch should never pop a window over the game.
+fn start_minimized_enabled() -> bool {
+    crate::settings::is_start_minimized()
+}
+
+#[tauri::command]
+fn get_start_minimized() -> Result<bool, String> {
+    Ok(start_minimized_enabled())
+}
+
+#[tauri::command]
+fn set_start_minimized(enabled: bool) -> Result<bool, String> {
+    crate::settings::set_start_minimized(enabled);
+    // Re-write the Run entry so a stored boot launch picks up the new flag.
+    if get_autostart_enabled().unwrap_or(false) {
+        return set_autostart_enabled(true);
     }
     Ok(enabled)
 }
@@ -814,6 +844,10 @@ fn list_supported_modes() -> Result<Vec<display::DisplayMode>, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Debloated Windows images often ship without WebView2. Fail with a
+    // repair dialog instead of the cryptic webview-creation error.
+    webview_guard::ensure_webview2_or_exit();
+
     // Copy any pre-rename data out of %LOCALAPPDATA%\TrueStretchStudio before
     // the first read below; copy-only, per file, idempotent, failures logged.
     paths::migrate_legacy_data();
@@ -833,9 +867,7 @@ pub fn run() {
     let preferred_stretched = std::sync::Arc::new(Mutex::new((saved_w, saved_h)));
     let pref_clone = std::sync::Arc::clone(&preferred_stretched);
 
-    let initial_auto_bl = paths::read_data_file("auto_borderless.txt")
-        .map(|s| s.trim() == "1")
-        .unwrap_or(false);
+    let initial_auto_bl = crate::settings::is_auto_borderless();
     AUTO_BORDERLESS_ENABLED.store(initial_auto_bl, Ordering::Relaxed);
 
     // Self-heal: earlier builds wrote vendor display keys (AMD Dal*, Intel
@@ -869,6 +901,14 @@ pub fn run() {
     builder
         .manage(app_state)
         .setup(move |app| {
+            // Boot-to-tray: the Run entry passes --minimized at login, so the
+            // main window stays hidden and the tray icon owns the session.
+            // A tray click (or single-instance re-launch) shows it again.
+            if std::env::args().any(|a| a == "--minimized") {
+                if let Some(main) = app.get_webview_window("main") {
+                    let _ = main.hide();
+                }
+            }
             // Dev-only: re-create the boot-time dev dashboard that used to be
             // declared in tauri.conf.json. Compiled out of release entirely —
             // no renderer, no window, nothing to hide.
@@ -1247,6 +1287,8 @@ pub fn run() {
             check_channel_update,
             get_autostart_enabled,
             set_autostart_enabled,
+            get_start_minimized,
+            set_start_minimized,
             open_external_url,
             open_dev_window,
             window_minimize,

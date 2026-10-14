@@ -38,6 +38,8 @@ import {
   openExternalUrl,
   getAutostartEnabled,
   setAutostartEnabled,
+  getStartMinimized,
+  setStartMinimized as ipcSetStartMinimized,
   setSpaceSpam as ipcSetSpaceSpam,
   fetchAllMonitors,
   fetchOverlayMonitor,
@@ -136,6 +138,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
     setCurrentVersion(ver);
     const auto = await getAutostartEnabled();
     setAutostart(auto);
+    getStartMinimized().then(setStartMinimized).catch(() => {});
     isOverlayVisible().then(setOverlayOpen).catch(() => {});
     getOverlayEditMode().then(setInEditMode).catch(() => {});
     try {
@@ -276,10 +279,14 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
     try { await ipcSetSpaceSpam(next); } catch { setSpaceSpam(!next); }
   };
 
-  const handleToggleStartMinimized = () => {
+  const handleToggleStartMinimized = async () => {
     const next = !startMinimized;
     setStartMinimized(next);
-    localStorage.setItem('aspect_start_minimized', next ? 'true' : 'false');
+    try {
+      await ipcSetStartMinimized(next);
+    } catch {
+      setStartMinimized(!next);
+    }
   };
 
   const handleToggleCloseToTray = () => {

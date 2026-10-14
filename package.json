@@ -4,7 +4,8 @@
   "version": "0.4.4",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "tauri dev",
+    "dev:ui": "vite",
     "build:ui": "tsc -b && vite build",
     "build": "npm run build:ui && tauri build --no-bundle",
     "build:bundle": "npm run build:ui && tauri build",

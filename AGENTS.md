@@ -33,7 +33,8 @@ Prerequisites: Bun, Rust stable (`x86_64-pc-windows-msvc`), VS 2022 Build Tools 
 
 ```bash
 bun install                  # install root deps
-bun run tauri dev            # app with hot-reload UI (Vite on 127.0.0.1:5173, strictPort)
+bun run dev                  # app with hot-reload UI (Vite on 127.0.0.1:5173, strictPort)
+bun run dev:ui               # Vite frontend only (browser preview, no Rust)
 bun run build:ui             # type-check (tsc -b) + vite build -> dist/
 bun run build                # UI + Rust, no installer -> src-tauri/target/release/recon.exe
 bun run build:bundle          # full release -> src-tauri/target/release/bundle/

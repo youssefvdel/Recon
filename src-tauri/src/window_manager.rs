@@ -495,7 +495,7 @@ pub fn restore_blur_behind(_hwnd: HWND) {
     // API that causes visual artifacts and flickering on layered windows.
 }
 
-fn overlay_monitor_file() -> std::path::PathBuf {
+pub(crate) fn overlay_monitor_file() -> std::path::PathBuf {
     std::env::var("LOCALAPPDATA")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::path::PathBuf::from(r"C:\Users\Administrator\AppData\Local"))
@@ -506,8 +506,7 @@ fn overlay_monitor_file() -> std::path::PathBuf {
 /// Overlay monitor choice: "auto" (default — follow the game window) or a
 /// `\\.\DISPLAYn` device name pinned by the user in Settings.
 pub fn get_overlay_monitor_setting() -> String {
-    std::fs::read_to_string(overlay_monitor_file())
-        .ok()
+    crate::settings::load_overlay_monitor()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "auto".to_string())
@@ -521,11 +520,7 @@ pub fn set_overlay_monitor_setting(name: &str) -> Result<String, String> {
             return Err(format!("Unknown monitor '{}'", clean));
         }
     }
-    let file = overlay_monitor_file();
-    if let Some(dir) = file.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("Cannot create settings dir: {}", e))?;
-    }
-    std::fs::write(&file, clean).map_err(|e| format!("Cannot save overlay monitor: {}", e))?;
+    crate::settings::save_overlay_monitor(clean);
     Ok(clean.to_string())
 }
 

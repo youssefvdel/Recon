@@ -390,11 +390,11 @@ pub fn scan_pressed_non_modifier_key() -> Option<u16> {
 }
 
 pub fn save_saved_hotkey(binding: &ShortcutBinding) {
-    let _ = crate::paths::write_data_file("hotkey.txt", &binding.serialize());
+    crate::settings::save_hotkey_raw(&binding.serialize());
 }
 
 pub fn load_saved_hotkey() -> ShortcutBinding {
-    if let Some(s) = crate::paths::read_data_file("hotkey.txt") {
+    if let Some(s) = crate::settings::load_hotkey_raw() {
         if let Some(binding) = ShortcutBinding::deserialize(&s) {
             return binding;
         }
@@ -403,21 +403,11 @@ pub fn load_saved_hotkey() -> ShortcutBinding {
 }
 
 pub fn save_saved_stretched_res(w: u32, h: u32) {
-    let _ = crate::paths::write_data_file("stretched_res.txt", &format!("{}:{}", w, h));
+    crate::settings::save_stretched(w, h);
 }
 
 pub fn load_saved_stretched_res(default_w: u32, default_h: u32) -> (u32, u32) {
-    if let Some(s) = crate::paths::read_data_file("stretched_res.txt") {
-        let parts: Vec<&str> = s.trim().split(':').collect();
-        if parts.len() == 2 {
-            if let (Ok(w), Ok(h)) = (parts[0].parse(), parts[1].parse()) {
-                if w > 0 && h > 0 {
-                    return (w, h);
-                }
-            }
-        }
-    }
-    (default_w, default_h)
+    crate::settings::load_stretched().unwrap_or((default_w, default_h))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
