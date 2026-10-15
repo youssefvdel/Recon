@@ -45,8 +45,12 @@ import {
 import { listen } from '@tauri-apps/api/event';
 import { IS_DEV } from './utils/devTools';
 import { ConsentModal } from './components/ConsentModal';
+import { OpsNotices } from './components/OpsNotices';
+import { fetchNotices, noticeApplies, isDismissed, sendPulse, type OpsNotice } from './utils/ops';
+import { APP_VERSION } from './utils/version';
 import { CrashOffer } from './components/CrashOffer';
-import { hasConsented, installCrashCapture, CONSENT_EVENT } from './utils/consent';
+import { installCrashCapture, CONSENT_EVENT } from './utils/consent';
+import { accountCurrent } from './utils/accounts';
 
 export const App: React.FC = () => {
   const isOverlay = React.useMemo(() => {
@@ -131,13 +135,27 @@ export const App: React.FC = () => {
   const announcedUpdateRef = useRef('');
   const [hasUpdate, setHasUpdate] = useState(false);
   const [_latestVersion, setLatestVersion] = useState('');
-  const [showConsent, setShowConsent] = useState<boolean>(() => {
-    try {
-      return !hasConsented();
-    } catch {
-      return false;
-    }
-  });
+  const [showConsent, setShowConsent] = useState<boolean>(false);
+  const [opsNotices, setOpsNotices] = useState<OpsNotice[]>([]);
+
+  // Broadcasts + usage pulse, main window only, once per launch.
+  // The first-run consent popup is gone: crash capture stays local-only and
+  // opt-in from Settings, and the modal now opens only from there.
+  useEffect(() => {
+    if (isOverlay || isDevWindow) return;
+    let dead = false;
+    fetchNotices().then((all) => {
+      if (dead) return;
+      setOpsNotices(all.filter((n) => noticeApplies(n, APP_VERSION) && !isDismissed(n.id)));
+    });
+    accountCurrent()
+      .then((live) => sendPulse(live, APP_VERSION))
+      .catch(() => sendPulse(null, APP_VERSION));
+    return () => {
+      dead = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Local-only crash capture (opt-in flag lives in utils/consent).
   // Consent modal re-opens from Settings via the CONSENT_EVENT.
@@ -425,6 +443,10 @@ export const App: React.FC = () => {
           hasUpdate={hasUpdate}
         />
         {/* Scrollable View Content (unified grid locks to viewport, no scroll) */}
+        <OpsNotices
+          notices={opsNotices}
+          onDismiss={(id) => setOpsNotices((prev) => prev.filter((n) => n.id !== id))}
+        />
         <main
           ref={mainRef}
           className={
