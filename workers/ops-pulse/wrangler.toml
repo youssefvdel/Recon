@@ -1,0 +1,9 @@
+name = "recon-ops-pulse"
+main = "src/index.ts"
+compatibility_date = "2026-10-14"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "recon-pulses"
+database_id = "PASTE-D1-ID-HERE"

@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS pulses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL,
+  riot_id TEXT NOT NULL DEFAULT 'unknown',
+  version TEXT NOT NULL DEFAULT 'unknown'
+);
+CREATE INDEX IF NOT EXISTS idx_pulses_ts ON pulses (ts);
