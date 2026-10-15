@@ -144,15 +144,21 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (isOverlay || isDevWindow) return;
     let dead = false;
-    fetchNotices().then((all) => {
-      if (dead) return;
-      setOpsNotices(all.filter((n) => noticeApplies(n, APP_VERSION) && !isDismissed(n.id)));
-    });
+    const pullNotices = () => {
+      fetchNotices().then((all) => {
+        if (dead) return;
+        setOpsNotices(all.filter((n) => noticeApplies(n, APP_VERSION) && !isDismissed(n.id)));
+      });
+    };
+    pullNotices();
+    // Live broadcast: running apps pick up new notices within 5 minutes.
+    const pollId = setInterval(pullNotices, 5 * 60 * 1000);
     accountCurrent()
       .then((live) => sendPulse(live, APP_VERSION))
       .catch(() => sendPulse(null, APP_VERSION));
     return () => {
       dead = true;
+      clearInterval(pollId);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
