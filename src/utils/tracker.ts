@@ -2073,6 +2073,15 @@ let trnSpreadLastPollAt = 0;
  *  Resets on match change — the budget is per lobby, not per session and
  *  not per phase (a fill dispatched pre-flip drains across it). */
 let trnSpreadSpent = 0;
+/** When this lobby's budget last refilled. A spent budget used to strand the
+ *  rest of the lobby for the WHOLE match (a captcha wall or one flaky window
+ *  could eat all 10 firings), leaving those players on the "still loading"
+ *  dot forever. It now refills on a timer instead; the real ceiling is the
+ *  Rust per-lobby request cap, which this does not touch. */
+let trnSpreadRefilledAt = 0;
+/** One refill window per lobby: long enough that a wall cannot be hammered,
+ *  short enough that a 35-minute match gets several honest attempts. */
+export const TRN_SPREAD_REFILL_MS = 5 * 60 * 1000;
 /** Owning generation of the open drain job for this lobby (0 = none). Only
  *  the owner settles it, so a stale settle can never kill a newer job. */
 let trnDrainGen = 0;
@@ -2132,10 +2141,18 @@ async function enqueueTrnSpread(matchId: string, phase: string, players: SpreadP
     // New match: stale firings must never fetch for the old lobby.
     trnSpreadKey = key;
     trnSpreadSpent = 0;
+    trnSpreadRefilledAt = Date.now();
     // Warm the pause hint from Riot-local BEFORE dispatching (don't wait for
     // the next poll): the full poll can arrive already in coregame while
     // presences still show agent-select — that race missed whole lobbies.
     await warmTrnPhaseFromPresence().catch(() => {});
+  } else if (trnSpreadRefilledAt > 0 && Date.now() - trnSpreadRefilledAt >= TRN_SPREAD_REFILL_MS) {
+    // Same lobby, refill window elapsed: whoever is still statless gets
+    // another budget. Bounded by the Rust per-lobby ceiling, so this cannot
+    // turn into a request storm even if the lobby sits here for an hour.
+    trnSpreadSpent = 0;
+    trnSpreadRefilledAt = Date.now();
+    if (import.meta.env.DEV) trnLog('budget refilled', `budget=${budget}`);
   }
   // Drain-vs-new split: only NEW fills gate here — nothing fresh enqueues
   // while paused. Already-dispatched firings carry drain:true below and run
