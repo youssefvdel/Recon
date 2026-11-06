@@ -120,7 +120,11 @@ check('fill stops when polls go stale', tracker.includes('TRN_SPREAD_STALE_MS'),
 check('heal skips flagged deliberate negatives', tracker.includes('!entry.negative &&'), true);
 check('hidden tab pauses enqueue', tracker.includes("document.hidden) return;"), true);
 check('cooldown fail-fast touches no network', tracker.includes('touch no network during cooldown'), true);
-check('manual refresh bypasses the fill', tracker.includes('fetchTrnStatsNow(p.puuid, realName, realTag)'), true);
+// The manual path calls fetchTrnStatsNow directly (not through the fill) and
+// never marks it as a drain: a user refresh is a NEW request, not a budgeted
+// carry-over. Asserted on the argument OBJECT, so the call shape can evolve.
+const manualCall = /fetchTrnStatsNow\(p\.puuid, realName, realTag,\s*\{([^}]*)\}\)/.exec(tracker);
+check('manual refresh bypasses the fill', !!manualCall && !manualCall[1].includes('drain'), true);
 check('manual immediate respects the mode budget', tracker.includes('forceRefresh && trnSpreadSpent < trnSpreadBudget(isDeathmatch)'), true);
 check('budget spent counted on fire', tracker.includes('trnSpreadSpent++'), true);
 check('budget resets on match change (per-lobby budget)', tracker.includes('trnSpreadSpent = 0'), true);
@@ -132,7 +136,10 @@ check('fill skips in-flight players without spending', tracker.includes('trnInFl
 // --- Drain split: dispatched fill finishes across the flip, new fills gate ---
 check('new fills gate at enqueue while paused', tracker.includes('if (await trnProxyPaused())'), true);
 check('dispatched firings skip the pause check by design', tracker.includes('No paused check by'), true);
-check('dispatched firings carry drain', tracker.includes('fetchTrnStatsNow(puuid, name, tag, true)'), true);
+// The fill's firing must actually reach the transport as a drain — proven on
+// the argument object, not on a positional boolean.
+const fillCall = /fetchTrnStatsNow\(puuid, name, tag,\s*\{([^}]*)\}\)/.exec(tracker);
+check('dispatched firings carry drain', !!fillCall && fillCall[1].includes('drain: true'), true);
 check('drain reaches act stats', trn.includes('trnDrainFor(name, tag, drain) ? { drain: true } : {}'), true);
 check('drain skips only the pause pre-check', trn.includes('opts?.drain !== true && (await trnProxyPaused())'), true);
 

@@ -459,7 +459,8 @@ check(
     trackerSrc.indexOf('if (await trnProxyPaused())') < trackerSrc.indexOf('const budgeted = orderSpreadQueue'),
   true
 );
-check('dispatched firings carry drain', trackerSrc.includes('fetchTrnStatsNow(puuid, name, tag, true)'), true);
+const devqaFillCall = /fetchTrnStatsNow\(puuid, name, tag,\s*\{([^}]*)\}\)/.exec(trackerSrc);
+check('dispatched firings carry drain', !!devqaFillCall && devqaFillCall[1].includes('drain: true'), true);
 
 // --- atomic fill job: descendants inherit drain until settle, then re-gate ---
 // Behavioral (pure module state, no Tauri): open → inherit (case-insensitive)
