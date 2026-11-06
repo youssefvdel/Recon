@@ -665,6 +665,12 @@ fn teardown_still_valid(gen: u64, current_gen: u64, in_flight: u64) -> bool {
 /// Backoff gate for any self-heal rebuild: never twice inside the window.
 /// Pure — unit-tested.
 fn recreate_backoff_elapsed(last_recreate_ms: u64, now: u64) -> bool {
+    // 0 = never rebuilt. Without this the "never" case only looks elapsed
+    // because the wall clock is huge; a small injected `now` (unit tests, a
+    // mocked clock) would wrongly hold the first heal back by a full backoff.
+    if last_recreate_ms == 0 {
+        return true;
+    }
     now.saturating_sub(last_recreate_ms) >= PROXY_RECREATE_BACKOFF.as_millis() as u64
 }
 
