@@ -971,17 +971,31 @@ fn trace_err(r: &SlotResult) -> String {
     format!(" err={flat}")
 }
 
-/// True when a 429 body is tracker.gg's Warden captcha gate rather than a plain
-/// rate limit. The API answers `{"errors":[{"code":"Warden::Challenge",
-/// "message":"…must solve a captcha…"}]}` — either marker is enough, matched
-/// case-insensitively, and only on 429 (a 500 whose body says "captcha" is not
-/// this shape). Pure — unit-tested.
+/// True when the response is tracker.gg's human-gate wall rather than a plain
+/// rate limit or permission error.
+///
+/// Two shapes, one wall:
+/// - 429 JSON: `{"errors":[{"code":"Warden::Challenge","message":"…captcha…"}]}`
+///   — the API's captcha gate;
+/// - 403 HTML: Tracker Network's own "You've Been Blocked" page or a Cloudflare
+///   "Attention Required" block page (both probed live 2026-11-06). The hidden
+///   window can no more clear this than it can solve the captcha.
+///
+/// Deliberately conservative: only 403/429, only body markers, case-insensitive.
+/// A normal 403 API error (`{"errors":[…]}` JSON) carries none of the block-page
+/// prose, so it keeps its `HTTP 403` shape and the TS ladder. Pure — unit-tested.
 fn is_warden_captcha(status: u16, body: &str) -> bool {
-    if status != 429 {
-        return false;
-    }
     let b = body.to_ascii_lowercase();
-    b.contains("warden::challenge") || b.contains("captcha")
+    match status {
+        429 => b.contains("warden::challenge") || b.contains("captcha"),
+        403 => {
+            b.contains("you've been blocked")
+                || b.contains("attention required")
+                || b.contains("cf-mitigated")
+                || b.contains("just a moment")
+        }
+        _ => false,
+    }
 }
 
 /// Map a resolved slot to the command surface. Pure — unit-tested.
@@ -999,9 +1013,10 @@ fn map_result(r: SlotResult) -> Result<String, String> {
         }
         return Ok(r.body);
     }
-    // Warden captcha: a human-only gate. It must NOT look like a rate limit, or
-    // every caller retries it on a timer that can never clear it (that was the
-    // shipped bug: a plain `HTTP 429` fed the TS cooldown ladder forever).
+    // Warden wall: a human-only gate (429 captcha JSON, or a 403 block page).
+    // It must NOT look like a rate limit, or every caller retries it on a timer
+    // that can never clear it (that was the shipped bug: a plain `HTTP 429` fed
+    // the TS cooldown ladder forever, and a bare 403 did the same).
     if is_warden_captcha(r.status, &r.body) {
         return Err("TRN_CAPTCHA_REQUIRED".to_string());
     }
@@ -1677,10 +1692,11 @@ mod tests {
         assert_eq!(e.chars().count(), "HTTP 451: ".chars().count() + 300);
     }
 
-    /// The shipped bug: tracker.gg answers its Warden captcha as a plain 429,
-    /// the transport called it `HTTP 429`, and the TS ladder retried a
-    /// human-only gate every 60s forever. The captcha must be its own exact
-    /// string, and a real rate limit must keep its old shape.
+    /// The shipped bug: tracker.gg answers its Warden wall as a plain 429 (or a
+    /// 403 block page), and the transport called it `HTTP 429`/`HTTP 403` so the
+    /// TS ladder retried a human-only gate every 60s forever, with no verify
+    /// affordance. Both shapes must be the same exact string; a real rate limit
+    /// and a normal 403 API error must keep their old shape.
     #[test]
     fn warden_captcha_is_not_a_rate_limit() {
         let err = |status: u16, body: &str| {
@@ -1692,7 +1708,7 @@ mod tests {
             })
             .unwrap_err()
         };
-        // The real body, probed 2026-11-06.
+        // The real 429 body, probed 2026-11-06.
         let warden = r#"{"errors":[{"code":"Warden::Challenge","message":"You are making too many requests and must solve a captcha to continue."}]}"#;
         assert_eq!(err(429, warden), "TRN_CAPTCHA_REQUIRED");
         // Either marker is enough, matched case-insensitively.
@@ -1700,11 +1716,29 @@ mod tests {
         assert_eq!(err(429, "please solve a CAPTCHA"), "TRN_CAPTCHA_REQUIRED");
         // A plain rate limit still feeds the TS ladder byte-for-byte.
         assert_eq!(err(429, "rate limited"), "HTTP 429: rate limited");
-        // Only a 429 is the captcha gate: other statuses keep their shape.
-        assert_eq!(err(500, "captcha"), "HTTP 500: captcha");
+        // Same wall as a 403 HTML block page: Tracker Network's own page (the
+        // title probed live), plus the Cloudflare variants of it.
+        let blocked = "<!doctype html><title>You've Been Blocked - Tracker Network</title>";
+        assert_eq!(err(403, blocked), "TRN_CAPTCHA_REQUIRED");
+        assert_eq!(
+            err(403, "<title>Attention Required! | Cloudflare</title>"),
+            "TRN_CAPTCHA_REQUIRED"
+        );
+        assert_eq!(err(403, "<p>Just a moment...</p>"), "TRN_CAPTCHA_REQUIRED");
+        assert_eq!(err(403, "cf-mitigated: challenge"), "TRN_CAPTCHA_REQUIRED");
+        // Conservative: a normal JSON 403 API error is not the wall, and the
+        // 429-only markers never leak into a 403.
+        let api403 = r#"{"errors":[{"code":"Forbidden","message":"Access denied"}]}"#;
+        assert_eq!(err(403, api403), format!("HTTP 403: {}", snippet(api403)));
         assert_eq!(err(403, warden), format!("HTTP 403: {}", snippet(warden)));
+        assert_eq!(err(403, "captcha"), "HTTP 403: captcha");
+        // Only the wall statuses participate: a 500 keeps its shape even with
+        // block-page prose in the body.
+        assert_eq!(err(500, "captcha"), "HTTP 500: captcha");
+        assert_eq!(err(500, blocked), format!("HTTP 500: {}", snippet(blocked)));
         // Contract with TS: no HTTP code, no body.
         assert!(!err(429, "captcha").contains("HTTP"));
+        assert!(!err(403, blocked).contains("HTTP"));
     }
 
     /// H3: a window wedged before its first READY used to be immortal. Two

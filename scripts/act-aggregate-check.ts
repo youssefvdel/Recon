@@ -111,6 +111,41 @@ type Sample = { won: boolean | null; kills: number; deaths: number; score: numbe
   check('rank: hidden badge propagates', hidden.isRankHidden === true, hidden);
 }
 
+// 7. Act cap + the honest verdict that replaces a silent blank. The cap has
+//    to cover a normal act (10 starved every active player) and the failure
+//    kinds must stay distinguishable so the UI never calls a local failure a
+//    private profile.
+{
+  const { actStateFor, LOCAL_ACT_MAX_MATCHES, LOCAL_ACT_BUDGET_MS } = await import(
+    '../src/utils/tracker.ts'
+  );
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../src/utils/tracker.ts', import.meta.url), 'utf8');
+
+  check('act cap covers a normal act (>= 50)', LOCAL_ACT_MAX_MATCHES >= 50, LOCAL_ACT_MAX_MATCHES);
+  check('act cap stays inside Riot history (~95)', LOCAL_ACT_MAX_MATCHES <= 95, LOCAL_ACT_MAX_MATCHES);
+  check('act aggregation has a time budget', LOCAL_ACT_BUDGET_MS > 0 && LOCAL_ACT_BUDGET_MS <= 30_000, LOCAL_ACT_BUDGET_MS);
+  // Scoped to fetchLocalActStats: an older 24h-record helper also reads this
+  // history path, so a whole-file indexOf would compare unrelated positions.
+  const actFn = src.slice(src.indexOf('export async function fetchLocalActStats'));
+  check(
+    'cap check happens BEFORE any history fetch',
+    actFn.indexOf('LOCAL_ACT_TOO_LONG') !== -1 &&
+      actFn.indexOf('LOCAL_ACT_TOO_LONG') < actFn.indexOf('/match-history/v1/history/'),
+    true
+  );
+  check('aggregation concurrency stays at 4', src.includes('mapLimit(picked, 4,'), true);
+  check('immutable per-(match,player) cache kept', src.includes('const actSampleCache = new Map'), true);
+  check('budget is checked between pages', src.includes("throw new Error('LOCAL_ACT_TIMEOUT')"), true);
+
+  check('too-long maps to its own verdict', actStateFor('LOCAL_ACT_TOO_LONG') === 'too-long', actStateFor('LOCAL_ACT_TOO_LONG'));
+  check('timeout maps to its own verdict', actStateFor('LOCAL_ACT_TIMEOUT') === 'timeout', actStateFor('LOCAL_ACT_TIMEOUT'));
+  check('incomplete window is named', actStateFor('LOCAL_ACT_INCOMPLETE') === 'incomplete', actStateFor('LOCAL_ACT_INCOMPLETE'));
+  check('unranked act is named', actStateFor('LOCAL_NO_ACT_GAMES') === 'incomplete', actStateFor('LOCAL_NO_ACT_GAMES'));
+  check('unknown failure is a LOCAL failure, never private', actStateFor('boom 500') === 'local-failed', actStateFor('boom 500'));
+  check('verdict never claims private', actStateFor('HTTP 451 private').includes('private') === false, true);
+}
+
 if (failures > 0) {
   console.error(`${failures} failure(s)`);
   process.exit(1);

@@ -11,6 +11,7 @@ import {
   trnProxyBackoffRemainingMs,
 } from '../utils/trn';
 import { triggerGlobalRefresh } from '../hooks/useTrackerData';
+import { clearLocalStatsRetry } from '../utils/tracker';
 
 /* One line about the TRN path, and — when a HUMAN is the only thing that can
  * clear it — the two buttons that ask them. Everything TRN used to fail
@@ -64,6 +65,9 @@ export const TrnStatusBanner: React.FC = () => {
       // says otherwise (a still-blocked request re-sets it immediately).
       resetTrnCooldown();
       resetTrnHealth();
+      // Players held by the failure paths' retryAfter gate (30s / 5min) are
+      // still "not due" — without this the refresh visibly does nothing.
+      clearLocalStatsRetry();
       await triggerGlobalRefresh();
     } catch (e) {
       setVerifyErr(String(e instanceof Error ? e.message : e));

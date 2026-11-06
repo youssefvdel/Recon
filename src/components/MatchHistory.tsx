@@ -52,6 +52,8 @@ interface Row {
   k4: number;
   aces: number;
   trs: number;
+  /** True when `trs` came from calculateTrsFallback, not tracker.gg. */
+  trsEstimated: boolean;
 }
 
 /** Count clutch rounds fought alone (won vs lost). Mirrors matchCard's clutch rule. */
@@ -227,12 +229,17 @@ const MatchRow: React.FC<{
             className="flex items-center justify-center h-6 cursor-default"
             data-tip={
               r.trs > 0
-                ? `Tracker Rating Score: ${r.trs} / 1000 — Tier ${scoreTier(r.trs).tier}`
+                ? `Tracker Rating Score: ${r.trs} / 1000 — Tier ${scoreTier(r.trs).tier}${r.trsEstimated ? ' (estimated from K/D/ACS — not tracker.gg)' : ''}`
                 : 'Tracker Rating Score unavailable'
             }
           >
             {r.trs > 0 ? (
-              <ScoreBadge tier={scoreTier(r.trs).tier} size={22} />
+              <span className="flex items-baseline gap-0.5">
+                <ScoreBadge tier={scoreTier(r.trs).tier} size={22} />
+                {r.trsEstimated && (
+                  <span className="text-[7px] font-bold uppercase text-m3-outline">est.</span>
+                )}
+              </span>
             ) : (
               <span className="text-[10px] font-mono text-m3-outline">—</span>
             )}
@@ -469,12 +476,15 @@ export const MatchHistory: React.FC = () => {
             won,
           })
         : 0;
-      const trs = typeof realTrs === 'number' && realTrs > 0 ? realTrs : fallbackTrs;
+      const trsReal = typeof realTrs === 'number' && realTrs > 0;
+      const trs = trsReal ? realTrs : fallbackTrs;
+      const trsEstimated = !trsReal && trs > 0;
 
       out.push({
         g, detail, agent, won, us, them, k, d, a, acs, dd, hsPct, place,
         kast, cw, cl, k3, k4, aces,
         trs,
+        trsEstimated,
       });
     }
     return out;

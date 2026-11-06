@@ -141,12 +141,13 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
       const adr = Math.round(p.damage / roundsCount);
       const ddPerRound = Math.round((p.damage - p.damageTaken) / roundsCount);
 
-      // Headshot % calculation
+      // Headshot %: REAL hit counts only. The old fallback derived a number
+      // from K/D whenever the counts were absent, which printed a fabricated
+      // stat as if it had been read. No counts -> no number.
       const totalHits = p.headshots + p.bodyshots + p.legshots;
-      let hsPct = totalHits > 0 ? Number(((p.headshots / totalHits) * 100).toFixed(1)) : 0;
-      if (hsPct === 0 && p.kills > 0) {
-        hsPct = Number(Math.min(48, Math.max(14, Math.round(24 + (kd - 1) * 6))).toFixed(1));
-      }
+      // 0 = "no hit counts in this payload". Every render site shows "—" for 0,
+      // which is the same convention the live table already uses.
+      const hsPct = totalHits > 0 ? Number(((p.headshots / totalHits) * 100).toFixed(1)) : 0;
 
       // KAST, First Kills, First Deaths, Multi-kills
       let kastRounds = 0;
@@ -200,7 +201,9 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
         ? (trnMatchTrs?.[currentMatchId] ?? trnTrsMap[playerHandle] ?? trnTrsMap[fallbackHandle] ?? trnTrsMap[agentKey])
         : (trnTrsMap[playerHandle] ?? trnTrsMap[fallbackHandle] ?? trnTrsMap[agentKey]);
 
-      const trs = typeof realTrs === 'number' && realTrs > 0 ? realTrs : fallbackTrs;
+      const trsReal = typeof realTrs === 'number' && realTrs > 0;
+      const trs = trsReal ? realTrs : fallbackTrs;
+      const trsEstimated = !trsReal && trs > 0;
 
       const displayName = isMe
         ? myAccountName || rawName || 'You'
@@ -227,6 +230,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
         fd,
         mk,
         trs,
+        trsEstimated,
       };
     });
   }, [detail, puuid, myAccountName, myAccountTag, agentInfo, resolvedNames, roundsCount, currentMatchId, trnMatchTrs, trnTrsMap]);
@@ -402,6 +406,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
       fd: p.fd,
       mk: p.mk,
       trs: p.trs,
+      trsEstimated: p.trsEstimated,
     });
   };
 
@@ -696,7 +701,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                             <td className="py-1.5 px-2 text-center text-m3-on-surface font-medium text-xs">{p.damage}</td>
 
                             {/* HS% */}
-                            <td className="py-1.5 px-2 text-center text-m3-on-surface font-medium text-xs">{p.hsPct}%</td>
+                            <td className="py-1.5 px-2 text-center text-m3-on-surface font-medium text-xs">{p.hsPct > 0 ? `${p.hsPct}%` : '—'}</td>
                           </tr>
                         );
                       })}
@@ -843,12 +848,17 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                                 className="flex items-center justify-center cursor-default"
                                 data-tip={
                                   p.trs > 0
-                                    ? `Tracker Score: ${p.trs} / 1000 — Tier ${scoreTier(p.trs).tier}`
+                                    ? `Tracker Score: ${p.trs} / 1000 — Tier ${scoreTier(p.trs).tier}${p.trsEstimated ? ' (estimated from K/D/ACS — not tracker.gg)' : ''}`
                                     : 'Tracker Score unavailable'
                                 }
                               >
                                 {p.trs > 0 ? (
-                                  <ScoreBadge tier={scoreTier(p.trs).tier} size={20} />
+                                  <span className="flex items-baseline justify-center gap-0.5">
+                                    <ScoreBadge tier={scoreTier(p.trs).tier} size={20} />
+                                    {p.trsEstimated && (
+                                      <span className="text-[7px] font-bold uppercase text-zinc-500">est.</span>
+                                    )}
+                                  </span>
                                 ) : (
                                   <span className="text-[10px] font-mono text-zinc-500">—</span>
                                 )}
@@ -882,7 +892,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                             <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.adr}</td>
 
                             {/* HS% */}
-                            <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.hsPct}%</td>
+                            <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.hsPct > 0 ? `${p.hsPct}%` : '—'}</td>
 
                             {/* KAST */}
                             <td className="py-1.5 px-1 text-center text-m3-outline font-medium text-xs">{p.kast}%</td>
@@ -1040,12 +1050,17 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                                 className="flex items-center justify-center cursor-default"
                                 data-tip={
                                   p.trs > 0
-                                    ? `Tracker Score: ${p.trs} / 1000 — Tier ${scoreTier(p.trs).tier}`
+                                    ? `Tracker Score: ${p.trs} / 1000 — Tier ${scoreTier(p.trs).tier}${p.trsEstimated ? ' (estimated from K/D/ACS — not tracker.gg)' : ''}`
                                     : 'Tracker Score unavailable'
                                 }
                               >
                                 {p.trs > 0 ? (
-                                  <ScoreBadge tier={scoreTier(p.trs).tier} size={20} />
+                                  <span className="flex items-baseline justify-center gap-0.5">
+                                    <ScoreBadge tier={scoreTier(p.trs).tier} size={20} />
+                                    {p.trsEstimated && (
+                                      <span className="text-[7px] font-bold uppercase text-zinc-500">est.</span>
+                                    )}
+                                  </span>
                                 ) : (
                                   <span className="text-[10px] font-mono text-zinc-500">—</span>
                                 )}
@@ -1079,7 +1094,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                             <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.adr}</td>
 
                             {/* HS% */}
-                            <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.hsPct}%</td>
+                            <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.hsPct > 0 ? `${p.hsPct}%` : '—'}</td>
 
                             {/* KAST */}
                             <td className="py-1.5 px-1 text-center text-m3-outline font-medium text-xs">{p.kast}%</td>

@@ -1981,6 +1981,13 @@ export interface LivePlayerStatsEntry {
    *  it must stay distinguishable: a failed entry is statless AND backoff-armed,
    *  which is byte-identical to a successful "no data" answer otherwise. */
   lastFetchFailed?: boolean;
+  /** Why the act-stats cell has no number, when the reason is NOT "unknown".
+   *  'too-long' = the act has more games than we will page (the honest answer
+   *  is "not computed", not an empty cell); 'incomplete' = some match in the
+   *  window was unreadable; 'timeout' = the aggregation time budget ran out;
+   *  'local-failed' = the local Riot read itself failed. null/undefined means
+   *  no verdict was recorded (blank for the ordinary "not fetched" reason). */
+  actState?: 'too-long' | 'incomplete' | 'timeout' | 'local-failed' | null;
   /** Last successful 24h-record refresh — decoupled from `fetchedAt`, which
    *  TRN updates also bump. Sharing one timestamp let each source suppress
    *  the other's refresh. */
@@ -2299,10 +2306,18 @@ export async function fetchLocalRank(puuid: string, region: string): Promise<Loc
   return parseLocalRank(await riotGet(shardFor(region), `/mmr/v1/players/${puuid}`), seasonOrder || []);
 }
 
-/** Matches read per player per fill: the act has to be COVERED COMPLETELY or
- *  we report nothing, so this is the largest act we will aggregate (see
- *  `fetchLocalActStats`). Bounded so one fill cannot turn into 200 GETs. */
-export const LOCAL_ACT_MAX_MATCHES = 10;
+/** Matches read per player per fill. The act must be COVERED COMPLETELY or we
+ *  report nothing, so this is the largest act we will aggregate (see
+ *  `fetchLocalActStats`). 50 covers a normal act — a 10 was starving every
+ *  active player, since almost everyone is past 10 competitive games by
+ *  mid-act. Riot's own history is seen capped near 95 rows, so 50 stays well
+ *  inside what the endpoint will page. */
+export const LOCAL_ACT_MAX_MATCHES = 50;
+
+/** Wall-clock budget for ONE player's act aggregation. A poll must never be
+ *  held hostage by a slow client, so the aggregation gives up (reports
+ *  nothing) rather than overrunning this. */
+export const LOCAL_ACT_BUDGET_MS = 20_000;
 
 /** Immutable per (match, player) sample cache: match details never change, so
  *  a second fill of the same lobby costs zero requests. */
@@ -2376,8 +2391,10 @@ export async function fetchLocalActStats(
   if (want <= 0) throw new Error('LOCAL_NO_ACT_GAMES');
   if (want > LOCAL_ACT_MAX_MATCHES) throw new Error('LOCAL_ACT_TOO_LONG');
   const q = queue.toLowerCase().trim();
+  const startedAt = Date.now();
   const ids: string[] = [];
-  for (let page = 0; page < 3 && ids.length < want; page++) {
+  for (let page = 0; page < 5 && ids.length < want; page++) {
+    if (Date.now() - startedAt > LOCAL_ACT_BUDGET_MS) throw new Error('LOCAL_ACT_TIMEOUT');
     const start = page * 20;
     const j = await riotGet(
       shardFor(region),
@@ -2393,11 +2410,47 @@ export async function fetchLocalActStats(
   }
   const picked = ids.slice(0, want);
   if (picked.length < want) throw new Error('LOCAL_ACT_INCOMPLETE');
+  if (Date.now() - startedAt > LOCAL_ACT_BUDGET_MS) throw new Error('LOCAL_ACT_TIMEOUT');
   const samples = (
     await mapLimit(picked, 4, (id) => loadActSample(region, id, puuid))
   ).filter((s): s is ActMatchSample => s !== null);
   if (samples.length < want) throw new Error('LOCAL_ACT_INCOMPLETE');
   return aggregateActStats(samples);
+}
+
+/** Why an act aggregate was not produced. Pure — checked by
+ *  scripts/act-aggregate-check.ts. Anything we cannot name is a local read
+ *  failure, never a "private profile". */
+export function actStateFor(
+  msg: string
+): NonNullable<LivePlayerStatsEntry['actState']> {
+  if (msg.includes('LOCAL_ACT_TOO_LONG')) return 'too-long';
+  if (msg.includes('LOCAL_ACT_TIMEOUT')) return 'timeout';
+  if (msg.includes('LOCAL_ACT_INCOMPLETE') || msg.includes('LOCAL_NO_ACT_GAMES')) return 'incomplete';
+  return 'local-failed';
+}
+
+/** Drop the retry gate on every cached player so the next poll re-attempts
+ *  them immediately. The TRN banner's "I finished" calls this: without it the
+ *  button looks dead, because the 30s/5min `retryAfter` set by the failure
+ *  paths holds every player exactly where they already are. */
+export function clearLocalStatsRetry(): void {
+  for (const [k, v] of livePlayerStatsCache) {
+    livePlayerStatsCache.set(k, { ...v, retryAfter: 0, lastFetchFailed: false });
+  }
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const raw = localStorage.getItem(LIVE_STATS_CACHE_KEY);
+    if (!raw) return;
+    const store = JSON.parse(raw) as Record<string, LivePlayerStatsEntry>;
+    let touched = 0;
+    for (const k of Object.keys(store)) {
+      if (!store[k]) continue;
+      store[k] = { ...store[k], retryAfter: 0, lastFetchFailed: false };
+      touched++;
+    }
+    if (touched > 0) localStorage.setItem(LIVE_STATS_CACHE_KEY, JSON.stringify(store));
+  } catch {}
 }
 
 /** Context every local read needs; carried from the poll that already has it. */
@@ -2426,17 +2479,21 @@ function fetchTrnStatsNow(
       fetchedAt: Date.now(),
       retryAfter: 0,
       lastFetchFailed: false,
+      // A successful recompute clears any previous verdict.
+      actState: null,
     };
-    const agg = await fetchLocalActStats(puuid, ctx.region, ctx.queue, rank).catch(() => null);
+    const agg = await fetchLocalActStats(puuid, ctx.region, ctx.queue, rank).catch((e: unknown) => {
+      update.actState = actStateFor(String(e));
+      // Rank read fine, act window not. Back off so this does not re-run one
+      // mmr read per poll; a too-long act cannot shrink, so it backs off far
+      // harder than a transient miss.
+      update.retryAfter = Date.now() + (update.actState === 'too-long' ? 60 : 5) * 60 * 1000;
+      return null;
+    });
     if (agg) {
       if (agg.kd != null) update.kd = agg.kd;
       if (agg.winPct != null) update.winPct = agg.winPct;
       if (agg.acs != null) update.acs = agg.acs;
-    } else {
-      // Rank read fine, act window not (too long to cover, or incomplete).
-      // Back off like a statless answer so this does not re-run one mmr read
-      // per player per poll; the 5-minute refill retries it.
-      update.retryAfter = Date.now() + 5 * 60 * 1000;
     }
     return update;
   })();
@@ -2598,6 +2655,12 @@ export function setCachedLivePlayerStats(puuid: string, entry: Partial<LivePlaye
   }
   if (entry.retryAfter !== undefined) {
     merged.retryAfter = entry.retryAfter;
+  }
+  // Same explicit pass-through for the act verdict: `null` is a real value
+  // here (it CLEARS a stale reason after a successful recompute), but the
+  // generic loop above skips null.
+  if (entry.actState !== undefined) {
+    merged.actState = entry.actState;
   }
 
   livePlayerStatsCache.set(pU, merged);

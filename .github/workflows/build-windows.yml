@@ -41,6 +41,11 @@ jobs:
         # Fail fast on tsc/vite errors before the long Rust compile.
         run: bun run build:ui
 
+      - name: Run Rust unit tests
+        # 115 lib tests (110 #[test] + 5 #[tokio::test]); pure, no WebView2.
+        # Runs after build:ui so tauri-build sees dist/.
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
       - name: Build recon.exe (no installer)
         # @tauri-apps/cli is a devDependency; --no-bundle skips NSIS and
         # updater signing, so no TAURI_SIGNING_PRIVATE_KEY secret is needed.

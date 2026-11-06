@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Copy, Check, Lock } from 'lucide-react';
 import { ScoreBadge, scoreTier } from './ScoreBadge';
-import { fetchTrnActStats, fetchTrnAgents, isTrnPrivateError, trnNegativeKind, type TrnActStats, type TrnAgentStat } from '../utils/trn';
-import { fetchMmrDirect, gameData } from '../utils/tracker';
+import { fetchTrnActStats, fetchTrnAgents, isTrnPrivateError, isTrnCaptcha, trnNegativeKind, type TrnActStats, type TrnAgentStat } from '../utils/trn';
+import { fetchMmrDirect, gameData, getCachedLivePlayerStats } from '../utils/tracker';
 import { getCountryName, getTrackerUrls, TRN_PRIVATE_TOOLTIP } from '../utils/playerDisplay';
 import { openExternalUrl } from '../utils/ipc';
 import type { TrackerProfile } from '../types';
@@ -34,6 +34,8 @@ export interface SelectedPlayerInfo {
   fd: number;
   mk: number;
   trs: number;
+  /** True when TRS came from calculateTrsFallback, not tracker.gg. */
+  trsEstimated?: boolean;
 }
 
 interface Props {
@@ -55,6 +57,9 @@ export const PlayerOverviewModal: React.FC<Props> = ({
   const [mmrProfile, setMmrProfile] = useState<TrackerProfile | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isPrivate, setIsPrivate] = useState(false);
+  /** Why the act panel is empty, when we can name it. Never "private" unless
+   *  TRN actually proved it — a local Riot failure is not a locked profile. */
+  const [failKind, setFailKind] = useState<'captcha' | 'rate-limited' | 'too-long' | 'local' | ''>('');
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -79,6 +84,7 @@ export const PlayerOverviewModal: React.FC<Props> = ({
     let active = true;
     setIsLoading(true);
     setIsPrivate(false);
+    setFailKind('');
 
     const name = player.name;
     const tag = player.tag || '';
@@ -98,9 +104,22 @@ export const PlayerOverviewModal: React.FC<Props> = ({
         setTrnStats(trnRes.value.stats);
       } else {
         setTrnStats(null);
+        const reason = String(
+          trnRes.reason instanceof Error ? trnRes.reason.message : trnRes.reason
+        );
         // Proven private (fresh 451 or registry) → lock panel, not spinner/error.
         if (isTrnPrivateError(trnRes.reason) || trnNegativeKind(name, tag) === 'private') {
           setIsPrivate(true);
+        } else if (isTrnCaptcha(reason)) {
+          setFailKind('captcha');
+        } else if (reason.includes('TRN_RATE_LIMITED') || reason.includes(' 429')) {
+          setFailKind('rate-limited');
+        } else if (getCachedLivePlayerStats(player.puuid)?.actState === 'too-long') {
+          // The local read worked; the act is simply bigger than we will page.
+          setFailKind('too-long');
+        } else {
+          // Local Riot read failed / no readable act window. NOT private data.
+          setFailKind('local');
         }
       }
       if (agentsRes.status === 'fulfilled') {
@@ -277,7 +296,7 @@ export const PlayerOverviewModal: React.FC<Props> = ({
             <div className="rounded-2xl bg-m3-surface-container-low border border-m3-outline-subtle p-4">
               <div className="text-[10px] font-bold uppercase tracking-wider text-m3-outline mb-3 flex items-center justify-between">
                 <span>Match Scoreboard Snapshot</span>
-                <span className="text-m3-primary font-mono font-bold">TRS: {player.trs}</span>
+                <span className="text-m3-primary font-mono font-bold">TRS: {player.trs}{player.trsEstimated ? " (est.)" : ""}</span>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
                 <div className="p-2.5 rounded-xl bg-m3-surface-container border border-m3-outline-subtle/50">
@@ -407,7 +426,15 @@ export const PlayerOverviewModal: React.FC<Props> = ({
               </div>
             ) : (
               <div className="p-6 rounded-2xl bg-m3-surface-container-low border border-m3-outline-subtle text-center text-xs text-m3-outline">
-                Act profile is private or unavailable on TRN for this player.
+                {failKind === 'captcha'
+                  ? 'tracker.gg needs a one-time verification — press Verify in the banner, then reopen this player.'
+                  : failKind === 'rate-limited'
+                    ? 'tracker.gg is rate-limiting right now — these stats return on their own.'
+                    : failKind === 'too-long'
+                      ? 'Act stats not computed — this act has more games than a local scan covers.'
+                      : failKind === 'local'
+                        ? 'Act stats could not be read from the local Riot client for this player.'
+                        : 'Act stats are not available for this player.'}
               </div>
             )}
           </div>
