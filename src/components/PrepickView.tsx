@@ -385,7 +385,7 @@ export const PrepickView: React.FC = () => {
       {/* Agent Selector Modal */}
       {activePickerTarget && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75"
           onClick={() => setActivePickerTarget(null)}
         >
           <div

@@ -35,13 +35,14 @@ import { LoadoutViewer } from './LoadoutViewer';
 import { useSeasonNames } from '../hooks/useTrackerData';
 import { ScoreBadge, scoreTier } from './ScoreBadge';
 import { ServerChip } from './ServerChip';
+import { StatValue } from './StatValue';
+import { formatKd, formatPct } from '../utils/format';
 import {
   getFlagUrl,
   getCountryName,
   getTrackerUrls,
   rankTooltip,
   shortAct,
-  formatKd,
   getPartyStyle,
   splitTeams,
   byAcsDesc,
@@ -605,7 +606,10 @@ const PlayerRow: React.FC<{
   const [copied, setCopied] = useState(false);
   const rankIcon = tierIcons[p.tier];
   const peakIcon = tierIcons[p.peakTier];
-  const kd = formatKd(p.kd);
+  // p.kd is typed string | number upstream; normalise once for the shared
+  // one-decimal formatter. 0/blank keeps the old "unknown" meaning.
+  const kdValue = typeof p.kd === 'number' ? p.kd : Number(p.kd);
+  const kdKnown = p.kd != null && Number.isFinite(kdValue) && kdValue > 0;
   // Private profiles: every TRN-fed cell shows a lock instead of a dash so
   // users read "locked", not "broken". Rank/peak/level are Riot-local and stay.
   const locked = p.isTrnPrivate === true;
@@ -618,16 +622,14 @@ const PlayerRow: React.FC<{
   // queued or in flight, the plain dash once we have a verdict. Kept as quiet
   // as possible — this is a dense table and both states are already the
   // majority of cells in a fresh lobby.
-  const trnBlank = (state: LiveMatchPlayer['trnState']) =>
+  const statBlank = (state: LiveMatchPlayer['trnState'], reason = LIVE_UNAVAILABLE_TIP) =>
     state === 'pending' ? (
       <span data-tip={LIVE_PENDING_TIP} className="inline-flex items-center justify-center">
-        <span className="block h-[3px] w-[3px] rounded-full bg-m3-outline/60" />
+        <span className="sr-only">{LIVE_PENDING_TIP}</span>
+        <span aria-hidden="true" className="block h-[3px] w-[3px] rounded-full bg-m3-outline/60" />
       </span>
     ) : (
-      <span className="text-m3-outline" data-tip={LIVE_UNAVAILABLE_TIP}>
-        <span aria-hidden="true">—</span>
-        <span className="sr-only">{LIVE_UNAVAILABLE_TIP}</span>
-      </span>
+      <StatValue reason={reason} />
     );
   const party = getPartyStyle(p.partyIndex);
   const flagUrl = getFlagUrl(p.country);
@@ -835,7 +837,7 @@ const PlayerRow: React.FC<{
         ) : locked ? (
           lockCell
         ) : (
-          trnBlank(p.trnState)
+          statBlank(p.trnState)
         )}
       </div>
 
@@ -891,36 +893,50 @@ const PlayerRow: React.FC<{
         ) : locked ? (
           lockCell
         ) : (
-          trnBlank(p.trnState)
+          statBlank(p.trnState)
         )}
       </div>
 
       {/* 8. K/D */}
       <div className="text-right font-mono text-[10.5px] font-bold" data-tip="Act-wide K/D">
-        {locked ? lockCell : p.kd == null ? trnBlank(p.trnState) : <span className={kd.color}>{kd.text}</span>}
+        {locked ? (
+          lockCell
+        ) : !kdKnown ? (
+          statBlank(p.trnState)
+        ) : (
+          <span className={kdValue >= 1 ? 'text-m3-mint font-bold' : 'text-m3-coral font-bold'}>
+            {formatKd(kdValue)}
+          </span>
+        )}
       </div>
 
       {/* 9. Win % */}
       <div className="text-right font-mono text-[10.5px]" data-tip="Act-wide win rate">
         {p.winPct != null ? (
           <span className={p.winPct >= 50 ? 'text-m3-mint font-semibold' : 'text-rose-400'}>
-            {p.winPct.toFixed(0)}%
+            {formatPct(p.winPct, 0)}
           </span>
         ) : locked ? (
           lockCell
         ) : (
-          trnBlank(p.trnState)
+          statBlank(p.trnState)
         )}
       </div>
 
       {/* 10. HS % */}
       <div className="text-right font-mono text-[10.5px] text-amber-500" data-tip="Act-wide headshot %">
-        {p.hsPct != null && p.hsPct > 0 ? `${p.hsPct.toFixed(0)}%` : locked ? lockCell : trnBlank(p.trnState)}
+        {p.hsPct != null && p.hsPct > 0 ? (
+          formatPct(p.hsPct, 0)
+        ) : locked ? (
+          lockCell
+        ) : (
+          statBlank(p.trnState)
+        )}
       </div>
 
       {/* 11. Account level */}
-      <div className="text-right font-mono text-[9.5px] text-m3-outline" data-tip={p.accountLevel > 0 ? 'Account level' : 'Account level not read yet'}>
-        {p.accountLevel > 0 ? p.accountLevel : '—'}
+      <div className="text-right font-mono text-[9.5px] text-m3-outline" data-tip="Account level">
+        {p.accountLevel > 0 ? p.accountLevel : <StatValue reason="Account level not read yet" />}
       </div>
     </div>
   );

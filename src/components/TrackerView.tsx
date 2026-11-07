@@ -55,13 +55,30 @@ export const TrackerView: React.FC<{ initialSubTab?: TrackerSubTab; liveRequest?
   return (
     <div className="h-full flex flex-col min-h-0 overflow-hidden bg-m3-surface">
       {/* Material 3 Tab Row Navigation */}
-      <nav className="flex items-center gap-1 sm:gap-2 px-4 sm:px-6 bg-m3-surface-container-low border-b border-m3-outline-subtle h-11 shrink-0 select-none z-10">
+      <nav
+        role="tablist"
+        aria-label="Tracker sections"
+        className="flex items-center gap-1 sm:gap-2 px-4 sm:px-6 bg-m3-surface-container-low border-b border-m3-outline-subtle h-11 shrink-0 select-none z-10">
         {TABS.map((t) => {
           const active = subTab === t.id;
           return (
             <button
               key={t.id}
+              role="tab"
+              id={`tracker-tab-${t.id}`}
+              aria-selected={active}
+              aria-controls="tracker-panel"
+              tabIndex={active ? 0 : -1}
               onClick={() => setSubTab(t.id)}
+              onKeyDown={(e) => {
+                if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+                e.preventDefault();
+                const i = TABS.findIndex((x) => x.id === subTab);
+                const delta = e.key === 'ArrowRight' ? 1 : TABS.length - 1;
+                const next = TABS[(i + delta) % TABS.length];
+                setSubTab(next.id);
+                document.getElementById(`tracker-tab-${next.id}`)?.focus();
+              }}
               className={`relative h-full px-3.5 sm:px-4 flex items-center justify-center text-xs sm:text-[13px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                 active ? 'text-m3-primary font-bold font-display' : 'text-m3-outline hover:text-m3-on-surface'
               }`}
@@ -85,7 +102,11 @@ export const TrackerView: React.FC<{ initialSubTab?: TrackerSubTab; liveRequest?
       </nav>
 
       {/* Tab Content Body */}
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <div
+        role="tabpanel"
+        id="tracker-panel"
+        aria-labelledby={`tracker-tab-${subTab}`}
+        className="flex-1 min-h-0 overflow-hidden">
         <AnimatePresence mode="wait">
           {subTab === 'overview' && (
             <motion.div key="overview" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">

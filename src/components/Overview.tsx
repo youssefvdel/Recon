@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { AlertTriangle, Check, Gamepad2, Lock, RefreshCw, X } from 'lucide-react';
-import { tierName } from '../utils/tracker';
+import { tierName, type RiotClientStatus } from '../utils/tracker';
+import { StatValue } from './StatValue';
+import { formatKd, formatPct } from '../utils/format';
 import { ScoreBadge, gradeFor, scoreTier, tierColor } from './ScoreBadge';
 import {
   fetchTrnActStats,
@@ -66,44 +68,86 @@ export const shortAct = (label: string): string => {
 
 const pctLabel = (p: number): string => (p >= 50 ? `Top ${Math.round(100 - p)}%` : `Bottom ${Math.round(p)}%`);
 
-const BigTile: React.FC<{ label: string; value?: string; numeric?: number; decimals?: number; suffix?: string; locked?: boolean; index: number }> = ({
+const BigTile: React.FC<{
+  label: string;
+  numeric?: number;
+  format?: (n: number) => string;
+  index: number;
+  pending?: boolean;
+  emptyReason?: string;
+}> = ({
   label,
-  value,
   numeric,
-  decimals = 0,
-  suffix = '',
-  locked = false,
+  format = (n) => String(Math.round(n)),
   index,
+  pending = false,
+  emptyReason = 'Not loaded yet',
 }) => {
   // Round to displayed precision: recomputed floats (51.05 vs 51.0500001)
-  // across background refreshes must not replay the 0→target tween, or the
-  // tiles visibly count up over and over.
-  const factor = 10 ** decimals;
-  const stable = numeric === undefined ? undefined : Math.round(numeric * factor) / factor;
-  const v = useCountUp(stable ?? 0, 900, !locked && stable !== undefined);
+  // across background refreshes must not replay the 0-to-target tween.
+  const stable = numeric === undefined ? undefined : Math.round(numeric * 1000) / 1000;
+  const v = useCountUp(stable ?? 0, 900, stable !== undefined);
   return (
     <motion.div variants={rise} custom={index}
-      className={`rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 flex flex-col gap-1 min-w-0 ${locked ? 'opacity-70' : ''}`}>
-      <span className="text-[11px] font-bold uppercase tracking-wider text-m3-outline flex items-center gap-1">
+      className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 flex flex-col gap-1 min-w-0">
+      <span className="text-micro font-bold uppercase tracking-wider text-m3-outline flex items-center gap-1">
         {label}
-        {locked && <Lock className="w-3 h-3" />}
       </span>
       <span className="font-display font-black text-2xl sm:text-3xl text-m3-on-surface tabular-nums truncate mt-0.5">
-        {locked ? (value ?? '—') : stable !== undefined ? <>{v.toFixed(decimals)}{suffix}</> : (value ?? '—')}
+        {stable !== undefined ? format(v) : pending ? '…' : <StatValue reason={emptyReason} />}
       </span>
     </motion.div>
   );
 };
 
-const SmallStat: React.FC<{ label: string; value: string; locked?: boolean; tone?: 'win' | 'loss' }> = ({ label, value, locked = false, tone }) => (
-  <div className={`flex flex-col gap-0.5 min-w-0 ${locked ? 'opacity-60' : ''}`}>
-    <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-m3-outline flex items-center gap-1">
+const SmallStat: React.FC<{ label: string; value: React.ReactNode; tone?: 'win' | 'loss' }> = ({ label, value, tone }) => (
+  <div className="flex flex-col gap-0.5 min-w-0">
+    <span className="text-micro font-bold uppercase tracking-[0.12em] text-m3-outline flex items-center gap-1">
       {label}
-      {locked && <Lock className="w-2.5 h-2.5" />}
     </span>
     <span className={`font-display font-extrabold text-base sm:text-lg tabular-nums truncate ${tone === 'win' ? 'text-m3-mint' : tone === 'loss' ? 'text-m3-coral' : 'text-m3-on-surface'}`}>{value}</span>
   </div>
 );
+
+/** "The client is not usable" state: the TRUE reason plus a retry, instead of
+ *  endless skeletons when the Riot client is logged out or crashed
+ *  (ux-gaps #2). `riotClientDetail` comes from the tracker probe. */
+const RiotClientNotice: React.FC<{
+  status: RiotClientStatus;
+  detail: string;
+  busy: boolean;
+  onRetry: () => void;
+}> = ({ status, detail, busy, onRetry }) => {
+  const action =
+    status === 'locked-out'
+      ? 'Sign in to Riot Client, then retry.'
+      : status === 'crashed'
+        ? 'Restart Riot Client, then retry.'
+        : status === 'not-running'
+          ? 'Start Riot Client or VALORANT, then retry.'
+          : 'Open Riot Client, then retry.';
+  return (
+    <div className="h-full min-h-0 max-w-6xl mx-auto w-full px-4 sm:px-6 py-3.5 pb-8 flex items-center justify-center">
+      <div className="rounded-3xl bg-m3-surface-container border border-m3-outline-subtle p-8 flex flex-col items-center text-center gap-3 max-w-sm shadow-m3-1">
+        <span className="w-14 h-14 rounded-3xl bg-m3-primary-container/50 border border-m3-primary/30 flex items-center justify-center">
+          <Gamepad2 className="w-7 h-7 text-m3-primary" />
+        </span>
+        <h2 className="font-display font-black text-lg text-m3-on-surface">{detail || (status === 'ok' ? 'Riot Client is closed' : 'Riot Client is unavailable')}</h2>
+        <p className="text-xs text-m3-outline leading-relaxed">
+          {action} Cached stats come back as soon as it answers.
+        </p>
+        <button
+          onClick={onRetry}
+          disabled={busy}
+          className="h-9 px-5 rounded-xl bg-m3-primary text-m3-on-primary text-xs font-bold flex items-center gap-2 cursor-pointer disabled:opacity-50 hover:brightness-110"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} />
+          <span>Retry</span>
+        </button>
+      </div>
+    </div>
+  );
+};
 
 const PLAYLISTS = [
   { value: 'competitive', label: 'Competitive' },
@@ -111,7 +155,7 @@ const PLAYLISTS = [
 ];
 
 export const Overview: React.FC = () => {
-  const { profile, seasonNames, seasonOrder, tierIcons, agentInfo, agg, trn, trnAgents, trnPrev, games, detailsById, isLoading, clientClosed, banner, setBanner, refresh } =
+  const { profile, seasonNames, seasonOrder, tierIcons, agentInfo, agg, trn, trnAgents, trnPrev, games, detailsById, isLoading, clientClosed, riotClient, riotClientDetail, banner, setBanner, refresh } =
     useTrackerData();
 
   const [playlist, setPlaylist] = useState('competitive');
@@ -193,13 +237,16 @@ export const Overview: React.FC = () => {
   const losses = S ? S.losses : isDefault && profile ? Math.max(0, profile.games - profile.wins) : 0;
   const wins = S ? S.wins : isDefault ? profile?.wins ?? 0 : 0;
   const winPct = S ? S.winPct : isDefault && profile && profile.games > 0 ? (profile.wins / profile.games) * 100 : 0;
-  const kd = S?.kd ?? (isDefault ? agg?.kd : undefined) ?? 0;
-  const adr = S?.adr ?? (isDefault ? agg?.adr : undefined) ?? 0;
-  const kills = S?.kills ?? (isDefault ? agg?.kills : undefined) ?? 0;
-  const deaths = S?.deaths ?? (isDefault ? agg?.deaths : undefined) ?? 0;
-  const assists = S?.assists ?? (isDefault ? agg?.assists : undefined) ?? 0;
+  const kdTile = S?.kd ?? (isDefault ? agg?.kd : undefined);
+  const adrTile = S?.adr ?? (isDefault ? agg?.adr : undefined);
+  const kills = S?.kills ?? (isDefault ? agg?.kills : undefined);
+  const deaths = S?.deaths ?? (isDefault ? agg?.deaths : undefined);
+  const assists = S?.assists ?? (isDefault ? agg?.assists : undefined);
   const kpiReady = !selLoading && statsReady;
-  const kpiPlaceholder = selLoading ? '…' : statsReady ? undefined : '—';
+  /* One placeholder rule for the whole page: a number, an ellipsis while a
+     fetch is in flight, or the house dash with a reason (docs/audit #1). */
+  const statText = (v: number | undefined, reason: string): React.ReactNode =>
+    v !== undefined ? v.toLocaleString('en-US') : isLoading || selLoading ? '…' : <StatValue reason={reason} />;
 
   const recentActs = useMemo(() => {
     if (!profile) return [];
@@ -264,27 +311,16 @@ export const Overview: React.FC = () => {
   const accLabel = recentHit ? `Last ${recentHit.used}` : 'Act-wide';
 
   if (!profile) {
-    if (clientClosed) {
+    // Any client state other than "ok" gets the real reason and a retry, never
+    // skeletons forever (a stale lockfile used to look identical to a load).
+    if (riotClient !== 'ok' || clientClosed) {
       return (
-        <div className="h-full min-h-0 max-w-6xl mx-auto w-full px-4 sm:px-6 py-3.5 pb-8 flex items-center justify-center">
-          <div className="rounded-3xl bg-m3-surface-container border border-m3-outline-subtle p-8 flex flex-col items-center text-center gap-3 max-w-sm shadow-m3-1">
-            <span className="w-14 h-14 rounded-3xl bg-m3-primary-container/50 border border-m3-primary/30 flex items-center justify-center">
-              <Gamepad2 className="w-7 h-7 text-m3-primary" />
-            </span>
-            <h3 className="font-display font-black text-lg text-m3-on-surface">Riot Client is closed</h3>
-            <p className="text-xs text-m3-outline leading-relaxed">
-              The tracker reads live data from your local Riot session. Open Riot Client or Valorant, then refresh.
-            </p>
-            <button
-              onClick={refresh}
-              disabled={isLoading}
-              className="h-9 px-5 rounded-xl bg-m3-primary text-m3-on-primary text-xs font-bold flex items-center gap-2 cursor-pointer disabled:opacity-50 hover:brightness-110"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-              <span>Refresh</span>
-            </button>
-          </div>
-        </div>
+        <RiotClientNotice
+          status={riotClient}
+          detail={riotClientDetail}
+          busy={isLoading}
+          onRetry={() => void refresh()}
+        />
       );
     }
     return (
@@ -295,15 +331,19 @@ export const Overview: React.FC = () => {
   }
 
   return (
-    <motion.div initial="hidden" animate="show" className="h-full min-h-0 flex flex-col justify-start gap-2 max-w-6xl mx-auto w-full px-6 pt-3 pb-3">
-      {clientClosed && (
+    <motion.div initial="hidden" animate="show" className="h-full min-h-0 flex flex-col justify-start gap-2 max-w-6xl mx-auto w-full px-6 pt-3 pb-3 overflow-y-auto custom-scrollbar">
+      <header className="shrink-0 px-1">
+        <h1 className="font-display font-black text-xl text-m3-on-surface tracking-tight">Overview</h1>
+        <p className="text-xs text-m3-outline mt-0.5">Your competitive profile at a glance</p>
+      </header>
+      {(riotClient !== 'ok' || clientClosed) && (
         <div className="p-2.5 rounded-xl bg-m3-surface-container-high border border-m3-outline-subtle text-m3-on-surface-variant text-xs font-medium flex items-center justify-between shrink-0">
           <div className="flex items-center space-x-2">
             <Gamepad2 className="w-3.5 h-3.5 text-m3-outline shrink-0" />
-            <span>Viewing offline cached stats • Riot Client is closed</span>
+            <span>{riotClientDetail || 'Riot Client is closed'} — showing cached stats</span>
           </div>
-          <button onClick={refresh} disabled={isLoading} className="text-m3-primary hover:underline text-xs ml-3 cursor-pointer font-bold shrink-0">
-            Check Connection
+          <button onClick={() => void refresh()} disabled={isLoading} className="text-m3-primary hover:underline text-xs ml-3 cursor-pointer font-bold shrink-0">
+            Retry
           </button>
         </div>
       )}
@@ -311,11 +351,11 @@ export const Overview: React.FC = () => {
       <div className="flex items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-40">
-            <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-m3-outline mb-1 px-1">Playlist</div>
+            <div className="text-micro font-bold uppercase tracking-[0.14em] text-m3-outline mb-1 px-1">Playlist</div>
             <CustomDropdown value={playlist} options={PLAYLISTS} onChange={(v) => setPlaylist(v)} />
           </div>
           <div className="w-48">
-            <div className="text-[9px] font-bold uppercase tracking-[0.14em] text-m3-outline mb-1 px-1">Act</div>
+            <div className="text-micro font-bold uppercase tracking-[0.14em] text-m3-outline mb-1 px-1">Act</div>
             <CustomDropdown value={seasonId} options={seasonOptions} onChange={(v) => setSeasonId(v)} />
           </div>
         </div>
@@ -346,17 +386,17 @@ export const Overview: React.FC = () => {
         <>
           {/* Primary KPI Tiles */}
           <section className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 shrink-0">
-            <BigTile index={2} label="Win %" numeric={kpiReady ? winPct : undefined} decimals={2} suffix="%" value={kpiPlaceholder} />
-            <BigTile index={3} label="K/D" numeric={kpiReady ? kd : undefined} decimals={3} value={kpiPlaceholder} />
+            <BigTile index={2} label="Win %" numeric={kpiReady ? winPct : undefined} format={(n) => formatPct(n, 0)} pending={selLoading} emptyReason="Stats for this act have not loaded yet" />
+            <BigTile index={3} label="K/D" numeric={kpiReady ? kdTile : undefined} format={(n) => formatKd(n)} pending={selLoading || isLoading} emptyReason="K/D has not loaded yet" />
             <BigTile
               index={4}
               label="Headshot %"
-              numeric={S ? S.hsPct : accHeadPct > 0 ? accHeadPct : undefined}
-              decimals={2}
-              suffix="%"
-              value={!S && accHeadPct === 0 ? '—' : undefined}
+              numeric={S ? S.hsPct : recentHit ? accHeadPct : undefined}
+              format={(n) => formatPct(n, 1)}
+              pending={selLoading || isLoading}
+              emptyReason="No hit data recorded yet"
             />
-            <BigTile index={5} label="Damage/Round" numeric={kpiReady ? adr : undefined} decimals={2} value={kpiPlaceholder} />
+            <BigTile index={5} label="Damage/Round" numeric={kpiReady ? adrTile : undefined} format={(n) => String(Math.round(n))} pending={selLoading || isLoading} emptyReason="Damage per round has not loaded yet" />
           </section>
 
           {/* Secondary stats row */}
@@ -365,12 +405,12 @@ export const Overview: React.FC = () => {
             <div className="grid grid-cols-4 sm:grid-cols-8 gap-3">
               <SmallStat label="Wins" value={String(wins)} tone="win" />
               <SmallStat label="Losses" value={String(losses)} tone="loss" />
-              <SmallStat label="Kills" value={kills ? kills.toLocaleString() : '…'} />
-              <SmallStat label="Deaths" value={deaths ? deaths.toLocaleString() : '…'} />
-              <SmallStat label="Assists" value={assists ? assists.toLocaleString() : '…'} />
-              <SmallStat label="Headshots" value={S ? S.headshots.toLocaleString() : recentHit ? recentHit.head.toLocaleString() : '—'} />
-              <SmallStat label="Flawless" value={String(S?.flawless ?? (isDefault ? agg?.flawless : undefined) ?? '…')} />
-              <SmallStat label="Clutches" value={String(S?.clutches ?? (isDefault ? agg?.clutches : undefined) ?? '…')} />
+              <SmallStat label="Kills" value={statText(kills, 'Kills have not loaded yet')} />
+              <SmallStat label="Deaths" value={statText(deaths, 'Deaths have not loaded yet')} />
+              <SmallStat label="Assists" value={statText(assists, 'Assists have not loaded yet')} />
+              <SmallStat label="Headshots" value={statText(S?.headshots ?? recentHit?.head, 'Headshots have not loaded yet')} />
+              <SmallStat label="Flawless" value={statText(S?.flawless ?? (isDefault ? agg?.flawless : undefined), 'Flawless rounds have not loaded yet')} />
+              <SmallStat label="Clutches" value={statText(S?.clutches ?? (isDefault ? agg?.clutches : undefined), 'Clutches have not loaded yet')} />
             </div>
           </motion.section>
 
@@ -386,7 +426,7 @@ export const Overview: React.FC = () => {
                   <div>
                     <div className="text-[11px] font-medium text-m3-outline">Match Kills (Best)</div>
                     <div className="font-display font-extrabold text-lg text-m3-on-surface tabular-nums leading-tight">
-                      {S ? String(S.bestKills || '…') : '…'}
+                      {statText(S?.bestKills, 'Combat highlights have not loaded yet')}
                     </div>
                   </div>
                 </div>
@@ -395,7 +435,11 @@ export const Overview: React.FC = () => {
                   <div>
                     <div className="text-[11px] font-medium text-m3-outline">First Kills / Deaths</div>
                     <div className="font-display font-extrabold text-lg text-m3-on-surface tabular-nums leading-tight">
-                      {S ? `${S.firstKills} / ${S.firstDeaths}` : isDefault && agg ? `${agg.firstKills} / ${agg.firstDeaths}` : '…'}
+                      {S
+                        ? `${S.firstKills} / ${S.firstDeaths}`
+                        : isDefault && agg
+                          ? `${agg.firstKills} / ${agg.firstDeaths}`
+                          : statText(undefined, 'Combat highlights have not loaded yet')}
                     </div>
                   </div>
                 </div>
@@ -404,7 +448,7 @@ export const Overview: React.FC = () => {
                   <div>
                     <div className="text-[11px] font-medium text-m3-outline">Aces</div>
                     <div className="font-display font-extrabold text-lg text-m3-on-surface tabular-nums leading-tight">
-                      {S?.aces ?? (isDefault ? agg?.aces : undefined) ?? '…'}
+                      {statText(S?.aces ?? (isDefault ? agg?.aces : undefined), 'Combat highlights have not loaded yet')}
                     </div>
                   </div>
                 </div>
@@ -466,13 +510,13 @@ export const Overview: React.FC = () => {
                   <div>
                     <div className="text-[11px] font-semibold text-m3-outline">Win %</div>
                     <div className="font-display font-bold text-base sm:text-lg text-m3-on-surface tabular-nums mt-0.5">
-                      {topAgent.winPct.toFixed(1)}%
+                      {formatPct(topAgent.winPct, 0)}
                     </div>
                   </div>
                   <div>
                     <div className="text-[11px] font-semibold text-m3-outline">K/D</div>
                     <div className="font-display font-bold text-base sm:text-lg text-m3-on-surface tabular-nums mt-0.5">
-                      {topAgent.kd.toFixed(2)}
+                      {formatKd(topAgent.kd)}
                     </div>
                   </div>
                   <div>
@@ -517,17 +561,17 @@ export const Overview: React.FC = () => {
                   <div className="flex-1 flex flex-col justify-around h-full gap-2 text-[12px] min-w-0">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-m3-outline font-medium w-10">Head</span>
-                      <span className="font-mono font-bold text-base text-m3-primary">{accHeadPct.toFixed(2)}%</span>
+                      <span className="font-mono font-bold text-base text-m3-primary">{formatPct(accHeadPct, 1)}</span>
                       <span className="font-mono text-xs text-m3-outline tabular-nums ml-auto">{accHead.toLocaleString()} hits</span>
                     </div>
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-m3-outline font-medium w-10">Body</span>
-                      <span className="font-mono font-bold text-base text-m3-on-surface">{bodyPct.toFixed(2)}%</span>
+                      <span className="font-mono font-bold text-base text-m3-on-surface">{formatPct(bodyPct, 1)}</span>
                       <span className="font-mono text-xs text-m3-outline tabular-nums ml-auto">{accBody.toLocaleString()} hits</span>
                     </div>
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-m3-outline font-medium w-10">Legs</span>
-                      <span className="font-mono font-bold text-base text-m3-on-surface">{legPct.toFixed(2)}%</span>
+                      <span className="font-mono font-bold text-base text-m3-on-surface">{formatPct(legPct, 1)}</span>
                       <span className="font-mono text-xs text-m3-outline tabular-nums ml-auto">{accLegs.toLocaleString()} hits</span>
                     </div>
                   </div>
@@ -535,7 +579,11 @@ export const Overview: React.FC = () => {
               ) : (
                 <div className="rounded-xl bg-m3-surface-container-low/60 border border-m3-outline-subtle/60 p-3 text-xs text-m3-outline flex items-start gap-2">
                   <Lock className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                  <span>Hit data loading…</span>
+                  <span>
+                    {isLoading || selLoading
+                      ? 'Hit data loading…'
+                      : 'No hit-location data yet — play a match with the Riot Client open.'}
+                  </span>
                 </div>
               )}
             </motion.section>
@@ -551,7 +599,7 @@ export const Overview: React.FC = () => {
               className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 flex flex-col justify-between shadow-m3-1">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="font-display font-bold text-sm text-m3-on-surface">Previous Acts</h3>
-                <span className="text-[10px] text-m3-outline uppercase tracking-wider font-semibold">Competitive History</span>
+                <span className="text-micro text-m3-outline uppercase tracking-wider font-semibold">Competitive History</span>
               </div>
               <div className="grid grid-cols-3 gap-2 flex-1 items-center text-center py-1">
                 {recentActs.length > 0 ? (
@@ -563,7 +611,7 @@ export const Overview: React.FC = () => {
                     // the peak (e.g. peaked Ascendant 3, now Ascendant 2).
                     const rankTier = s.tier;
                     const rName = tierName(s.tier);
-                    const kdVal = isCurrent ? (S?.kd ?? agg?.kd ?? prev?.kd ?? 0) : (prev?.kd ?? 0);
+                    const kdVal = isCurrent ? (S?.kd ?? agg?.kd ?? prev?.kd) : prev?.kd;
                     const matchesCount = isCurrent
                       ? (S ? S.wins + S.losses + S.ties : profile.games)
                       : (prev?.matches ?? s.games);
@@ -581,14 +629,20 @@ export const Overview: React.FC = () => {
                             <div className="w-11 h-11 rounded-full bg-m3-surface-container-high" />
                           )}
                         </div>
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-m3-outline/70">
+                        <span className="text-micro font-bold uppercase tracking-wider text-m3-outline/70">
                           Peak Rating
                         </span>
                         <div className="font-display font-bold text-xs sm:text-sm text-m3-on-surface leading-tight mt-0.5 truncate max-w-full">
                           {rName}
                         </div>
-                        <div className="text-[10px] text-m3-outline mt-1 font-medium truncate max-w-full">
-                          K/D <strong className="text-m3-on-surface font-mono font-bold">{kdVal.toFixed(2)}</strong> Matches <strong className="text-m3-on-surface font-mono font-bold">{matchesCount}</strong>
+                        <div className="text-micro text-m3-outline mt-1 font-medium truncate max-w-full">
+                          K/D{' '}
+                          {kdVal !== undefined ? (
+                            <strong className="text-m3-on-surface font-mono font-bold">{formatKd(kdVal)}</strong>
+                          ) : (
+                            <StatValue reason="K/D has not loaded for this act" />
+                          )}{' '}
+                          Matches <strong className="text-m3-on-surface font-mono font-bold">{matchesCount}</strong>
                         </div>
                       </div>
                     );
@@ -603,13 +657,13 @@ export const Overview: React.FC = () => {
                       <div className="my-1.5 flex items-center justify-center">
                         <div className="w-11 h-11 rounded-full bg-m3-surface-container-high" />
                       </div>
-                      <span className="text-[9px] font-bold uppercase tracking-wider text-m3-outline/40">
+                      <span className="text-micro font-bold uppercase tracking-wider text-m3-outline/40">
                         Peak Rating
                       </span>
                       <div className="font-display font-bold text-xs sm:text-sm text-m3-outline/40 leading-tight mt-0.5">
                         —
                       </div>
-                      <div className="text-[10px] text-m3-outline/40 mt-1 font-medium">
+                      <div className="text-micro text-m3-outline/40 mt-1 font-medium">
                         K/D — Matches —
                       </div>
                     </div>
@@ -637,7 +691,7 @@ export const Overview: React.FC = () => {
                     <div className="font-display font-black text-3xl text-m3-on-surface tabular-nums leading-none">
                       {trn.trnScore}
                     </div>
-                    <div className="text-[10px] font-bold text-m3-outline px-2 py-0.5 rounded-md bg-m3-surface-container-high border border-m3-outline-subtle ml-1">
+                    <div className="text-micro font-bold text-m3-outline px-2 py-0.5 rounded-md bg-m3-surface-container-high border border-m3-outline-subtle ml-1">
                       Tracker Score - Tier {scoreTier(trn.trnScore).tier}
                     </div>
                   </div>
@@ -645,8 +699,8 @@ export const Overview: React.FC = () => {
 
                 <div className="flex items-center justify-between gap-1 mt-3 pt-2">
                   {[
-                    { label: 'Round Win %', v: trn.roundWinPct.toFixed(1) + '%', p: trn.roundWinPctile },
-                    { label: 'KAST', v: trn.kast.toFixed(1) + '%', p: trn.kastPctile },
+                    { label: 'Round Win %', v: formatPct(trn.roundWinPct, 1), p: trn.roundWinPctile },
+                    { label: 'KAST', v: formatPct(trn.kast, 1), p: trn.kastPctile },
                     { label: 'ACS', v: trn.acs.toFixed(1), p: trn.acsPctile },
                     { label: 'DDΔ/Round', v: String(Math.round(trn.damageDelta / Math.max(1, trn.rounds))), p: trn.ddPctile },
                   ].map((s, i) => {
@@ -659,13 +713,13 @@ export const Overview: React.FC = () => {
                           className="flex-1 text-center pb-1.5 border-b-2"
                           style={{ borderBottomColor: tone }}
                         >
-                          <div className="text-[10px] font-bold uppercase tracking-wider text-m3-outline truncate">
+                          <div className="text-micro font-bold uppercase tracking-wider text-m3-outline truncate">
                             {s.label}
                           </div>
                           <div className="text-[15px] font-mono font-bold text-m3-on-surface mt-0.5 tabular-nums">
                             {s.v}
                           </div>
-                          <div className="text-[10px] font-mono font-bold truncate mt-0.5" style={{ color: tone }}>
+                          <div className="text-micro font-mono font-bold truncate mt-0.5" style={{ color: tone }}>
                             <span>{g}</span> <span className="text-m3-outline font-normal">· {pctLabel(s.p)}</span>
                           </div>
                         </div>
@@ -686,7 +740,7 @@ export const Overview: React.FC = () => {
                       <div className="font-display font-black text-3xl text-m3-outline/40 tabular-nums leading-none">
                         —
                       </div>
-                      <div className="text-[10px] font-bold text-m3-outline/40 px-2 py-0.5 rounded-md bg-m3-surface-container-high border border-m3-outline-subtle ml-1">
+                      <div className="text-micro font-bold text-m3-outline/40 px-2 py-0.5 rounded-md bg-m3-surface-container-high border border-m3-outline-subtle ml-1">
                         No score yet
                       </div>
                     </div>
@@ -696,13 +750,13 @@ export const Overview: React.FC = () => {
                       <React.Fragment key={label}>
                         {i > 0 && <span className="text-m3-outline-subtle font-bold text-xs px-0.5 select-none">+</span>}
                         <div className="flex-1 text-center pb-1.5 border-b-2 border-m3-outline-subtle/40">
-                          <div className="text-[10px] font-bold uppercase tracking-wider text-m3-outline/40 truncate">
+                          <div className="text-micro font-bold uppercase tracking-wider text-m3-outline/40 truncate">
                             {label}
                           </div>
                           <div className="text-[15px] font-mono font-bold text-m3-outline/40 mt-0.5 tabular-nums">
                             —
                           </div>
-                          <div className="text-[10px] font-mono font-bold truncate mt-0.5 text-m3-outline/40">
+                          <div className="text-micro font-mono font-bold truncate mt-0.5 text-m3-outline/40">
                             —
                           </div>
                         </div>

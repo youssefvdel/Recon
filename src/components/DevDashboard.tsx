@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { FlaskConical, Play, Trash2, Radio, Coffee, Download, Copy, Activity, Terminal, ChevronDown } from 'lucide-react';
+import { FlaskConical, Play, Trash2, Radio, Coffee, Download, Copy, Activity, Terminal, ChevronDown, AlertTriangle } from 'lucide-react';
 import { listen, emit } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import {
@@ -433,6 +433,33 @@ export function trnExportReport(exported: number, held: number, verb: 'Copied' |
   }
   const tail = verb === 'Copied' ? 'to clipboard' : 'as recon-trn-trace-*.txt';
   return `${verb} ${exported} line${exported === 1 ? '' : 's'} ${tail}${exported < held ? ` (of ${held} held)` : ''}`;
+}
+
+/* ---- Overlay failure notices -------------------------------------------
+ * OverlayView.tsx raises an in-game warning row for failed overlay IPC and,
+ * because the HUD window is click-through so the row can never be dismissed
+ * there, keeps a capped record under this key. That record is the only way to
+ * find out later why the HUD misbehaved mid-match, so it gets a reader here. */
+const OVERLAY_NOTICE_KEY = 'recon_overlay_notices_v1';
+type OverlayNoticeRow = { at: string; text: string };
+
+function readOverlayNotices(): OverlayNoticeRow[] {
+  try {
+    const raw = localStorage.getItem(OVERLAY_NOTICE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (r): r is OverlayNoticeRow =>
+        !!r &&
+        typeof r === 'object' &&
+        typeof (r as OverlayNoticeRow).text === 'string' &&
+        typeof (r as OverlayNoticeRow).at === 'string',
+    );
+  } catch {
+    // Blocked or corrupt storage: show nothing rather than break the panel.
+    return [];
+  }
 }
 /* ---- IPC smoke tests -------------------------------------------------------
  * One click = one IPC round-trip, and the answer lands next to the button.
@@ -1146,6 +1173,35 @@ export const DevDashboard: React.FC = () => {
     const el = trnLogBox.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [trnLogRows, trnLogOpen, trnLogFilter]);
+
+  /* Overlay failure notices: written by the HUD window (OverlayView.tsx), read
+   * here so a mid-match warning that auto-cleared after 6 s is still findable.
+   * Poll + focus re-read; the JSON compare keeps a quiet ring from re-rendering
+   * the whole dashboard on every tick. */
+  const [overlayNotices, setOverlayNotices] = useState<OverlayNoticeRow[]>([]);
+  useEffect(() => {
+    const read = () => {
+      const next = readOverlayNotices();
+      setOverlayNotices((prev) =>
+        JSON.stringify(prev) === JSON.stringify(next) ? prev : next,
+      );
+    };
+    read();
+    const id = setInterval(read, 5000);
+    window.addEventListener('focus', read);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('focus', read);
+    };
+  }, []);
+  const clearOverlayNotices = () => {
+    try {
+      localStorage.removeItem(OVERLAY_NOTICE_KEY);
+    } catch {
+      /* Nothing to clear if storage is blocked. */
+    }
+    setOverlayNotices([]);
+  };
 
   /* Performance: own-process RAM/CPU timeline (dev-only backend ring: 5s
    * cadence, 1h window, pauses while VALORANT owns the screen). The
@@ -1874,6 +1930,47 @@ export const DevDashboard: React.FC = () => {
       {/* Backend events + log export share one column, stacked, so the trace
           above can take two columns without leaving a hole in the grid. */}
       <div className="flex flex-col gap-3.5 min-w-0">
+        <section className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-4 min-w-0">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <h4 className="font-display font-bold text-sm text-m3-on-surface flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+              <span>Overlay notices</span>
+            </h4>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-mono text-m3-outline text-right">
+                {overlayNotices.length} held · newest first
+              </span>
+              <button
+                type="button"
+                onClick={clearOverlayNotices}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-m3-surface-container-low border border-m3-outline-subtle text-m3-outline hover:text-m3-on-surface flex items-center gap-1 cursor-pointer"
+              >
+                <Trash2 className="w-3 h-3" />
+                <span>Clear</span>
+              </button>
+            </div>
+          </div>
+          {overlayNotices.length === 0 ? (
+            <p className="text-[11px] font-mono text-m3-outline">
+              No overlay failures recorded. The in-game HUD writes a line here when an overlay
+              command or the Tab probe fails, then clears its on-screen warning after 6 s.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-1 max-h-56 overflow-auto font-mono text-[11px]">
+              {[...overlayNotices]
+                .reverse()
+                .slice(0, 10)
+                .map((n, i) => (
+                  <li key={`${n.at}-${i}`} className="flex gap-2 min-w-0">
+                    <span className="shrink-0 text-m3-outline tabular-nums">
+                      {new Date(n.at).toLocaleString()}
+                    </span>
+                    <span className="min-w-0 text-amber-300 break-words">{n.text}</span>
+                  </li>
+                ))}
+            </ul>
+          )}
+        </section>
         <section className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-4 min-w-0">
           <div className="flex items-center justify-between mb-2">
             <h4 className="font-display font-bold text-sm text-m3-on-surface flex items-center gap-1.5">

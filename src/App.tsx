@@ -163,7 +163,7 @@ export const App: React.FC = () => {
   const mainRef = useRef<HTMLElement>(null);
   const [preferredStretched, setPreferredStretched] = useState<[number, number]>([2088, 1440]);
   const [isLoading, setIsLoading] = useState(false);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
   const [autoUpdate, setAutoUpdate] = useState<AutoUpdateState>(getAutoUpdateState);
   const announcedUpdateRef = useRef('');
   const [hasUpdate, setHasUpdate] = useState(false);
@@ -662,21 +662,36 @@ export const App: React.FC = () => {
         </motion.div>
       )}
 
-      {/* Animated Toast Notification */}
-      <AnimatePresence>
-        {toast && (
-          <motion.div
-            initial={{ opacity: 0, y: 16, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 16, scale: 0.95 }}
-            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-            className="fixed bottom-6 right-6 z-50 px-5 py-3 rounded-full bg-m3-surface-bright text-m3-on-surface border border-m3-primary/40 shadow-m3-3 text-xs font-medium flex items-center space-x-2.5 backdrop-blur-md"
-          >
-            <span className="w-2 h-2 rounded-full bg-m3-primary" />
-            <span>{toast.message}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Animated Toast Notification.
+          Bottom-right STACK column: every transient notice in the app renders
+          here, so a future tray/status banner can join the column instead of
+          fighting the toast for the same fixed offset. No backdrop blur — the
+          toast sits on a flat /0.85 plate, same convention as the HUD. */}
+      <div
+        className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-2 pointer-events-none"
+        aria-live={toast?.type === 'error' ? 'assertive' : 'polite'}
+        aria-atomic="true"
+        role="status"
+      >
+        <AnimatePresence>
+          {toast && (
+            <motion.div
+              initial={{ opacity: 0, y: 16, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 16, scale: 0.95 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+              className="pointer-events-auto px-5 py-3 rounded-full bg-m3-surface-bright/85 text-m3-on-surface border border-m3-primary/40 shadow-m3-3 text-xs font-medium flex items-center space-x-2.5"
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  toast.type === 'error' ? 'bg-red-400' : 'bg-m3-primary'
+                }`}
+              />
+              <span>{toast.message}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
     </MotionConfig>
   );

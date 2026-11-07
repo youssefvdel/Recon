@@ -49,13 +49,30 @@ export const UtilityView: React.FC<UtilityViewProps> = ({
   return (
     <div className="h-full flex flex-col min-h-0 overflow-hidden bg-m3-surface">
       {/* Material 3 Tab Row Navigation */}
-      <nav className="flex items-center gap-1 sm:gap-2 px-4 sm:px-6 bg-m3-surface-container-low border-b border-m3-outline-subtle h-11 shrink-0 select-none z-10">
+      <nav
+        role="tablist"
+        aria-label="Display utility sections"
+        className="flex items-center gap-1 sm:gap-2 px-4 sm:px-6 bg-m3-surface-container-low border-b border-m3-outline-subtle h-11 shrink-0 select-none z-10">
         {SUBTABS.map((t) => {
           const active = subTab === t.id;
           return (
             <button
               key={t.id}
+              role="tab"
+              id={`utility-tab-${t.id}`}
+              aria-selected={active}
+              aria-controls="utility-panel"
+              tabIndex={active ? 0 : -1}
               onClick={() => setSubTab(t.id)}
+              onKeyDown={(e) => {
+                if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+                e.preventDefault();
+                const i = SUBTABS.findIndex((x) => x.id === subTab);
+                const delta = e.key === 'ArrowRight' ? 1 : SUBTABS.length - 1;
+                const next = SUBTABS[(i + delta) % SUBTABS.length];
+                setSubTab(next.id);
+                document.getElementById(`utility-tab-${next.id}`)?.focus();
+              }}
               className={`relative h-full px-3.5 sm:px-4 flex items-center justify-center text-xs sm:text-[13px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                 active ? 'text-m3-primary font-bold font-display' : 'text-m3-outline hover:text-m3-on-surface'
               }`}
@@ -74,7 +91,11 @@ export const UtilityView: React.FC<UtilityViewProps> = ({
       </nav>
 
       {/* Content Area */}
-      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-4 sm:px-6 py-3.5 pb-8">
+      <div
+        role="tabpanel"
+        id="utility-panel"
+        aria-labelledby={`utility-tab-${subTab}`}
+        className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-4 sm:px-6 py-3.5 pb-8">
         <div className="max-w-6xl mx-auto h-full w-full">
           <AnimatePresence mode="wait">
             {subTab === 'switcher' && (

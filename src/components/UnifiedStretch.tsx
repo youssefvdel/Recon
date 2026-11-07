@@ -91,7 +91,16 @@ export const UnifiedStretch: React.FC<UnifiedStretchProps> = ({
     try {
       localStorage.setItem('aspect_auto_borderless', String(enabled));
     } catch {}
-    setAutoBorderlessIpc(enabled).catch(() => {});
+    setBlStatus(null);
+    setAutoBorderlessIpc(enabled).catch((e: unknown) => {
+      // Never leave the switch showing a state the backend refused: revert the
+      // optimistic flip and say why in the borderless status line.
+      setAutoBorderless(!enabled);
+      try {
+        localStorage.setItem('aspect_auto_borderless', String(!enabled));
+      } catch {}
+      setBlStatus(`Could not save auto-borderless: ${String(e)}`);
+    });
   };
 
   // ---- Custom Dropdown state ----
@@ -799,7 +808,7 @@ export const UnifiedStretch: React.FC<UnifiedStretchProps> = ({
       {/* Hotkey modal */}
       <AnimatePresence>
         {showHotkeyModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-m3-surface-container-lowest/80 backdrop-blur-md">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-m3-surface-container-lowest/95">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}

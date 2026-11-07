@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { X, Loader2, Crosshair, User } from 'lucide-react';
 import type { LiveMatchPlayer } from '../types';
 import {
@@ -118,7 +118,7 @@ const PlayerCardContainer: React.FC<{
     <div className="flex-1 min-h-0 w-full max-w-[200px] rounded-2xl bg-m3-surface-container-low border border-m3-outline-subtle/80 hover:border-m3-primary/50 shadow-m3-2 overflow-hidden relative flex flex-col justify-between transition-colors group">
       {/* Level Chip floating cleanly inside the top */}
       <div className="absolute top-2 inset-x-0 flex justify-center z-20 pointer-events-none">
-        <div className="bg-m3-surface-dim/80 backdrop-blur-md border border-m3-outline-subtle/80 rounded-full px-2 py-0.5 font-mono text-[10px] font-bold text-m3-primary shadow-m3-1 flex items-center gap-1 select-none">
+        <div className="bg-m3-surface-dim border border-m3-outline-subtle/80 rounded-full px-2 py-0.5 font-mono text-[10px] font-bold text-m3-primary shadow-m3-1 flex items-center gap-1 select-none">
           <span className="text-m3-outline text-[8px]">&lt;</span>
           <span>{player.accountLevel || 1}</span>
           <span className="text-m3-outline text-[8px]">&gt;</span>
@@ -253,15 +253,56 @@ export const LoadoutViewer: React.FC<{
   onClose: () => void;
 }> = ({ player, loadout, loading, ambiguous, unavailableReason, onClose }) => {
   const [catalog, setCatalog] = useState<WeaponCatalog | null>(null);
-
-  // Close on Escape key
+  const titleId = React.useId();
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+  // Kept in a ref so the mount-only dialog effect never re-fires (and steals
+  // focus back to Close) when the parent re-renders its inline onClose.
+  const onCloseRef = useRef(onClose);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    onCloseRef.current = onClose;
   }, [onClose]);
+
+  // Dialog recipe (docs/audit/ui.md #4): focus in on open, restore on close,
+  // Esc closes, Tab is trapped inside the panel. Mount-only by design.
+  useEffect(() => {
+    restoreFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const t = window.setTimeout(() => closeRef.current?.focus(), 0);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const panel = panelRef.current;
+      if (!panel) return;
+      const focusables = Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && (active === first || active === panel)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      window.clearTimeout(t);
+      document.removeEventListener('keydown', onKeyDown, true);
+      restoreFocusRef.current?.focus?.();
+    };
+  }, []);
 
   // Load catalog so default weapon icons and chromas resolve instantly
   useEffect(() => {
@@ -320,10 +361,15 @@ export const LoadoutViewer: React.FC<{
 
   return (
     <div
-      className="m3-modal-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-md p-2 sm:p-3"
+      className="m3-modal-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-2 sm:p-3"
       onClick={onClose}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         className="m3-modal-panel w-full max-w-[1360px] h-[calc(100vh-24px)] max-h-[780px] rounded-2xl sm:rounded-3xl border border-m3-outline-subtle bg-m3-surface text-m3-on-surface shadow-m3-3 p-3 sm:p-4 flex flex-col select-none overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
@@ -342,7 +388,7 @@ export const LoadoutViewer: React.FC<{
               </div>
             )}
             <div className="flex flex-col">
-              <span className="font-display font-bold text-sm sm:text-base text-m3-on-surface tracking-tight leading-tight">
+              <span id={titleId} className="font-display font-bold text-sm sm:text-base text-m3-on-surface tracking-tight leading-tight">
                 {rioId}
               </span>
               <div className="flex items-center gap-1.5 mt-0.5">
@@ -368,6 +414,7 @@ export const LoadoutViewer: React.FC<{
               Collection
             </span>
             <button
+              ref={closeRef}
               onClick={onClose}
               className="p-1.5 rounded-full text-m3-on-surface-variant hover:text-m3-on-surface hover:bg-m3-surface-container-highest transition-colors cursor-pointer"
               aria-label="Close loadout"
@@ -396,7 +443,7 @@ export const LoadoutViewer: React.FC<{
             fake "Standard" defaults that reads as real data. */}
         <div className="flex-1 min-h-0 relative overflow-hidden">
           {loading && (
-            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-m3-surface/90 backdrop-blur-xs rounded-2xl">
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-m3-surface/95 rounded-2xl">
               <Loader2 className="w-6 h-6 text-m3-primary animate-spin" />
               <span className="text-xs font-mono text-m3-primary uppercase tracking-wider">
                 Loading live weapon arsenal…

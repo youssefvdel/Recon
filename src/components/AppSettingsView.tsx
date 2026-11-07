@@ -535,9 +535,11 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-0.5">
+            <div role="radiogroup" aria-label="Release channel" className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-0.5">
               <button
                 type="button"
+                role="radio"
+                aria-checked={updateChannel === 'stable'}
                 onClick={() => handleChannelChange('stable')}
                 disabled={checking || installing}
                 className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-1 ${
@@ -562,6 +564,8 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
 
               <button
                 type="button"
+                role="radio"
+                aria-checked={updateChannel === 'early-access'}
                 onClick={() => handleChannelChange('early-access')}
                 disabled={checking || installing}
                 className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-1 ${
@@ -731,6 +735,9 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
               </div>
               <button
                 type="button"
+                role="switch"
+                aria-checked={autostart}
+                aria-label="Launch Recon when Windows starts"
                 onClick={handleToggleAutostart}
                 className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
                   autostart ? 'bg-m3-primary' : 'bg-m3-surface-container-high'
@@ -756,6 +763,9 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
               </div>
               <button
                 type="button"
+                role="switch"
+                aria-checked={startMinimized}
+                aria-label="Start Recon minimized to the tray"
                 onClick={handleToggleStartMinimized}
                 className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
                   startMinimized ? 'bg-m3-primary' : 'bg-m3-surface-container-high'
@@ -781,6 +791,9 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
               </div>
               <button
                 type="button"
+                role="switch"
+                aria-checked={closeToTray}
+                aria-label="Keep Recon running in the tray when the window closes"
                 onClick={handleToggleCloseToTray}
                 className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
                   closeToTray ? 'bg-m3-primary' : 'bg-m3-surface-container-high'
@@ -895,6 +908,9 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
               </div>
               <button
                 type="button"
+                role="switch"
+                aria-checked={inGameToasts}
+                aria-label="Show resolution-switch notifications"
                 onClick={handleToggleToasts}
                 className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
                   inGameToasts ? 'bg-m3-primary' : 'bg-m3-surface-container-high'
@@ -920,6 +936,9 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
               </div>
               <button
                 type="button"
+                role="switch"
+                aria-checked={spaceSpam}
+                aria-label="Hold Space to re-press it"
                 onClick={handleToggleSpaceSpam}
                 className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
                   spaceSpam ? 'bg-m3-primary' : 'bg-m3-surface-container-high'
@@ -940,12 +959,10 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
                   Hardware Acceleration
                 </div>
                 <div className="text-[11px] text-m3-outline">
-                  Native Win32 GDI & DirectComposition GPU pipeline enabled.
+                  Win32 GDI + DirectComposition is the compositing path. This row is not a health
+                  readout — use the Display/GPU panel for measured state.
                 </div>
               </div>
-              <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 font-mono text-[10px] font-bold border border-emerald-500/30">
-                ACTIVE
-              </span>
             </div>
           </div>
         </div>

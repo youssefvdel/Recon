@@ -211,6 +211,45 @@ export const CustomResolution: React.FC<CustomResolutionProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isTesting, revertSafeMode, keepChanges]);
 
+  // Dialog recipe for the fail-safe overlay (docs/audit/ui.md #4): focus the
+  // safe action on open, trap Tab, restore focus on close. Escape/Enter stay in
+  // the handler above — never bind them twice or Revert runs twice.
+  const testTitleId = React.useId();
+  const testDialogRef = useRef<HTMLDivElement | null>(null);
+  const keepRef = useRef<HTMLButtonElement | null>(null);
+  const testRestoreFocus = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!isTesting) return;
+    testRestoreFocus.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const t = window.setTimeout(() => keepRef.current?.focus(), 0);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+      const panel = testDialogRef.current;
+      if (!panel) return;
+      const focusables = Array.from(
+        panel.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex]:not([tabindex="-1"])')
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && (active === first || active === panel)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      window.clearTimeout(t);
+      document.removeEventListener('keydown', onKeyDown, true);
+      testRestoreFocus.current?.focus?.();
+    };
+  }, [isTesting]);
+
   const startSafeTest = async (overrideW?: number, overrideH?: number, overrideHz?: number) => {
     const tw = overrideW ?? width;
     const th = overrideH ?? height;
@@ -301,8 +340,15 @@ export const CustomResolution: React.FC<CustomResolutionProps> = ({
     <div className="flex flex-col gap-2.5 p-3.5 select-none bg-m3-surface-container text-m3-on-surface relative rounded-2xl border border-m3-outline-subtle shadow-m3-1">
       {/* SAFE TEST COUNTDOWN OVERLAY MODAL */}
       {isTesting && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="w-full max-w-sm p-6 rounded-3xl bg-m3-surface-container-high border border-m3-primary/50 shadow-2xl flex flex-col items-center text-center space-y-4">
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div
+            ref={testDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={testTitleId}
+            tabIndex={-1}
+            className="w-full max-w-sm p-6 rounded-3xl bg-m3-surface-container-high border border-m3-primary/50 shadow-2xl flex flex-col items-center text-center space-y-4 focus:outline-none"
+          >
             <div className="relative w-20 h-20 flex items-center justify-center my-1 shrink-0">
               <div className="absolute inset-0 rounded-full border-4 border-m3-outline-subtle" />
               <div
@@ -315,7 +361,7 @@ export const CustomResolution: React.FC<CustomResolutionProps> = ({
             </div>
 
             <div>
-              <h3 className="font-display font-extrabold text-lg text-m3-on-surface">
+              <h3 id={testTitleId} className="font-display font-extrabold text-lg text-m3-on-surface">
                 Testing Custom Resolution
               </h3>
               <p className="text-sm font-semibold text-m3-primary mt-0.5 font-mono">
@@ -328,6 +374,7 @@ export const CustomResolution: React.FC<CustomResolutionProps> = ({
 
             <div className="flex items-center space-x-2.5 w-full pt-2">
               <button
+                ref={keepRef}
                 onClick={keepChanges}
                 className="flex-1 py-2.5 px-3 rounded-full bg-m3-primary text-m3-on-primary font-bold text-xs shadow-m3-1 hover:brightness-110 active:scale-95 transition-all flex items-center justify-center space-x-1.5 cursor-pointer"
               >

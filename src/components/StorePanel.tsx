@@ -260,7 +260,7 @@ export const StorePanel: React.FC = () => {
                   {/* Contents overlay — covers the banner art, no layout shift */}
                   {expandedId === bundle.id && bundleItems.length > 0 && (
                     <div
-                      className="absolute inset-0 z-10 rounded-xl bg-black/85 backdrop-blur-[2px] p-2 flex flex-col min-h-0"
+                      className="absolute inset-0 z-10 rounded-xl bg-black/90 p-2 flex flex-col min-h-0"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <div className="flex items-center justify-between px-1 pb-1.5 shrink-0">

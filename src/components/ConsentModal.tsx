@@ -46,22 +46,22 @@ export const ConsentModal: React.FC<{ onDone: () => void }> = ({ onDone }) => {
                 Kept on this PC. Never uploaded — only shown to you when something breaks.
               </div>
             </div>
-            <div className="flex gap-1.5 shrink-0">
-              <button
-                type="button"
-                onClick={() => setCrashOn(true)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${crashOn ? 'bg-m3-primary/20 border-m3-primary text-m3-primary' : 'bg-m3-surface-container-low border-m3-outline-subtle text-m3-outline hover:text-m3-on-surface'}`}
-              >
-                ON
-              </button>
-              <button
-                type="button"
-                onClick={() => setCrashOn(false)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${!crashOn ? 'bg-m3-coral/15 border-m3-coral/50 text-m3-coral' : 'bg-m3-surface-container-low border-m3-outline-subtle text-m3-outline hover:text-m3-on-surface'}`}
-              >
-                OFF
-              </button>
-            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={crashOn}
+              aria-label="Keep local crash reports"
+              onClick={() => setCrashOn(!crashOn)}
+              className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors shrink-0 ${
+                crashOn ? 'bg-m3-primary' : 'bg-m3-surface-container-high'
+              }`}
+            >
+              <div
+                className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                  crashOn ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
           </div>
 
           <div className="flex items-center justify-between gap-3 rounded-xl bg-m3-surface-container-low border border-m3-outline-subtle px-3 py-2">
@@ -72,22 +72,22 @@ export const ConsentModal: React.FC<{ onDone: () => void }> = ({ onDone }) => {
                 server. This is the only feature that sends account data.
               </div>
             </div>
-            <div className="flex gap-1.5 shrink-0">
-              <button
-                type="button"
-                onClick={() => setPulseOn(true)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${pulseOn ? 'bg-m3-primary/20 border-m3-primary text-m3-primary' : 'bg-m3-surface-container-low border-m3-outline-subtle text-m3-outline hover:text-m3-on-surface'}`}
-              >
-                ON
-              </button>
-              <button
-                type="button"
-                onClick={() => setPulseOn(false)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${!pulseOn ? 'bg-m3-coral/15 border-m3-coral/50 text-m3-coral' : 'bg-m3-surface-container-low border-m3-outline-subtle text-m3-outline hover:text-m3-on-surface'}`}
-              >
-                OFF
-              </button>
-            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={pulseOn}
+              aria-label="Send the optional usage heartbeat"
+              onClick={() => setPulseOn(!pulseOn)}
+              className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors shrink-0 ${
+                pulseOn ? 'bg-m3-primary' : 'bg-m3-surface-container-high'
+              }`}
+            >
+              <div
+                className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                  pulseOn ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
           </div>
         </div>
 

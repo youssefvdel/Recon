@@ -63,6 +63,53 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: bunx tauri build
 
+      - name: Sign setup.exe (Authenticode)
+        id: authenticode
+        # Order matters: build -> Authenticode-sign -> refresh the updater .sig
+        # -> latest.json -> publish. The feed must describe the published bytes.
+        # Skipped when the signing secrets are absent (forks, quote-less runs).
+        shell: pwsh
+        env:
+          SIGN_PFX_B64: ${{ secrets.WINDOWS_SIGN_PFX_B64 }}
+          SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}
+        run: |
+          if (-not $env:SIGN_PFX_B64) {
+            Write-Host 'No Authenticode certificate configured; setup.exe stays unsigned.'
+            'signed=false' >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          $exe = "src-tauri/target/release/bundle/nsis/Recon_${version}_x64-setup.exe"
+          if (-not (Test-Path $exe)) { throw "missing $exe" }
+          $pfx = Join-Path $env:RUNNER_TEMP 'recon-sign.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGN_PFX_B64))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found in the Windows SDK' }
+          & $signtool.FullName sign /fd SHA256 /f $pfx /p $env:SIGN_PFX_PASSWORD `
+            /tr http://timestamp.digicert.com /td SHA256 $exe
+          # `signtool verify /pa` fails for a self-signed root the runner does not
+          # trust; assert the signer instead (same rule as build-windows.yml).
+          $sig = Get-AuthenticodeSignature $exe
+          Write-Host "Authenticode: $($sig.Status) / $($sig.SignerCertificate.Subject)"
+          if (-not $sig.SignerCertificate) { throw "$exe is not signed" }
+          'signed=true' >> $env:GITHUB_OUTPUT
+
+      - name: Refresh updater signature
+        # Authenticode signing changed the installer bytes, so the .sig Tauri made
+        # during bundling no longer verifies. Re-sign the final bytes with the
+        # same updater key, or the updater would reject every download.
+        if: steps.authenticode.outputs.signed == 'true'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          bunx tauri signer sign \
+            "src-tauri/target/release/bundle/nsis/Recon_${VERSION}_x64-setup.exe"
+
       - name: Generate latest.json
         shell: bash
         run: |

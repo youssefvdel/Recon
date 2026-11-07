@@ -6,6 +6,8 @@ import { useTrackerData } from '../hooks/useTrackerData';
 import { ScoreBadge, scoreTier } from './ScoreBadge';
 import { ServerChip } from './ServerChip';
 import OverlayCrosshair from './OverlayCrosshair';
+import { StatValue } from './StatValue';
+import { formatPct } from '../utils/format';
 import {
   DEFAULT_OVERLAY_CROSSHAIR,
   sanitizeCrosshairShape,
@@ -2156,7 +2158,7 @@ export const OverlayView: React.FC = () => {
                       {/* Win % */}
                       <div className="text-right font-mono text-[10px] font-bold tabular-nums whitespace-nowrap" data-tip="Win Rate">
                         <span className={stat.winPct >= 50 ? 'text-m3-mint' : 'text-m3-on-surface-variant'}>
-                          {stat.winPct.toFixed(1)}%
+                          {formatPct(stat.winPct, 1)}
                         </span>
                       </div>
 
@@ -2167,7 +2169,7 @@ export const OverlayView: React.FC = () => {
 
                       {/* HS% */}
                       <div className="text-right font-mono text-[10px] text-amber-200/90 font-medium tabular-nums whitespace-nowrap" data-tip="Headshot %">
-                        {stat.hsPct > 0 ? `${stat.hsPct.toFixed(0)}%` : null}
+                        {stat.hsPct > 0 ? formatPct(stat.hsPct, 0) : null}
                       </div>
                     </div>
                   );
@@ -2399,8 +2401,8 @@ const PregameTeamColumn: React.FC<{
                 ) : privLocked ? (
                   privLockCell
                 ) : (
-                  <span className="w-5 h-5 rounded border border-m3-outline-subtle/55 bg-m3-surface-container-high/60 flex items-center justify-center text-[9px] font-mono text-m3-outline/70">
-                    —
+                  <span className="w-5 h-5 rounded border border-m3-outline-subtle/55 bg-m3-surface-container-high/60 flex items-center justify-center text-[9px] font-mono">
+                    <StatValue reason="Tracker Score unavailable" className="text-[9px]" />
                   </span>
                 )}
               </div>
@@ -2543,7 +2545,7 @@ const PregameTeamColumn: React.FC<{
               <div className="text-right font-mono text-[11px] font-semibold tabular-nums whitespace-nowrap" data-tip="Act Win Rate">
                 {p.winPct != null ? (
                   <span className={p.winPct >= 50 ? 'text-m3-mint' : 'text-m3-on-surface-variant'}>
-                    {p.winPct}%
+                    {formatPct(p.winPct, 0)}
                   </span>
                 ) : privLocked ? (
                   privLockCell
@@ -2553,7 +2555,7 @@ const PregameTeamColumn: React.FC<{
               {/* HS % */}
               <div className="text-right font-mono text-[11px] tabular-nums whitespace-nowrap" data-tip="Headshot %">
                 {p.hsPct != null ? (
-                  <span className="text-amber-200/90 font-medium">{p.hsPct}%</span>
+                  <span className="text-amber-200/90 font-medium">{formatPct(p.hsPct, 0)}</span>
                 ) : privLocked ? (
                   privLockCell
                 ) : null}
@@ -2787,7 +2789,7 @@ const VerticalSquadColumn: React.FC<{
           <div className="text-right font-mono text-[10px] tabular-nums whitespace-nowrap" data-tip="Act-wide win rate">
             {p.winPct != null ? (
               <span className={p.winPct >= 50 ? 'text-m3-mint font-semibold' : 'text-rose-400'}>
-                {p.winPct.toFixed(0)}%
+                {formatPct(p.winPct, 0)}
               </span>
             ) : privLocked ? (
               privLockCell
@@ -2798,7 +2800,7 @@ const VerticalSquadColumn: React.FC<{
 
           {/* Act-wide headshot % */}
           <div className="text-right font-mono text-[10px] text-amber-200/90 tabular-nums whitespace-nowrap" data-tip="Act-wide headshot %">
-            {p.hsPct != null && p.hsPct > 0 ? `${p.hsPct.toFixed(0)}%` : privLocked ? privLockCell : trnBlank(p.trnState)}
+            {p.hsPct != null && p.hsPct > 0 ? formatPct(p.hsPct, 0) : privLocked ? privLockCell : trnBlank(p.trnState)}
           </div>
         </div>
       );

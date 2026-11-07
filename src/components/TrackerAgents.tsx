@@ -260,16 +260,16 @@ export const TrackerAgents: React.FC = () => {
 
   return (
     <div className="h-full min-h-0 overflow-y-auto custom-scrollbar max-w-6xl mx-auto w-full px-4 sm:px-6 py-3.5 pb-10">
-      {/* Page Header (Material 3 Typography) */}
+      {/* Page header — same shell as Match History */}
       <div className="flex items-center justify-between mb-3.5">
-        <div>
-          <h2 className="font-display font-black text-xl text-m3-on-surface tracking-tight">
+        <header className="min-w-0">
+          <h1 className="font-display font-black text-xl text-m3-on-surface tracking-tight">
             Agent Performance
-          </h2>
+          </h1>
           <p className="text-xs text-m3-outline mt-0.5">
             Competitive act statistics across all played agents
           </p>
-        </div>
+        </header>
         <div className="flex items-center gap-2 shrink-0">
           <div className="w-40">
             <CustomDropdown value={actId} options={actOptions} onChange={setActId} />
