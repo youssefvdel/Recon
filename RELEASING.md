@@ -142,6 +142,30 @@ only update itself if it already contains the plugin — 0.3.0 was the first.
 
 ---
 
+## Code signing
+
+`recon.exe` downloads are Authenticode-signed in CI with a **self-signed**
+certificate (`CN=Youssef Adel,O=Recon,C=EG`, RSA 4096, SHA-256, 5 years from
+2026-11-07) and timestamped by DigiCert. The **"Sign recon.exe"** step in
+`.github/workflows/build-windows.yml` does it. When the secrets are absent (forks,
+runs without them) the step skips and the exe is unsigned.
+
+| Secret | Holds |
+| --- | --- |
+| `WINDOWS_SIGN_PFX_B64` | the PFX, base64-encoded |
+| `WINDOWS_SIGN_PFX_PASSWORD` | its password |
+
+Rules:
+
+- **Never commit the PFX or its password.** They live in repo secrets only.
+- **Rotate the certificate and the two secrets together.** A new cert with a stale
+  secret makes the signing step fail — loudly, before upload, which is intended.
+- Signing only removes the warning on machines that install the public cert; it is
+  not SmartScreen reputation. Creation, rotation, user install, the paid OV/EV path
+  and local signing are in [docs/release-signing.md](docs/release-signing.md).
+
+---
+
 ## Why the app can't just replace its own .exe
 
 Windows will not let a running process overwrite its own executable, and Recon
