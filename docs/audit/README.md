@@ -15,6 +15,24 @@ Linux. Evidence is source, Tailwind tokens, a local bundle build, and the
 repo's own recorded `perf.rs` measurements. Verdicts that need a real Windows
 box are marked VERIFY in the individual files.
 
+## Status: applied
+
+All findings in this folder were fixed across three waves on `main`:
+
+- `5ba5158` wave 1 — overlay input fail-safe, WS_EX_LAYERED and every CSS blur
+  removed, alpha layer only when it has content, in-game drain fixed, TRN cache
+  capped + swept, proxy TTL 60 s, account-switch guard, bundle 1012 -> 648 kB.
+- `f474f7f` wave 2 — heartbeat opt-in (privacy claim true), stale tracker.gg copy
+  gone, honest stat cells, modal/tooltip/tab/switch accessibility, Riot-client
+  status surfaced, text floor, signed automated releases.
+- `18e0f95` wave 3 — the last blur sites, Overview's real unavailable states with
+  retry, shared StatValue across views, overlay notice reader, installer
+  Authenticode-signed before the updater signature is regenerated.
+
+Anything still open is called out in the individual files (VERIFY items that need
+a Windows box, and the two deliberately-deferred items: the healthy-client
+profile-fetch spinner, and the HUD keeping its 2-decimal K/D precision).
+
 ## Ranked cross-audit shortlist
 
 Value per unit effort, highest first. "Why now" is the reason it outranks the
