@@ -50,6 +50,12 @@ export default {
         sans: ['"DM Sans"', 'system-ui', '-apple-system', 'sans-serif'],
         mono: ['"JetBrains Mono"', '"Cascadia Code"', 'monospace'],
       },
+      // Type floor. Text below 11px was unreadable on a 1440p stretched
+      // display (docs/audit/ui.md #3); micro is the smallest size allowed.
+      // Never go back to arbitrary text-[<11px] values.
+      fontSize: {
+        micro: ['11px', '15px'],
+      },
       borderRadius: {
         '3xl': '24px',
         '4xl': '32px',
