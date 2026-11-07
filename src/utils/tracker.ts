@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
 import type { LiveMatchPlayer, LiveMatchState, LocalRiotAccount, TrackerDuel, TrackerMatchDetail, TrackerMmrPoint, TrackerPlayer, TrackerProfile } from '../types';
 import { isTauri } from './ipc';
+import { aggregateActStats, type ActAggregate, type ActMatchSample } from './actStats';
 import { setTrnMatchPhase, setTrnLobbyKey, trnLog, trnProxyPaused, openTrnDrainJob, closeTrnDrainJob, isTrnPrivateError, trnNoteNegative } from './trn';
 import { getDevMockMatch, isDevNoClient } from './devTools';
 import { extractGamePodId, parseGamePodId } from './matchServer';
@@ -1980,6 +1981,13 @@ export interface LivePlayerStatsEntry {
    *  it must stay distinguishable: a failed entry is statless AND backoff-armed,
    *  which is byte-identical to a successful "no data" answer otherwise. */
   lastFetchFailed?: boolean;
+  /** Why the act-stats cell has no number, when the reason is NOT "unknown".
+   *  'too-long' = the act has more games than we will page (the honest answer
+   *  is "not computed", not an empty cell); 'incomplete' = some match in the
+   *  window was unreadable; 'timeout' = the aggregation time budget ran out;
+   *  'local-failed' = the local Riot read itself failed. null/undefined means
+   *  no verdict was recorded (blank for the ordinary "not fetched" reason). */
+  actState?: 'too-long' | 'incomplete' | 'timeout' | 'local-failed' | null;
   /** Last successful 24h-record refresh — decoupled from `fetchedAt`, which
    *  TRN updates also bump. Sharing one timestamp let each source suppress
    *  the other's refresh. */
@@ -2073,6 +2081,15 @@ let trnSpreadLastPollAt = 0;
  *  Resets on match change — the budget is per lobby, not per session and
  *  not per phase (a fill dispatched pre-flip drains across it). */
 let trnSpreadSpent = 0;
+/** When this lobby's budget last refilled. A spent budget used to strand the
+ *  rest of the lobby for the WHOLE match (a captcha wall or one flaky window
+ *  could eat all 10 firings), leaving those players on the "still loading"
+ *  dot forever. It now refills on a timer instead; the real ceiling is the
+ *  Rust per-lobby request cap, which this does not touch. */
+let trnSpreadRefilledAt = 0;
+/** One refill window per lobby: long enough that a wall cannot be hammered,
+ *  short enough that a 35-minute match gets several honest attempts. */
+export const TRN_SPREAD_REFILL_MS = 5 * 60 * 1000;
 /** Owning generation of the open drain job for this lobby (0 = none). Only
  *  the owner settles it, so a stale settle can never kill a newer job. */
 let trnDrainGen = 0;
@@ -2121,7 +2138,13 @@ export function mergeMmrRow(
   };
 }
 
-async function enqueueTrnSpread(matchId: string, phase: string, players: SpreadPlayer[], isDeathmatch = false): Promise<void> {
+async function enqueueTrnSpread(
+  matchId: string,
+  phase: string,
+  players: SpreadPlayer[],
+  isDeathmatch = false,
+  ctx: LocalRiotCtx = { region: '', queue: 'competitive' }
+): Promise<void> {
   if (typeof document !== 'undefined' && document.hidden) return;
   const budget = trnSpreadBudget(isDeathmatch);
   // Per-LOBBY key (match, not match+phase): a fill dispatched pre-flip keeps
@@ -2132,10 +2155,18 @@ async function enqueueTrnSpread(matchId: string, phase: string, players: SpreadP
     // New match: stale firings must never fetch for the old lobby.
     trnSpreadKey = key;
     trnSpreadSpent = 0;
+    trnSpreadRefilledAt = Date.now();
     // Warm the pause hint from Riot-local BEFORE dispatching (don't wait for
     // the next poll): the full poll can arrive already in coregame while
     // presences still show agent-select — that race missed whole lobbies.
     await warmTrnPhaseFromPresence().catch(() => {});
+  } else if (trnSpreadRefilledAt > 0 && Date.now() - trnSpreadRefilledAt >= TRN_SPREAD_REFILL_MS) {
+    // Same lobby, refill window elapsed: whoever is still statless gets
+    // another budget. Bounded by the Rust per-lobby ceiling, so this cannot
+    // turn into a request storm even if the lobby sits here for an hour.
+    trnSpreadSpent = 0;
+    trnSpreadRefilledAt = Date.now();
+    if (import.meta.env.DEV) trnLog('budget refilled', `budget=${budget}`);
   }
   // Drain-vs-new split: only NEW fills gate here — nothing fresh enqueues
   // while paused. Already-dispatched firings carry drain:true below and run
@@ -2182,7 +2213,7 @@ async function enqueueTrnSpread(matchId: string, phase: string, players: SpreadP
           if (!playerNeedsTrnStats(puuid) || trnInFlightLive.has(puuid.toLowerCase())) return;
           if (trnSpreadSpent >= budget) return;
           trnSpreadSpent++;
-          fetchTrnStatsNow(puuid, name, tag, true);
+          fetchTrnStatsNow(puuid, name, tag, { ...ctx, drain: true });
         })
         .catch(() => {});
     }, trnFillJitterMs());
@@ -2190,10 +2221,11 @@ async function enqueueTrnSpread(matchId: string, phase: string, players: SpreadP
   if (import.meta.env.DEV) trnLog('fill dispatched', `scheduled=${budgeted.length} budget=${trnSpreadSpent}/${budget}`);
 }
 
-/** Immediate single-player TRN fetch (deduped + cooldown fail-fast). The
- *  manual-refresh path calls this directly (gated); the fill passes
- *  drain:true for already-budgeted players running across the phase flip.
- *  Never throws into the poll loop. */
+/** Immediate single-player stats fetch. LOCAL Riot first (rank + act stats
+ *  read through the client's own token); tracker.gg only as a last resort and
+ *  only while its health is ok. The manual-refresh path calls this directly
+ *  (gated); the fill passes drain:true for already-budgeted players running
+ *  across the phase flip. Never throws into the poll loop. */
 /** Retry-after for a 451-private profile: it stays private until its owner
  *  acts on tracker.gg, so refetching every lobby is pure rate-limit burn. */
 export const TRN_PRIVATE_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
@@ -2201,84 +2233,361 @@ export const TRN_PRIVATE_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
  *  created later, so retry daily, not every lobby. */
 export const TRN_MISSING_RETRY_MS = 24 * 60 * 60 * 1000;
 
-function fetchTrnStatsNow(puuid: string, realName: string, realTag: string, drain = false): void {
+/* ------------------------------------------------------------------ *
+ * LOCAL rank + act stats — the tracker.gg replacement                  *
+ *                                                                      *
+ * tracker.gg is dead for this app (Warden captcha in front of the      *
+ * keyless API, no VALORANT licence for the official one). What the     *
+ * local Riot client still answers for ANY puuid, with the app's own    *
+ * token (the same `riotGet` transport every other read here uses):     *
+ *   /mmr/v1/players/{puuid}              tier + RR + seasonal history  *
+ *   /match-history/v1/history/{puuid}    match ids, newest first       *
+ *   /match-details/v1/matches/{id}       per-player scoreboard         *
+ * Read-only GETs, nothing derived that the payload does not contain.   *
+ *                                                                      *
+ * WORDING: these are PUBLIC rank + RR. Riot does not expose raw MMR    *
+ * and this file must never claim it — see ROADMAP.md and AGENTS.md.    *
+ * ------------------------------------------------------------------ */
+
+/** Public rank for one player, straight from /mmr/v1. */
+export interface LocalRankRow {
+  /** Competitive tier number (0 = unranked/unknown). */
+  tier: number;
+  /** Current-act Ranked Rating. */
+  rr: number;
+  peakTier: number;
+  peakSeasonId?: string;
+  actWins: number;
+  actGames: number;
+  leaderboardRank: number;
+  isRankHidden: boolean;
+}
+
+/** Parse one /mmr/v1/players/{puuid} body. PURE — extracted verbatim from the
+ *  live lobby loop so the poll and the single-player path can never drift.
+ *  Checked by scripts/act-aggregate-check.ts. */
+export function parseLocalRank(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  j: any,
+  seasonOrder: string[]
+): LocalRankRow {
+  const latest = j?.LatestCompetitiveUpdate ?? {};
+  const tierId = Number(latest?.TierAfterUpdate ?? 0);
+  const seasons = j?.QueueSkills?.competitive?.SeasonalInfoBySeasonID ?? {};
+  // Current-act row carries the LIVE RR; LatestCompetitiveUpdate only holds
+  // the value as of the last ranked game.
+  const curSeasonId = String(latest?.SeasonID ?? '').toLowerCase();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cur = (Object.entries(seasons) as [string, any][]).find(
+    ([id]) => id.toLowerCase() === curSeasonId
+  )?.[1];
+  const rr =
+    cur?.RankedRating != null
+      ? Number(cur.RankedRating)
+      : Number(latest?.RankedRatingAfterUpdate ?? 0);
+  const peakInfo = extractPeakInfo(seasons, seasonOrder || []);
+  const peak = Math.max(tierId, peakInfo.tier);
+  return {
+    tier: tierId,
+    rr,
+    peakTier: peak,
+    peakSeasonId: peak === tierId && tierId > 0 ? curSeasonId : peakInfo.seasonId,
+    actWins: Number(cur?.NumberOfWins ?? 0),
+    actGames: Number(cur?.NumberOfGames ?? 0),
+    leaderboardRank: Number(cur?.LeaderboardRank ?? 0),
+    isRankHidden: !!j?.IsActRankBadgeHidden,
+  };
+}
+
+/** Rank + RR for ANY puuid through the local client. Throws when unreadable. */
+export async function fetchLocalRank(puuid: string, region: string): Promise<LocalRankRow> {
+  if (!puuid) throw new Error('LOCAL_NO_PUUID');
+  const { seasonOrder } = await gameData();
+  return parseLocalRank(await riotGet(shardFor(region), `/mmr/v1/players/${puuid}`), seasonOrder || []);
+}
+
+/** Matches read per player per fill. The act must be COVERED COMPLETELY or we
+ *  report nothing, so this is the largest act we will aggregate (see
+ *  `fetchLocalActStats`). 50 covers a normal act — a 10 was starving every
+ *  active player, since almost everyone is past 10 competitive games by
+ *  mid-act. Riot's own history is seen capped near 95 rows, so 50 stays well
+ *  inside what the endpoint will page. */
+export const LOCAL_ACT_MAX_MATCHES = 50;
+
+/** Wall-clock budget for ONE player's act aggregation. A poll must never be
+ *  held hostage by a slow client, so the aggregation gives up (reports
+ *  nothing) rather than overrunning this. */
+export const LOCAL_ACT_BUDGET_MS = 20_000;
+
+/** Immutable per (match, player) sample cache: match details never change, so
+ *  a second fill of the same lobby costs zero requests. */
+const actSampleCache = new Map<string, ActMatchSample | null>();
+const ACT_SAMPLE_CACHE_MAX = 300;
+
+/** One player's scoreboard line + the team result, from local match details. */
+async function loadActSample(
+  region: string,
+  matchId: string,
+  puuid: string
+): Promise<ActMatchSample | null> {
+  const key = `${matchId}:${puuid.toLowerCase()}`;
+  if (actSampleCache.has(key)) return actSampleCache.get(key) ?? null;
+  let out: ActMatchSample | null = null;
+  try {
+    const j = await riotGet(shardFor(region), `/match-details/v1/matches/${matchId}`);
+    const scores: Record<string, number> = {};
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const t of (Array.isArray(j?.teams) ? j.teams : []) as any[]) {
+      scores[normTeam(t?.teamId)] = Number(t?.roundsWon ?? 0);
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const me = ((Array.isArray(j?.players) ? j.players : []) as any[]).find(
+      (p) => String(p?.subject ?? '').toLowerCase() === puuid.toLowerCase()
+    );
+    if (me) {
+      const st = me?.stats ?? {};
+      const mine = normTeam(me?.teamId);
+      // FFA modes have no two-sided result: unknown, never a guessed win.
+      const opp = Object.keys(scores).length === 2 ? Object.keys(scores).find((k) => k !== mine) : undefined;
+      const a = scores[mine] ?? 0;
+      const b = opp ? scores[opp] ?? 0 : 0;
+      out = {
+        won: opp && a !== b ? a > b : null,
+        kills: Number(st?.kills ?? 0),
+        deaths: Number(st?.deaths ?? 0),
+        score: Number(st?.score ?? 0),
+        rounds: Number(st?.roundsPlayed ?? 0),
+      };
+    }
+  } catch {
+    out = null;
+  }
+  actSampleCache.set(key, out);
+  if (actSampleCache.size > ACT_SAMPLE_CACHE_MAX) {
+    const first = actSampleCache.keys().next().value;
+    if (first !== undefined) actSampleCache.delete(first);
+  }
+  return out;
+}
+
+/** Act K/D, ACS and win rate for ANY puuid, computed from local Riot data.
+ *
+ *  The act window is exact, not guessed: /mmr/v1 tells us how many games this
+ *  act holds (`NumberOfGames`), and we aggregate precisely that many newest
+ *  queue-scoped matches. If any of them is unreadable the whole aggregate is
+ *  refused — a partial window under an "act" label would be a wrong number,
+ *  and this app does not print wrong numbers. Throws instead.
+ *
+ *  NOT computed here, because the payload does not carry them: headshot %,
+ *  KAST, damage delta, percentiles, Tracker Score. They stay blank. */
+export async function fetchLocalActStats(
+  puuid: string,
+  region: string,
+  queue = 'competitive',
+  rank?: LocalRankRow
+): Promise<ActAggregate> {
+  const r = rank ?? (await fetchLocalRank(puuid, region));
+  const want = Number(r.actGames) || 0;
+  if (want <= 0) throw new Error('LOCAL_NO_ACT_GAMES');
+  if (want > LOCAL_ACT_MAX_MATCHES) throw new Error('LOCAL_ACT_TOO_LONG');
+  const q = queue.toLowerCase().trim();
+  const startedAt = Date.now();
+  const ids: string[] = [];
+  for (let page = 0; page < 5 && ids.length < want; page++) {
+    if (Date.now() - startedAt > LOCAL_ACT_BUDGET_MS) throw new Error('LOCAL_ACT_TIMEOUT');
+    const start = page * 20;
+    const j = await riotGet(
+      shardFor(region),
+      `/match-history/v1/history/${puuid}?startIndex=${start}&endIndex=${start + 20}`
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows = ((Array.isArray(j?.History) ? j.History : []) as any[]).map((h) => ({
+      id: String(h?.MatchID ?? ''),
+      queue: String(h?.QueueID ?? '').toLowerCase().trim(),
+    }));
+    if (rows.length === 0) break;
+    for (const row of rows) if (row.id && row.queue === q) ids.push(row.id);
+  }
+  const picked = ids.slice(0, want);
+  if (picked.length < want) throw new Error('LOCAL_ACT_INCOMPLETE');
+  if (Date.now() - startedAt > LOCAL_ACT_BUDGET_MS) throw new Error('LOCAL_ACT_TIMEOUT');
+  const samples = (
+    await mapLimit(picked, 4, (id) => loadActSample(region, id, puuid))
+  ).filter((s): s is ActMatchSample => s !== null);
+  if (samples.length < want) throw new Error('LOCAL_ACT_INCOMPLETE');
+  return aggregateActStats(samples);
+}
+
+/** Why an act aggregate was not produced. Pure — checked by
+ *  scripts/act-aggregate-check.ts. Anything we cannot name is a local read
+ *  failure, never a "private profile". */
+export function actStateFor(
+  msg: string
+): NonNullable<LivePlayerStatsEntry['actState']> {
+  if (msg.includes('LOCAL_ACT_TOO_LONG')) return 'too-long';
+  if (msg.includes('LOCAL_ACT_TIMEOUT')) return 'timeout';
+  if (msg.includes('LOCAL_ACT_INCOMPLETE') || msg.includes('LOCAL_NO_ACT_GAMES')) return 'incomplete';
+  return 'local-failed';
+}
+
+/** Drop the retry gate on every cached player so the next poll re-attempts
+ *  them immediately. The TRN banner's "I finished" calls this: without it the
+ *  button looks dead, because the 30s/5min `retryAfter` set by the failure
+ *  paths holds every player exactly where they already are. */
+export function clearLocalStatsRetry(): void {
+  for (const [k, v] of livePlayerStatsCache) {
+    livePlayerStatsCache.set(k, { ...v, retryAfter: 0, lastFetchFailed: false });
+  }
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const raw = localStorage.getItem(LIVE_STATS_CACHE_KEY);
+    if (!raw) return;
+    const store = JSON.parse(raw) as Record<string, LivePlayerStatsEntry>;
+    let touched = 0;
+    for (const k of Object.keys(store)) {
+      if (!store[k]) continue;
+      store[k] = { ...store[k], retryAfter: 0, lastFetchFailed: false };
+      touched++;
+    }
+    if (touched > 0) localStorage.setItem(LIVE_STATS_CACHE_KEY, JSON.stringify(store));
+  } catch {}
+}
+
+/** Context every local read needs; carried from the poll that already has it. */
+export interface LocalRiotCtx {
+  region: string;
+  queue: string;
+  drain?: boolean;
+}
+
+function fetchTrnStatsNow(
+  puuid: string,
+  realName: string,
+  realTag: string,
+  ctx: LocalRiotCtx
+): void {
   const inFlightKey = puuid.toLowerCase();
   if (trnInFlightLive.has(inFlightKey)) return;
   trnInFlightLive.add(inFlightKey);
-  import('./trn')
-    .then(({ fetchTrnActStats, trnCooldownRemainingMs }) => {
-      if (trnCooldownRemainingMs() > 0) {
-        trnInFlightLive.delete(inFlightKey);
-        return;
-      }
-      fetchTrnActStats(realName, realTag, '', 'competitive', drain ? { drain: true } : undefined)
-        .then((res) => {
-          const realCountry =
-            res?.countryCode &&
-            res.countryCode.length === 2 &&
-            !['EU', 'NA', 'AP', 'KR'].includes(res.countryCode.toUpperCase())
-              ? res.countryCode.toUpperCase()
-              : undefined;
 
-          const update: Partial<LivePlayerStatsEntry> = {
-            fetchedAt: Date.now(),
-            // 0, not undefined: the merge below skips undefined/null so callers
-            // can do partial updates, which made `undefined` a silent no-op and
-            // let a stale backoff survive a successful fetch. 0 is this file's
-            // established "no backoff" value (`cached.retryAfter ?? 0`) and is
-            // falsy, so the poison self-heal ignores it.
-            retryAfter: 0,
-            lastFetchFailed: false,
-          };
-          if (realCountry) update.country = realCountry;
-          if (res?.stats?.kd != null) update.kd = Number(res.stats.kd.toFixed(2));
-          if (res?.stats?.winPct != null) update.winPct = Math.round(res.stats.winPct);
-          if (res?.stats?.hsPct != null) update.hsPct = Math.round(res.stats.hsPct);
-          if (res?.stats?.trnScore != null) update.trnScore = Math.round(res.stats.trnScore);
-          if (res?.stats?.acs != null) update.acs = Math.round(res.stats.acs);
-          // Public profile with real stats clears a previously latched private flag.
-          if (res?.stats?.kd != null) update.isTrnPrivate = false;
-          // If private or no stats found, set short backoff (5 min) so we can retry later
-          if (!res || !res.stats || res.stats.kd == null) {
-            update.retryAfter = Date.now() + 5 * 60 * 1000;
-          }
-          setCachedLivePlayerStats(puuid, update);
-        })
-        .catch((e) => {
-          // Align retry with the live cooldown expiry (+2s) so a player
-          // never sleeps through availability; floor 30s for transient errors.
-          // A 451-private profile latches the flag so rows show a lock, not breakage.
-          // Permanent negatives: 451 stays private until its owner acts (7d),
-          // 404 may gain a page later (24h) — refetching either every lobby
-          // is pure rate-limit burn, so back them off hard.
-          const cool = trnCooldownRemainingMs();
-          const backoff = isTrnPrivateError(e)
-            ? TRN_PRIVATE_RETRY_MS
-            : String(e).includes('HTTP 404')
-              ? TRN_MISSING_RETRY_MS
-              : Math.max(30 * 1000, cool + 2000);
-          setCachedLivePlayerStats(puuid, {
-            retryAfter: Date.now() + backoff,
-            // Marks the entry as a FAILURE, not a successful empty answer — see
-            // LivePlayerStatsEntry.lastFetchFailed.
-            lastFetchFailed: true,
-            ...(isTrnPrivateError(e)
-              ? { isTrnPrivate: true, negative: 'private' as const }
-              : String(e).includes('HTTP 404')
-                ? { negative: 'missing' as const }
-                : {}),
-          });
-          // Central registry (trn.ts): every fetch fn consults it first, so
-          // Overview/modals/maps/tabs/enrichment can never refire a proven
-          // private/missing account — not just the lobby fill.
-          if (isTrnPrivateError(e)) trnNoteNegative(realName, realTag, 'private');
-          else if (String(e).includes('HTTP 404')) trnNoteNegative(realName, realTag, 'missing');
-        })
-        .finally(() => {
-          trnInFlightLive.delete(inFlightKey);
-        });
+  // 1. LOCAL FIRST. Rank/RR always; act K/D + ACS + win% when the act is
+  //    small enough to be covered completely. Every field written is one Riot
+  //    literally reported — the entry shape leaves anything else blank.
+  const local = (async (): Promise<Partial<LivePlayerStatsEntry>> => {
+    const rank = await fetchLocalRank(puuid, ctx.region);
+    const update: Partial<LivePlayerStatsEntry> = {
+      fetchedAt: Date.now(),
+      retryAfter: 0,
+      lastFetchFailed: false,
+      // A successful recompute clears any previous verdict.
+      actState: null,
+    };
+    const agg = await fetchLocalActStats(puuid, ctx.region, ctx.queue, rank).catch((e: unknown) => {
+      update.actState = actStateFor(String(e));
+      // Rank read fine, act window not. Back off so this does not re-run one
+      // mmr read per poll; a too-long act cannot shrink, so it backs off far
+      // harder than a transient miss.
+      update.retryAfter = Date.now() + (update.actState === 'too-long' ? 60 : 5) * 60 * 1000;
+      return null;
+    });
+    if (agg) {
+      if (agg.kd != null) update.kd = agg.kd;
+      if (agg.winPct != null) update.winPct = agg.winPct;
+      if (agg.acs != null) update.acs = agg.acs;
+    }
+    return update;
+  })();
+
+  local
+    .then((update) => {
+      setCachedLivePlayerStats(puuid, update);
     })
     .catch(() => {
+      // 2. TRN LAST RESORT. Only while the transport is healthy: a captcha
+      //    wall or a spent ladder can never be fixed by retrying, and the
+      //    whole point of the health gate is that this path stays cold.
+      void import('./trn')
+        .then(({ fetchTrnActStats, trnCooldownRemainingMs, getTrnHealth }) => {
+          if (getTrnHealth().health !== 'ok' || trnCooldownRemainingMs() > 0) return;
+          return fetchTrnActStats(realName, realTag, '', 'competitive', ctx.drain ? { drain: true } : undefined)
+            .then((res) => {
+              const realCountry =
+                res?.countryCode &&
+                res.countryCode.length === 2 &&
+                !['EU', 'NA', 'AP', 'KR'].includes(res.countryCode.toUpperCase())
+                  ? res.countryCode.toUpperCase()
+                  : undefined;
+
+              const update: Partial<LivePlayerStatsEntry> = {
+                fetchedAt: Date.now(),
+                // 0, not undefined: the merge below skips undefined/null so callers
+                // can do partial updates, which made `undefined` a silent no-op and
+                // let a stale backoff survive a successful fetch. 0 is this file's
+                // established "no backoff" value (`cached.retryAfter ?? 0`) and is
+                // falsy, so the poison self-heal ignores it.
+                retryAfter: 0,
+                lastFetchFailed: false,
+              };
+              if (realCountry) update.country = realCountry;
+              if (res?.stats?.kd != null) update.kd = Number(res.stats.kd.toFixed(2));
+              if (res?.stats?.winPct != null) update.winPct = Math.round(res.stats.winPct);
+              if (res?.stats?.hsPct != null) update.hsPct = Math.round(res.stats.hsPct);
+              if (res?.stats?.trnScore != null) update.trnScore = Math.round(res.stats.trnScore);
+              if (res?.stats?.acs != null) update.acs = Math.round(res.stats.acs);
+              // Public profile with real stats clears a previously latched private flag.
+              if (res?.stats?.kd != null) update.isTrnPrivate = false;
+              // If private or no stats found, set short backoff (5 min) so we can retry later
+              if (!res || !res.stats || res.stats.kd == null) {
+                update.retryAfter = Date.now() + 5 * 60 * 1000;
+              }
+              setCachedLivePlayerStats(puuid, update);
+            })
+            .catch((e) => {
+              // Align retry with the live cooldown expiry (+2s) so a player
+              // never sleeps through availability; floor 30s for transient errors.
+              // A 451-private profile latches the flag so rows show a lock, not breakage.
+              // Permanent negatives: 451 stays private until its owner acts (7d),
+              // 404 may gain a page later (24h) — refetching either every lobby
+              // is pure rate-limit burn, so back them off hard.
+              const cool = trnCooldownRemainingMs();
+              const backoff = isTrnPrivateError(e)
+                ? TRN_PRIVATE_RETRY_MS
+                : String(e).includes('HTTP 404')
+                  ? TRN_MISSING_RETRY_MS
+                  : Math.max(30 * 1000, cool + 2000);
+              setCachedLivePlayerStats(puuid, {
+                retryAfter: Date.now() + backoff,
+                // Marks the entry as a FAILURE, not a successful empty answer — see
+                // LivePlayerStatsEntry.lastFetchFailed.
+                lastFetchFailed: true,
+                ...(isTrnPrivateError(e)
+                  ? { isTrnPrivate: true, negative: 'private' as const }
+                  : String(e).includes('HTTP 404')
+                    ? { negative: 'missing' as const }
+                    : {}),
+              });
+              // Central registry (trn.ts): every fetch fn consults it first, so
+              // Overview/modals/maps/tabs/enrichment can never refire a proven
+              // private/missing account — not just the lobby fill.
+              if (isTrnPrivateError(e)) trnNoteNegative(realName, realTag, 'private');
+              else if (String(e).includes('HTTP 404')) trnNoteNegative(realName, realTag, 'missing');
+            });
+        })
+        .catch(() => {})
+        // Nothing local AND tracker.gg cold: stay blank, back off 5 minutes
+        // like a statless answer, and never latch "private" on a transport
+        // failure — that is the copy bug this path exists to stop causing.
+        .then(() => {
+          const cur = getCachedLivePlayerStats(puuid);
+          if (cur && cur.kd == null && cur.acs == null) {
+            setCachedLivePlayerStats(puuid, {
+              retryAfter: Date.now() + 5 * 60 * 1000,
+              lastFetchFailed: true,
+            });
+          }
+        });
+    })
+    .finally(() => {
       trnInFlightLive.delete(inFlightKey);
     });
 }
@@ -2346,6 +2655,12 @@ export function setCachedLivePlayerStats(puuid: string, entry: Partial<LivePlaye
   }
   if (entry.retryAfter !== undefined) {
     merged.retryAfter = entry.retryAfter;
+  }
+  // Same explicit pass-through for the act verdict: `null` is a real value
+  // here (it CLEARS a stale reason after a successful recompute), but the
+  // generic loop above skips null.
+  if (entry.actState !== undefined) {
+    merged.actState = entry.actState;
   }
 
   livePlayerStatsCache.set(pU, merged);
@@ -3027,31 +3342,10 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
           batch.map(async (p) => {
             try {
               const j = await riotGet(shard, `/mmr/v1/players/${p}`);
-              const latest = j?.LatestCompetitiveUpdate ?? {};
-              const tierId = Number(latest?.TierAfterUpdate ?? 0);
-              const seasons = j?.QueueSkills?.competitive?.SeasonalInfoBySeasonID ?? {};
-              // Current-act row carries the LIVE RR; LatestCompetitiveUpdate only
-              // holds the value as of the last ranked game.
-              const curSeasonId = String(latest?.SeasonID ?? '').toLowerCase();
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const cur = (Object.entries(seasons) as [string, any][]).find(
-                ([id]) => id.toLowerCase() === curSeasonId
-              )?.[1];
-              const rr =
-                cur?.RankedRating != null
-                  ? Number(cur.RankedRating)
-                  : Number(latest?.RankedRatingAfterUpdate ?? 0);
-              const peakInfo = extractPeakInfo(seasons, data.seasonOrder || []);
-              const peak = Math.max(tierId, peakInfo.tier);
+              // Same parser the single-player local path uses (parseLocalRank):
+              // one place decides how a rank payload becomes a row.
               const val = {
-                tier: tierId,
-                rr,
-                peakTier: peak,
-                peakSeasonId: peak === tierId && tierId > 0 ? curSeasonId : peakInfo.seasonId,
-                actWins: Number(cur?.NumberOfWins ?? 0),
-                actGames: Number(cur?.NumberOfGames ?? 0),
-                leaderboardRank: Number(cur?.LeaderboardRank ?? 0),
-                isRankHidden: !!j?.IsActRankBadgeHidden,
+                ...parseLocalRank(j, data.seasonOrder || []),
                 fetchedAt: Date.now(),
               };
               liveMmrCache.set(p, val);
@@ -3361,7 +3655,7 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
       if (playerNeedsTrnStats(p.puuid) && realName && realTag && !realName.startsWith('Player ')) {
         if (forceRefresh && trnSpreadSpent < trnSpreadBudget(isDeathmatch)) {
           trnSpreadSpent++;
-          fetchTrnStatsNow(p.puuid, realName, realTag);
+          fetchTrnStatsNow(p.puuid, realName, realTag, { region, queue: directQueue });
         } else {
           spreadCandidates.push({
             puuid: p.puuid,
@@ -3479,7 +3773,7 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
     // this lobby once across BOTH realms, so it needs the id TS already has.
     setTrnLobbyKey(matchId);
     trnSpreadLastPollAt = Date.now();
-    if (spreadCandidates.length > 0) void enqueueTrnSpread(matchId, phase, spreadCandidates, isDeathmatch);
+    if (spreadCandidates.length > 0) void enqueueTrnSpread(matchId, phase, spreadCandidates, isDeathmatch, { region, queue: directQueue });
     else if (trnDrainGen !== 0 && matchId === trnDrainMatchId) {
       // Quiesced: nobody left to fetch — settle this lobby's drain job so
       // pause re-engages for anything new.

@@ -15,6 +15,13 @@
 //! error, not a queue) — tabbed-out, lobby, agent-select and menus always
 //! fetch, exactly when pre-fetch must run.
 //!
+//! Warden: tracker.gg now answers a captcha challenge (`HTTP 429
+//! {"code":"Warden::Challenge"}`, or a body saying "captcha"). `map_result`
+//! classifies that as `TRN_CAPTCHA_REQUIRED` — a shape no timer can clear, so
+//! callers must not retry it on the cooldown ladder. `trn_verify_open` shows the
+//! one window a human can solve it in; `trn_proxy_reset` then drops the hidden
+//! window so its next navigation inherits the cookies that earned the pass.
+//!
 //! Contract: TS policy (trn.ts gate/ladder/persisted cooldown, tracker.ts
 //! budget/spread/caches) is untouched — transport swap only, and no retry
 //! lives here. This window is the SOLE TRN transport (no Rust HTTP anywhere).
@@ -109,6 +116,13 @@ const MAX_SLOT_CHARS: usize = 8_000_000;
 /// install keeps the renderer alive, which is the cost this is here to remove.
 const PROXY_IDLE_TTL: Duration = Duration::from_secs(5 * 60);
 
+/// Visible verification window: the one place a human can clear tracker.gg's
+/// Warden captcha (the hidden window can never solve one). Created with the
+/// default WebView2 profile — never a custom `data_directory` — so the
+/// clearance cookies it earns are exactly the ones the hidden proxy inherits.
+pub const VERIFY_LABEL: &str = "trn-verify";
+const VERIFY_URL: &str = "https://tracker.gg/valorant";
+
 static SLOT_SEQ: AtomicU64 = AtomicU64::new(1);
 /// Per window lifetime: false until the first readiness pass. Reset when a
 /// fresh window is created — an existing window skips the gate.
@@ -124,6 +138,22 @@ static PROXY_TEARDOWN_GEN: AtomicU64 = AtomicU64::new(0);
 /// but one fail on a duplicate label. `proxy_window` contains no `.await`, so a
 /// plain std Mutex is correct and adds no async coupling.
 static PROXY_WINDOW_LOCK: Mutex<()> = Mutex::new(());
+
+/// Consecutive failed readiness passes on the CURRENT hidden window.
+///
+/// The watchdog below used to run only once a window had been READY, so a
+/// window wedged before its first READY (challenge page, dead renderer, hung
+/// navigation) was never rebuilt: every fetch paid the full 10s gate and
+/// returned `EDGE_PAUSED` for the rest of the session. A streak is the evidence
+/// that the PAGE, not the moment, is broken.
+static PROXY_FAIL_STREAK: AtomicU64 = AtomicU64::new(0);
+/// Failed gates needed before that window is rebuilt (`self_heal_due`).
+const PROXY_SELF_HEAL_AFTER: u64 = 2;
+/// Minimum gap between self-heal rebuilds, so a page that is permanently
+/// challenged costs at most one renderer rebuild per minute — never a loop.
+const PROXY_RECREATE_BACKOFF: Duration = Duration::from_secs(60);
+/// Last self-heal rebuild (epoch ms; 0 = never), read by `self_heal_due`.
+static PROXY_LAST_RECREATE_MS: AtomicU64 = AtomicU64::new(0);
 
 /// DEV-ONLY structured trace: `[TRN <epoch-ms>] …` on stderr (visible in the
 /// `tauri dev` terminal). The codebase writes `log::*` elsewhere but
@@ -363,6 +393,45 @@ fn spend_ceiling(lobby: &str) -> Ceiling {
     ceiling_allows(&mut c, lobby, now_ms())
 }
 
+/// Undo one `ceiling_allows` spend. Only the counters that request actually
+/// incremented are touched: a lobby counter that has since rolled to a new
+/// match is left alone (that match never spent this slot), and both counters
+/// saturate so a refund can never wrap below zero. Pure — unit-tested.
+fn ceiling_refund(c: &mut TrnCeiling, lobby: &str) {
+    c.window_spent = c.window_spent.saturating_sub(1);
+    if !lobby.is_empty() && c.lobby == lobby {
+        c.lobby_spent = c.lobby_spent.saturating_sub(1);
+    }
+}
+
+/// Refund the shared ceiling for an attempt that never became load.
+///
+/// The ceiling now bills only attempts that actually reached tracker.gg: any
+/// 2xx/HTTP answer counts (the server did work). A transport failure
+/// (`EDGE_UNAVAILABLE` / `EDGE_PAUSED` — no HTTP answer at all) and the Warden
+/// captcha refusal refund their slot, so a failure storm can never exhaust the
+/// hour budget and lock TRN out for the rest of it. Poisoned lock → no-op,
+/// matching the spend path (which never billed).
+fn refund_ceiling(lobby: &str) {
+    if let Ok(mut c) = TRN_CEILING.lock() {
+        ceiling_refund(&mut c, lobby);
+    }
+}
+
+/// True when this outcome must not stay billed (see `refund_ceiling`): the
+/// captcha and no-wire transport failures. `TRN_BUDGET` was never billed and
+/// an `HTTP {code}` was answered — both stay as they are. Pure — unit-tested.
+fn ceiling_refundable(out: &Result<String, String>) -> bool {
+    match out {
+        Ok(_) => false,
+        Err(e) => {
+            e == "TRN_CAPTCHA_REQUIRED"
+                || e.starts_with("EDGE_UNAVAILABLE")
+                || e.starts_with("EDGE_PAUSED")
+        }
+    }
+}
+
 /* ---- Shared response memo: the cross-realm duplicate costs no wire ---- *
  * `main` and `overlay` both run the same fill at the same time, and the
  * in-realm `trnInFlightLive` dedup cannot see the other realm, so EVERY
@@ -593,12 +662,35 @@ fn teardown_still_valid(gen: u64, current_gen: u64, in_flight: u64) -> bool {
     gen == current_gen && in_flight == 0
 }
 
+/// Backoff gate for any self-heal rebuild: never twice inside the window.
+/// Pure — unit-tested.
+fn recreate_backoff_elapsed(last_recreate_ms: u64, now: u64) -> bool {
+    // 0 = never rebuilt. Without this the "never" case only looks elapsed
+    // because the wall clock is huge; a small injected `now` (unit tests, a
+    // mocked clock) would wrongly hold the first heal back by a full backoff.
+    if last_recreate_ms == 0 {
+        return true;
+    }
+    now.saturating_sub(last_recreate_ms) >= PROXY_RECREATE_BACKOFF.as_millis() as u64
+}
+
+/// Rebuild verdict for a window that never reached READY: the gate must have
+/// failed `PROXY_SELF_HEAL_AFTER` times AND the backoff must have elapsed.
+/// Pure — unit-tested.
+fn self_heal_due(fail_streak: u64, last_recreate_ms: u64, now: u64) -> bool {
+    fail_streak >= PROXY_SELF_HEAL_AFTER && recreate_backoff_elapsed(last_recreate_ms, now)
+}
+
 /// Back to "never observed against a live window": the next fetch re-runs the
 /// readiness gate on a fresh navigation, so leaving the pre-teardown state in
-/// place would report a page that no longer exists.
+/// place would report a page that no longer exists. The self-heal streak and
+/// its backoff belong to the destroyed window too — a fresh lifetime starts
+/// with a clean slate (and a user `trn_proxy_reset` may rebuild immediately).
 fn reset_proxy_lifecycle() {
     PROXY_READY.store(false, Ordering::Relaxed);
     PROXY_STATE.store(u8::MAX as u64, Ordering::Relaxed);
+    PROXY_FAIL_STREAK.store(0, Ordering::Release);
+    PROXY_LAST_RECREATE_MS.store(0, Ordering::Release);
 }
 
 /// In-flight request guard, entered before the window is acquired.
@@ -727,6 +819,84 @@ fn game_has_focus() -> bool {
     crate::window_manager::is_valorant_foreground()
 }
 
+/// Document-start Warden observer, injected into BOTH tracker.gg windows (the
+/// hidden proxy and the visible verify window).
+///
+/// Observation only, and deliberately so: every wrapper calls through with the
+/// original `this`/arguments and returns the original result, so the page's
+/// fetch/XHR behaviour is unchanged. It records the `X-Warden-Challenge-Passed`
+/// value tracker.gg's own JS sends on a request or receives on a response into
+/// `window.__reconWarden = {token, ts}`; `trn_warden_token` reads that. Replay
+/// is NOT wired — a token is evidence a human pass happened, nothing more.
+///
+/// A broken init script would take the proxy window down with it, so every
+/// layer is wrapped in try/catch and nothing is ever thrown or re-thrown.
+const WARDEN_HOOK_JS: &str = r#"
+(function () {
+  try {
+    if (window.__reconWardenHooked) return;
+    window.__reconWardenHooked = true;
+    window.__reconWarden = { token: '', ts: 0 };
+    var K = 'x-warden-challenge-passed';
+    function note(v) {
+      if (!v) return;
+      try { window.__reconWarden = { token: String(v), ts: Date.now() }; } catch (e) {}
+    }
+    function fromInit(init) {
+      try {
+        var h = init && init.headers;
+        if (!h) return;
+        if (typeof h.get === 'function') return h.get('X-Warden-Challenge-Passed');
+        if (Array.isArray(h)) {
+          for (var i = 0; i < h.length; i++) {
+            if (String((h[i] && h[i][0]) || '').toLowerCase() === K) return h[i][1];
+          }
+          return;
+        }
+        for (var k in h) { if (String(k).toLowerCase() === K) return h[k]; }
+      } catch (e) {}
+    }
+    if (typeof window.fetch === 'function') {
+      var of = window.fetch;
+      window.fetch = function (input, init) {
+        try { note(fromInit(init)); } catch (e) {}
+        var p = of.apply(this, arguments);
+        try {
+          p.then(function (r) {
+            try {
+              if (r && r.headers && r.headers.get) note(r.headers.get('X-Warden-Challenge-Passed'));
+            } catch (e) {}
+          }, function () {});
+        } catch (e) {}
+        return p;
+      };
+    }
+    if (window.XMLHttpRequest && XMLHttpRequest.prototype) {
+      var xs = XMLHttpRequest.prototype.setRequestHeader;
+      XMLHttpRequest.prototype.setRequestHeader = function (k, v) {
+        try { if (String(k).toLowerCase() === K) note(v); } catch (e) {}
+        return xs.apply(this, arguments);
+      };
+      var xo = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function () {
+        try {
+          var self = this;
+          self.addEventListener('load', function () {
+            try { note(self.getResponseHeader('X-Warden-Challenge-Passed')); } catch (e) {}
+          });
+        } catch (e) {}
+        return xo.apply(this, arguments);
+      };
+    }
+  } catch (e) {}
+})();
+"#;
+
+/// Reads the token `WARDEN_HOOK_JS` recorded. Returns a JS string, so the
+/// ExecuteScript envelope is one JSON string literal (same double-decode as
+/// `parse_poll`).
+const WARDEN_PROBE_JS: &str = "String(((window.__reconWarden || {}).token) || '')";
+
 /// Kick script: starts the same-site fetch, parks the outcome on a per-call
 /// window slot. Slot + URL are JSON-encoded so exotic paths (quotes,
 /// unicode) can't break out of the string. Pure — unit-tested.
@@ -807,6 +977,33 @@ fn trace_err(r: &SlotResult) -> String {
     format!(" err={flat}")
 }
 
+/// True when the response is tracker.gg's human-gate wall rather than a plain
+/// rate limit or permission error.
+///
+/// Two shapes, one wall:
+/// - 429 JSON: `{"errors":[{"code":"Warden::Challenge","message":"…captcha…"}]}`
+///   — the API's captcha gate;
+/// - 403 HTML: Tracker Network's own "You've Been Blocked" page or a Cloudflare
+///   "Attention Required" block page (both probed live 2026-11-06). The hidden
+///   window can no more clear this than it can solve the captcha.
+///
+/// Deliberately conservative: only 403/429, only body markers, case-insensitive.
+/// A normal 403 API error (`{"errors":[…]}` JSON) carries none of the block-page
+/// prose, so it keeps its `HTTP 403` shape and the TS ladder. Pure — unit-tested.
+fn is_warden_captcha(status: u16, body: &str) -> bool {
+    let b = body.to_ascii_lowercase();
+    match status {
+        429 => b.contains("warden::challenge") || b.contains("captcha"),
+        403 => {
+            b.contains("you've been blocked")
+                || b.contains("attention required")
+                || b.contains("cf-mitigated")
+                || b.contains("just a moment")
+        }
+        _ => false,
+    }
+}
+
 /// Map a resolved slot to the command surface. Pure — unit-tested.
 fn map_result(r: SlotResult) -> Result<String, String> {
     if r.ok && (200..300).contains(&r.status) {
@@ -821,6 +1018,13 @@ fn map_result(r: SlotResult) -> Result<String, String> {
             ));
         }
         return Ok(r.body);
+    }
+    // Warden wall: a human-only gate (429 captcha JSON, or a 403 block page).
+    // It must NOT look like a rate limit, or every caller retries it on a timer
+    // that can never clear it (that was the shipped bug: a plain `HTTP 429` fed
+    // the TS cooldown ladder forever, and a bare 403 did the same).
+    if is_warden_captcha(r.status, &r.body) {
+        return Err("TRN_CAPTCHA_REQUIRED".to_string());
     }
     if r.status == 0 {
         return Err(format!("EDGE_PAUSED in-page fetch failed: {}", snippet(&r.body)));
@@ -916,18 +1120,24 @@ async fn wait_proxy_ready(window: &WebviewWindow, path: &str) -> Result<(), Stri
     let probe = readiness_probe();
     loop {
         let Some(env) = eval_roundtrip(window, probe.clone()).await else {
+            // No answer inside the eval budget: a dead renderer or a frozen
+            // page. Count it for the self-heal streak — the next fetch may
+            // rebuild this window (`ensure_proxy_alive`).
+            PROXY_FAIL_STREAK.fetch_add(1, Ordering::AcqRel);
             trn_trace!("LOST path={path} err=proxy lost during readiness probe");
             return Err("EDGE_UNAVAILABLE proxy lost".to_string());
         };
         if let Some(r) = parse_readiness(&env) {
             if is_proxy_ready(&r) {
                 PROXY_READY.store(true, Ordering::Relaxed);
+                PROXY_FAIL_STREAK.store(0, Ordering::Release);
                 set_proxy_state(ProxyState::Ready);
                 trn_trace!("READY (clearance ok)");
                 return Ok(());
             }
         }
         if tokio::time::Instant::now() >= deadline {
+            PROXY_FAIL_STREAK.fetch_add(1, Ordering::AcqRel);
             set_proxy_state(ProxyState::Challenged);
             trn_trace!("NOT READY path={path} (still loading/challenged after budget)");
             return Err("EDGE_PAUSED proxy not ready: page still loading or challenged".to_string());
@@ -1003,23 +1213,38 @@ fn recreate_proxy(
 ) -> Result<(), String> {
     destroy_proxy_window(app);
     PROXY_READY.store(false, Ordering::Relaxed);
+    PROXY_FAIL_STREAK.store(0, Ordering::Release);
+    PROXY_LAST_RECREATE_MS.store(now_ms(), Ordering::Release);
     set_proxy_state(ProxyState::Recreated);
     trn_trace!("RECREATED reason={reason} path={path} (fresh navigation re-earns clearance)");
     *window = proxy_window(app)?;
     Ok(())
 }
 
-/// Watchdog: one fast liveness ping per fetch on windows that previously
-/// passed readiness (fresh windows skip — the gate below vets them). The
-/// ping is the passive readiness probe (DOM reads only, zero API calls):
-/// silence past the budget or a mid-life challenge recreates the window.
-/// Healthy pages answer in ms, so the steady-state cost is one eval.
+/// Watchdog + bounded self-heal. Two cases:
+///
+/// - Window already READY: one fast liveness ping (the passive readiness probe,
+///   DOM reads only, zero API calls). Silence past the budget or a mid-life
+///   challenge recreates the window (backed off — see `recreate_backoff_elapsed`).
+/// - Window NOT ready: this used to return immediately, which made a window
+///   wedged before its first READY immortal. `PROXY_FAIL_STREAK` now counts
+///   failed gates, and once it reaches `PROXY_SELF_HEAL_AFTER` the window is
+///   rebuilt here, before the readiness gate re-vets the fresh navigation. The
+///   backoff bounds a permanently challenged page to one rebuild per minute.
 async fn ensure_proxy_alive(
     app: &AppHandle,
     window: &mut WebviewWindow,
     path: &str,
 ) -> Result<(), String> {
     if !PROXY_READY.load(Ordering::Relaxed) {
+        if self_heal_due(
+            PROXY_FAIL_STREAK.load(Ordering::Acquire),
+            PROXY_LAST_RECREATE_MS.load(Ordering::Acquire),
+            now_ms(),
+        ) {
+            trn_trace!("SELF-HEAL reason=never-ready path={path} (failed readiness {PROXY_SELF_HEAL_AFTER}x)");
+            recreate_proxy(app, window, "never-ready", path)?;
+        }
         return Ok(());
     }
     let ping = eval_roundtrip_timeout(window, readiness_probe(), WATCHDOG_TIMEOUT)
@@ -1027,9 +1252,19 @@ async fn ensure_proxy_alive(
         .and_then(|env| parse_readiness(&env));
     if !watchdog_should_recreate(ping.as_ref()) {
         set_proxy_state(ProxyState::Ready);
+        PROXY_FAIL_STREAK.store(0, Ordering::Release);
         return Ok(());
     }
-    recreate_proxy(app, window, watchdog_reason(ping.as_ref()), path)
+    PROXY_FAIL_STREAK.fetch_add(1, Ordering::AcqRel);
+    let reason = watchdog_reason(ping.as_ref());
+    if !recreate_backoff_elapsed(PROXY_LAST_RECREATE_MS.load(Ordering::Acquire), now_ms()) {
+        // The page passed the gate then wedged again inside the backoff: do not
+        // churn renderers, surface it and let the next fetch (after backoff)
+        // rebuild. Bounded wait, no recreate loop.
+        trn_trace!("WEDGED path={path} reason={reason} (recreate backed off)");
+        return Err("EDGE_PAUSED proxy wedged".to_string());
+    }
+    recreate_proxy(app, window, reason, path)
 }
 
 /// Existing hidden window, or a fresh one. Shared WebView2 pool (default
@@ -1062,6 +1297,10 @@ fn proxy_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     .visible(false)
     .skip_taskbar(true)
     .always_on_top(false)
+    // Observation-only Warden recorder (see WARDEN_HOOK_JS). This window's
+    // page is where a future replay would read the token from; the human pass
+    // itself happens in `trn_verify_open`'s visible window.
+    .initialization_script(WARDEN_HOOK_JS)
     .build()
     .map_err(|e| format!("EDGE_UNAVAILABLE proxy window: {e}"))?;
     let _ = w.hide();
@@ -1229,6 +1468,13 @@ pub async fn trn_proxy_fetch(
         }
     }
     .await;
+    // The ceiling bills only attempts that reached tracker.gg. A Warden
+    // captcha refusal and every no-wire transport failure refund their slot
+    // here, so a failure storm can never spend the hour budget; an answered
+    // `HTTP {code}` and the success path stay billed (see `ceiling_refundable`).
+    if ceiling_refundable(&out) {
+        refund_ceiling(lobby_key);
+    }
     // The one failure class with no line of its own. Every other exit above
     // traces itself (`outcome`, `PAUSED`, `CEILING`, `NOT READY`, `LOST`,
     // `fetch timeout`), and the infra arms that return through `?` — window
@@ -1267,6 +1513,80 @@ pub fn trn_proxy_paused(phase: Option<String>) -> bool {
 #[tauri::command]
 pub fn trn_proxy_state() -> String {
     proxy_state_str(PROXY_STATE.load(Ordering::Relaxed)).to_string()
+}
+
+/// Open the ONE visible window where a human clears tracker.gg's Warden
+/// captcha; the hidden proxy can never solve one.
+///
+/// Same WebView2 profile as every other window (no custom `data_directory`), so
+/// the clearance cookies it earns are exactly what the next `trn_proxy_fetch`
+/// presents after `trn_proxy_reset`. Labeled `trn-verify`, decorated, focused,
+/// never hidden: if it already exists it is re-shown instead of duplicated.
+///
+/// Async on purpose: `WebviewWindowBuilder::new` is documented to deadlock on
+/// Windows when called from a synchronous command.
+#[tauri::command]
+pub async fn trn_verify_open(app: AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window(VERIFY_LABEL) {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return Ok(());
+    }
+    let url = VERIFY_URL
+        .parse()
+        .map_err(|e| format!("EDGE_UNAVAILABLE bad verify url: {e}"))?;
+    WebviewWindowBuilder::new(&app, VERIFY_LABEL, WebviewUrl::External(url))
+        .title("Recon — tracker.gg verification")
+        .inner_size(1100.0, 800.0)
+        .center()
+        .decorations(true)
+        .focused(true)
+        .visible(true)
+        // Same observation-only Warden recorder as the proxy window: this is
+        // where the human pass actually happens.
+        .initialization_script(WARDEN_HOOK_JS)
+        .build()
+        .map_err(|e| format!("EDGE_UNAVAILABLE verify window: {e}"))?;
+    trn_trace!("VERIFY window opened (human captcha pass)");
+    Ok(())
+}
+
+/// Throw the hidden proxy away so its next fetch is a fresh navigation in the
+/// profile the user just verified. Safe with no window (every step is a no-op):
+/// destroy, clear READY/lifecycle, and invalidate any armed idle sweep.
+#[tauri::command]
+pub fn trn_proxy_reset(app: AppHandle) -> Result<(), String> {
+    destroy_proxy_window(&app);
+    reset_proxy_lifecycle();
+    PROXY_TEARDOWN_GEN.fetch_add(1, Ordering::AcqRel);
+    trn_trace!("RESET hidden proxy destroyed (next fetch re-navigates)");
+    Ok(())
+}
+
+/// Read the Warden pass token recorded by `WARDEN_HOOK_JS` (empty when the page
+/// never sent/received one). Read-only QA surface — no replay, no fetch.
+///
+/// Checks the visible verify window first (a human pass happens there), then the
+/// hidden proxy. Missing window, dead eval and garbage all answer `""`: this is
+/// a probe, never a failure.
+#[tauri::command]
+pub async fn trn_warden_token(app: AppHandle) -> Result<String, String> {
+    for label in [VERIFY_LABEL, PROXY_LABEL] {
+        let Some(w) = app.get_webview_window(label) else {
+            continue;
+        };
+        let Some(env) = eval_roundtrip(&w, WARDEN_PROBE_JS.to_string()).await else {
+            continue;
+        };
+        // ExecuteScript answers a JSON string literal: decode it once.
+        if let Ok(token) = serde_json::from_str::<String>(&env) {
+            if !token.is_empty() {
+                trn_trace!("WARDEN token_seen label={label}");
+                return Ok(token);
+            }
+        }
+    }
+    Ok(String::new())
 }
 
 #[cfg(test)]
@@ -1376,6 +1696,118 @@ mod tests {
         let big = "é".repeat(400);
         let e = map_result(SlotResult { ok: true, status: 451, body: big, len: 0 }).unwrap_err();
         assert_eq!(e.chars().count(), "HTTP 451: ".chars().count() + 300);
+    }
+
+    /// The shipped bug: tracker.gg answers its Warden wall as a plain 429 (or a
+    /// 403 block page), and the transport called it `HTTP 429`/`HTTP 403` so the
+    /// TS ladder retried a human-only gate every 60s forever, with no verify
+    /// affordance. Both shapes must be the same exact string; a real rate limit
+    /// and a normal 403 API error must keep their old shape.
+    #[test]
+    fn warden_captcha_is_not_a_rate_limit() {
+        let err = |status: u16, body: &str| {
+            map_result(SlotResult {
+                ok: false,
+                status,
+                body: body.into(),
+                len: 0,
+            })
+            .unwrap_err()
+        };
+        // The real 429 body, probed 2026-11-06.
+        let warden = r#"{"errors":[{"code":"Warden::Challenge","message":"You are making too many requests and must solve a captcha to continue."}]}"#;
+        assert_eq!(err(429, warden), "TRN_CAPTCHA_REQUIRED");
+        // Either marker is enough, matched case-insensitively.
+        assert_eq!(err(429, "Warden::Challenge"), "TRN_CAPTCHA_REQUIRED");
+        assert_eq!(err(429, "please solve a CAPTCHA"), "TRN_CAPTCHA_REQUIRED");
+        // A plain rate limit still feeds the TS ladder byte-for-byte.
+        assert_eq!(err(429, "rate limited"), "HTTP 429: rate limited");
+        // Same wall as a 403 HTML block page: Tracker Network's own page (the
+        // title probed live), plus the Cloudflare variants of it.
+        let blocked = "<!doctype html><title>You've Been Blocked - Tracker Network</title>";
+        assert_eq!(err(403, blocked), "TRN_CAPTCHA_REQUIRED");
+        assert_eq!(
+            err(403, "<title>Attention Required! | Cloudflare</title>"),
+            "TRN_CAPTCHA_REQUIRED"
+        );
+        assert_eq!(err(403, "<p>Just a moment...</p>"), "TRN_CAPTCHA_REQUIRED");
+        assert_eq!(err(403, "cf-mitigated: challenge"), "TRN_CAPTCHA_REQUIRED");
+        // Conservative: a normal JSON 403 API error is not the wall, and the
+        // 429-only markers never leak into a 403.
+        let api403 = r#"{"errors":[{"code":"Forbidden","message":"Access denied"}]}"#;
+        assert_eq!(err(403, api403), format!("HTTP 403: {}", snippet(api403)));
+        assert_eq!(err(403, warden), format!("HTTP 403: {}", snippet(warden)));
+        assert_eq!(err(403, "captcha"), "HTTP 403: captcha");
+        // Only the wall statuses participate: a 500 keeps its shape even with
+        // block-page prose in the body.
+        assert_eq!(err(500, "captcha"), "HTTP 500: captcha");
+        assert_eq!(err(500, blocked), format!("HTTP 500: {}", snippet(blocked)));
+        // Contract with TS: no HTTP code, no body.
+        assert!(!err(429, "captcha").contains("HTTP"));
+        assert!(!err(403, blocked).contains("HTTP"));
+    }
+
+    /// H3: a window wedged before its first READY used to be immortal. Two
+    /// failed gates rebuild it, but never twice inside the backoff, so a
+    /// permanently challenged page cannot become a recreate loop.
+    #[test]
+    fn self_heal_needs_a_streak_and_a_backoff() {
+        // One failed gate is not evidence the page itself is broken.
+        assert!(!self_heal_due(0, 0, 10_000));
+        assert!(!self_heal_due(PROXY_SELF_HEAL_AFTER - 1, 0, 10_000));
+        // Streak reached and never rebuilt -> rebuild on this fetch.
+        assert!(self_heal_due(PROXY_SELF_HEAL_AFTER, 0, 10_000));
+        // Rebuilt just now -> held off.
+        let t = 10_000_000;
+        assert!(!recreate_backoff_elapsed(t, t + 59_999));
+        assert!(recreate_backoff_elapsed(t, t + 60_000));
+        assert!(!self_heal_due(PROXY_SELF_HEAL_AFTER, t, t + 1));
+        assert!(self_heal_due(PROXY_SELF_HEAL_AFTER, t, t + 60_000));
+        // The streak still binds even when the backoff has elapsed.
+        assert!(!self_heal_due(PROXY_SELF_HEAL_AFTER - 1, t, t + 60_000));
+    }
+
+    /// A captcha refusal and a no-wire transport failure must not eat the hour
+    /// ceiling: a failure storm used to lock TRN out for an hour silently.
+    #[test]
+    fn captcha_and_no_wire_failures_refund_the_ceiling() {
+        assert!(!ceiling_refundable(&Ok("{}".to_string())));
+        assert!(ceiling_refundable(&Err("TRN_CAPTCHA_REQUIRED".to_string())));
+        assert!(ceiling_refundable(&Err(
+            "EDGE_UNAVAILABLE proxy lost".to_string()
+        )));
+        assert!(ceiling_refundable(&Err(
+            "EDGE_PAUSED proxy timeout".to_string()
+        )));
+        // An answered HTTP error and a refusal that was never billed stay put.
+        assert!(!ceiling_refundable(&Err("HTTP 429: limited".to_string())));
+        assert!(!ceiling_refundable(&Err(
+            "TRN_BUDGET hour spent".to_string()
+        )));
+    }
+
+    /// Refund arithmetic: only the counters this request spent are touched,
+    /// and saturating subtraction can never wrap a counter below zero.
+    #[test]
+    fn a_refused_attempt_does_not_count_as_load() {
+        let mut c = ceiling();
+        for _ in 0..3 {
+            assert_eq!(ceiling_allows(&mut c, "m1", 1000), Ceiling::Allow);
+        }
+        ceiling_refund(&mut c, "m1");
+        assert_eq!((c.window_spent, c.lobby_spent), (2, 2));
+        // The lobby counter rolled to a new match: an old request's refund
+        // must not steal from it, and unlobbied refunds never touch a lobby.
+        assert_eq!(ceiling_allows(&mut c, "m2", 1000), Ceiling::Allow);
+        ceiling_refund(&mut c, "m1");
+        assert_eq!((c.window_spent, c.lobby_spent), (2, 1));
+        ceiling_refund(&mut c, "");
+        assert_eq!((c.window_spent, c.lobby_spent), (1, 1));
+        // Saturating: a refund with nothing left cannot wrap.
+        for _ in 0..3 {
+            ceiling_refund(&mut c, "m2");
+        }
+        assert_eq!((c.window_spent, c.lobby_spent), (0, 0));
     }
 
     /// A 1.72 MB season segment used to be sliced to 1.5 MB in the page, so

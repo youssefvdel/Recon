@@ -46,6 +46,7 @@ import { listen } from '@tauri-apps/api/event';
 import { IS_DEV } from './utils/devTools';
 import { ConsentModal } from './components/ConsentModal';
 import { OpsNotices } from './components/OpsNotices';
+import { TrnStatusBanner } from './components/TrnStatusBanner';
 import { fetchNotices, noticeApplies, isDismissed, sendPulse, type OpsNotice } from './utils/ops';
 import { APP_VERSION } from './utils/version';
 import { CrashOffer } from './components/CrashOffer';
@@ -449,6 +450,7 @@ export const App: React.FC = () => {
           hasUpdate={hasUpdate}
         />
         {/* Scrollable View Content (unified grid locks to viewport, no scroll) */}
+        <TrnStatusBanner />
         <OpsNotices
           notices={opsNotices}
           onDismiss={(id) => setOpsNotices((prev) => prev.filter((n) => n.id !== id))}

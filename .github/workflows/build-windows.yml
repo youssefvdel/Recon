@@ -1,0 +1,89 @@
+name: Build Windows App
+
+on:
+  push:
+    branches:
+      - 'fix/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # Host target on windows-latest; stated explicitly for readers.
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        # Frozen lockfile is authoritative; plain install only rescues a stale lock.
+        shell: bash
+        run: bun install --frozen-lockfile || bun install
+
+      - name: Build frontend
+        # Fail fast on tsc/vite errors before the long Rust compile.
+        run: bun run build:ui
+
+      - name: Run Rust unit tests
+        # 115 lib tests (110 #[test] + 5 #[tokio::test]); pure, no WebView2.
+        # Runs after build:ui so tauri-build sees dist/.
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
+      - name: Build recon.exe (no installer)
+        # @tauri-apps/cli is a devDependency; --no-bundle skips NSIS and
+        # updater signing, so no TAURI_SIGNING_PRIVATE_KEY secret is needed.
+        run: bunx tauri build --no-bundle
+
+      - name: Sign recon.exe
+        # Optional: skipped when the signing secrets are absent, so forks and
+        # quote-less runs still produce a build. Once the machine that runs the
+        # binary trusts the certificate, the exe starts without a SmartScreen
+        # "unrecognized app" prompt.
+        shell: pwsh
+        env:
+          SIGN_PFX_B64: ${{ secrets.WINDOWS_SIGN_PFX_B64 }}
+          SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}
+        run: |
+          if (-not $env:SIGN_PFX_B64) {
+            Write-Host 'No signing certificate configured; leaving recon.exe unsigned.'
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP 'recon-sign.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGN_PFX_B64))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found in the Windows SDK' }
+          & $signtool.FullName sign /fd SHA256 /f $pfx /p $env:SIGN_PFX_PASSWORD `
+            /tr http://timestamp.digicert.com /td SHA256 `
+            src-tauri/target/release/recon.exe
+          # `signtool verify /pa` fails for a self-signed root the runner does not
+          # trust, which says nothing about whether signing worked. Assert the
+          # signature exists instead; trust is the target machine's business.
+          $sig = Get-AuthenticodeSignature src-tauri/target/release/recon.exe
+          Write-Host "Authenticode: $($sig.Status) / $($sig.SignerCertificate.Subject)"
+          if (-not $sig.SignerCertificate) { throw 'recon.exe is not signed' }
+
+      - name: Upload recon.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: recon-windows-x64
+          path: src-tauri/target/release/recon.exe
+          if-no-files-found: error
+          retention-days: 7

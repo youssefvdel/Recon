@@ -381,6 +381,120 @@ export function isTrnDeadQuiet(): boolean {
 }
 
 /* ------------------------------------------------------------------ *
+ * Warden captcha wall (upstream, confirmed 2026-11)
+ *
+ * api.tracker.gg now answers the profile endpoints with
+ *   HTTP 429 {"errors":[{"code":"Warden::Challenge","message":"…captcha…"}]}
+ * A HUMAN must solve it once in a VISIBLE window; the hidden proxy window
+ * never can. Rust recognises the body and raises this exact error instead of
+ * "HTTP 429", because the 429 ladder below is precisely the wrong response:
+ * it steps 25s→60s forever and the wall never clears.
+ *
+ * So the wall is classified FIRST in trnGet's catch and short-circuits every
+ * later call at the top of trnGet: no ladder step, no path-fail stamp, no
+ * dead-quiet, no wire. Only a user action clears it (see the banner).
+ * ------------------------------------------------------------------ */
+export const TRN_CAPTCHA_REQUIRED = 'TRN_CAPTCHA_REQUIRED';
+
+/** True for the captcha wall. Pure. */
+export function isTrnCaptcha(msg: unknown): boolean {
+  const s = typeof msg === 'string' ? msg : msg instanceof Error ? msg.message : String(msg ?? '');
+  return s.includes(TRN_CAPTCHA_REQUIRED);
+}
+
+/* ------------------------------------------------------------------ *
+ * Bounded backoff for the proxy-side refusals that touch no wire
+ *
+ * EDGE_UNAVAILABLE (hidden window lost), TRN_BUDGET (the shared Rust
+ * ceiling) and EDGE_PAUSED proxy-not-ready used to fall through untagged:
+ * no ladder, no path stamp, no dead-quiet — so five views plus the poll
+ * re-fired instantly and every attempt paid a window create/eval. They are
+ * NOT network death (nothing was fetched), so they must not feed the
+ * status-0 breaker. One shared window, doubling 5s→60s, cleared by the next
+ * answered request. Module state, not persisted.
+ * ------------------------------------------------------------------ */
+const TRN_PROXY_BACKOFF_BASE_MS = 5_000;
+const TRN_PROXY_BACKOFF_MAX_MS = 60_000;
+const TRN_PROXY_BACKOFF_MAX_STEP = 4;
+let trnProxyQuietUntil = 0;
+let trnProxyBackoffStep = 0;
+
+/** True for a refusal that never reached the wire. Pure. */
+export function isTrnProxyRefusal(msg: unknown): boolean {
+  const s = typeof msg === 'string' ? msg : msg instanceof Error ? msg.message : String(msg ?? '');
+  return s.includes('EDGE_UNAVAILABLE') || s.includes('TRN_BUDGET');
+}
+
+/** ms left on the shared proxy backoff; 0 when ready. Pure read. */
+export function trnProxyBackoffRemainingMs(): number {
+  return Math.max(0, trnProxyQuietUntil - Date.now());
+}
+
+/* ------------------------------------------------------------------ *
+ * TRN health: ONE observable verdict for the whole TRN path.
+ *
+ * Every failure used to be swallowed at the call sites (`.catch(() => {})`),
+ * so "broken forever" looked exactly like "not loaded yet". This is the
+ * single fact the UI needs: what the last request said, when, and why.
+ * Module state + a listener set, because both realms own a copy and only the
+ * owner realm ever sets it. Nothing is persisted — a restart re-probes.
+ * ------------------------------------------------------------------ */
+export type TrnHealth = 'ok' | 'captcha' | 'unavailable' | 'rate-limited';
+
+export interface TrnHealthState {
+  health: TrnHealth;
+  /** Epoch ms this verdict was set (0 = never). */
+  at: number;
+  /** One short human line for the banner. Empty when ok. */
+  detail: string;
+}
+
+const TRN_HEALTH_OK: TrnHealthState = { health: 'ok', at: 0, detail: '' };
+let trnHealth: TrnHealthState = TRN_HEALTH_OK;
+const trnHealthListeners = new Set<() => void>();
+
+/** Current verdict. Stable identity while unchanged — safe for useSyncExternalStore. */
+export function getTrnHealth(): TrnHealthState {
+  return trnHealth;
+}
+
+/** Subscribe to verdict changes. Returns the unsubscribe. */
+export function subscribeTrnHealth(fn: () => void): () => void {
+  trnHealthListeners.add(fn);
+  return () => {
+    trnHealthListeners.delete(fn);
+  };
+}
+
+/** Set the verdict. No emit when nothing changed (avoids a render per call). */
+function setTrnHealth(health: TrnHealth, detail = ''): void {
+  if (trnHealth.health === health && trnHealth.detail === detail) return;
+  trnHealth = { health, at: Date.now(), detail };
+  for (const fn of trnHealthListeners) fn();
+}
+
+/** Clear back to ok and drop the bounded proxy backoff, so an explicit user
+ *  action re-probes immediately instead of waiting out a window it just fixed.
+ *  The banner's "I finished" calls this. */
+export function resetTrnHealth(): void {
+  trnProxyBackoffStep = 0;
+  trnProxyQuietUntil = 0;
+  setTrnHealth('ok');
+}
+
+/** Open a VISIBLE tracker.gg window so the user can solve the captcha. */
+export async function openTrnVerifyWindow(): Promise<void> {
+  if (!isTauri()) throw new Error('TRN needs the desktop app.');
+  await invoke('trn_verify_open');
+}
+
+/** Drop the hidden proxy window so the next fetch reuses the earned cookies. */
+export async function resetTrnProxyWindow(): Promise<void> {
+  if (!isTauri()) return;
+  await invoke('trn_proxy_reset');
+}
+
+/* ------------------------------------------------------------------ *
  * Per-player cache bounds
  *
  * The maps below are keyed by `name#tag` (+ playlist/season), so their key
@@ -616,6 +730,17 @@ export async function trnGet(
     if (cached !== undefined) return cached;
   }
 
+  // Captcha wall BEFORE anything with a cost. The hidden window can never
+  // solve one, so every call would fail identically: fail here for free, with
+  // the shape the banner keys on, until the user verifies (resetTrnHealth).
+  // The file cache above is deliberately NOT behind this gate — a held body
+  // still renders while the wall stands.
+  if (trnHealth.health === 'captcha') {
+    if (import.meta.env.DEV) trnLog('captcha fail-fast', `path=${path.slice(0, 80)}`);
+    report('EDGE');
+    throw new Error(TRN_CAPTCHA_REQUIRED);
+  }
+
   // Per-path backoff BEFORE anything with a cost (even before pause/dead-quiet
   // reads): five views chase one player, and only the first failure per 30s
   // window may touch the wire — the rest fail fast here.
@@ -632,6 +757,16 @@ export async function trnGet(
     if (import.meta.env.DEV) trnLog('dead-quiet fail-fast', `remaining=${Math.ceil((trnDeadQuietUntil - Date.now()) / 1000)}s`);
     report('EDGE');
     throw new Error(`${TRN_DEAD_QUIET} ${Math.ceil((trnDeadQuietUntil - Date.now()) / 1000)}s`);
+  }
+
+  // Shared proxy backoff: EDGE_UNAVAILABLE / TRN_BUDGET fetch nothing, so they
+  // must not be retried by every view on every poll (each attempt pays a window
+  // create + eval). Bounded and cleared by the next answered request; kept
+  // separate from the status-0 breaker, which is about the page's network.
+  if (trnProxyBackoffRemainingMs() > 0) {
+    if (import.meta.env.DEV) trnLog('proxy-backoff fail-fast', `remaining=${Math.ceil(trnProxyBackoffRemainingMs() / 1000)}s`);
+    report('EDGE');
+    throw new Error(`TRN_PROXY_BACKOFF ${Math.ceil(trnProxyBackoffRemainingMs() / 1000)}s`);
   }
 
   // Pause pre-check BEFORE the gate slot claim: a paused call fetches nothing,
@@ -693,10 +828,24 @@ export async function trnGet(
     // An answered request proves the path is alive — reset the dead breaker.
     trnDeadStreak = 0;
     trnDeadQuietUntil = 0;
+    // A clean body is the only thing that clears a proxy backoff or a health
+    // verdict: everything else is a guess about why we are not fetching.
+    trnProxyBackoffStep = 0;
+    trnProxyQuietUntil = 0;
+    setTrnHealth('ok');
     report('EDGE');
   } catch (e) {
     const msg = String(e);
     if (import.meta.env.DEV) trnLog('fallback', `${msg.slice(0, 120)} elapsed=${Date.now() - t0}ms`);
+    // Captcha wall FIRST, before the 429/403 ladder: this IS a 429 upstream but
+    // it is not a rate limit. Stepping the ladder would extend an hour-long
+    // block that no amount of waiting clears, and stamping the path or the
+    // dead breaker would keep failing fast after the user verifies. Set the
+    // verdict, spend nothing, and let the banner ask for the human.
+    if (isTrnCaptcha(msg)) {
+      setTrnHealth('captcha', 'tracker.gg needs verification');
+      throw new Error(msg);
+    }
     // Race backstop: paused after waiting (match started mid-queue) — refund
     // the slot so followers don't pay for a call that fetched nothing.
     if (msg.includes(TRN_PROXY_PAUSED) && trnNextSlot === slot + gap) trnNextSlot = slot;
@@ -708,6 +857,9 @@ export async function trnGet(
           localStorage.setItem(TRN_COOLDOWN_KEY, String(trnCooldownUntil));
         } catch {}
       }
+      // A real Cloudflare rate limit: worth saying out loud, because the user
+      // cannot clear it by clicking anything — only by waiting.
+      setTrnHealth('rate-limited', `tracker.gg rate limit (${Math.ceil(trnCooldownRemainingMs() / 1000)}s)`);
       // An answered request (even a refusal) proves the path is alive —
       // the ladder owns HTTP errors, not the dead breaker.
       trnDeadStreak = 0;
@@ -720,6 +872,27 @@ export async function trnGet(
         trnDeadQuietUntil = Date.now() + TRN_DEAD_QUIET_MS;
         if (import.meta.env.DEV) trnLog('dead-quiet engaged', `streak=${trnDeadStreak}`);
       }
+    } else if (isTrnProxyRefusal(msg)) {
+      // Nothing reached the wire: the hidden window is gone (EDGE_UNAVAILABLE)
+      // or the shared Rust ceiling is spent (TRN_BUDGET). Neither is network
+      // death, so this gets its own bounded window instead of the status-0
+      // breaker — and it never stops the gate for later, legitimate calls.
+      trnProxyBackoffStep = Math.min(trnProxyBackoffStep + 1, TRN_PROXY_BACKOFF_MAX_STEP);
+      trnProxyQuietUntil =
+        Date.now() +
+        Math.min(TRN_PROXY_BACKOFF_MAX_MS, TRN_PROXY_BACKOFF_BASE_MS * 2 ** (trnProxyBackoffStep - 1));
+      setTrnHealth(
+        msg.includes('TRN_BUDGET') ? 'rate-limited' : 'unavailable',
+        msg.includes('TRN_BUDGET') ? 'TRN request ceiling reached' : 'tracker.gg window unavailable'
+      );
+      if (import.meta.env.DEV) trnLog('proxy-backoff engaged', `step=${trnProxyBackoffStep} ${msg.slice(0, 80)}`);
+    } else if (isTrnProxyNotReady(msg)) {
+      // Cold start: the page is still earning readiness (≤10s by Rust's own
+      // gate). Back off briefly so queued callers park once instead of each
+      // paying the readiness timeout, but say nothing — the user can do
+      // nothing about it and it clears itself.
+      trnProxyQuietUntil = Math.max(trnProxyQuietUntil, Date.now() + TRN_PROXY_BACKOFF_BASE_MS);
+      if (import.meta.env.DEV) trnLog('proxy not ready', 'backoff 5s');
     }
     // Stamp failed wire attempts so sibling views don't re-fire one dead URL:
     // any answered HTTP status or status-0 network death. Shapes that never

@@ -65,6 +65,28 @@ verified live, returns 20 matches). Large gains signal MMR above your visible ra
 small gains signal MMR below it. Render as `MMR ↑ above rank` / `MMR ~ at rank` /
 `MMR ↓ below rank`, never as a raw value.
 
+### tracker.gg public API — dead since 2026-11-02
+*Status:* Removed from the hot path. TRN enrichment is replaced by local Riot reads.
+
+**Verified finding (do not re-litigate):** tracker.gg's keyless API now sits behind an
+interactive captcha that a hidden WebView2 fetch can never pass, and the site API is not
+licensed for VALORANT, so no API key fixes it. Confirmed 2026-11-06/07 from both a
+residential line and a VPN exit:
+1. Profile/matches endpoints answer `HTTP 429 {"errors":[{"code":"Warden::Challenge",
+   "message":"…must solve a captcha…"}]}` with `access-control-expose-headers:
+   X-Warden-Challenge-Passed` — and still do after **95 s of silence**. Non-browser
+   clients get a separate 403 "You've Been Blocked" page instead. Last successful fetch
+   was **2026-11-02 16:28**, so the wall arrived in early November 2026.
+2. The official Tracker Network developer API covers Apex, The Division 2, Splitgate and
+   CS:GO only — their FAQ states a key for other games "won't be granted". Even with a
+   (bogus) `TRN-Api-Key` the captcha answered first.
+3. Replacement: Riot's local-client `mmr/v1`, `match-history/v1` and `match-details/v1`
+   answer for **arbitrary PUUIDs and match IDs** with the app's own local token — no key,
+   no captcha, no third party.
+
+Never put a human-gated captcha wall behind a silent retry loop; surface it and ask the
+user. Full timeline, evidence and the rule list: `docs/tracker-gg-postmortem.md`.
+
 ### Live in-match data — available WITHOUT Overwolf (earlier conclusion was WRONG)
 *Status:* **Deferred — decided we don't need it.** Research kept below so it is never
 re-investigated. Nothing was built; there is no code to remove.
