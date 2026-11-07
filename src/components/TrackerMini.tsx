@@ -204,7 +204,7 @@ export const TrackerMini: React.FC = () => {
             />
           ) : null}
           {mini.level > 0 ? (
-            <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-1 rounded bg-black/70 border border-m3-outline-subtle text-[8px] font-mono font-bold text-m3-on-surface leading-tight whitespace-nowrap">
+            <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-1 rounded bg-black/70 border border-m3-outline-subtle text-micro font-mono font-bold text-m3-on-surface leading-tight whitespace-nowrap">
               {mini.level}
             </span>
           ) : null}
@@ -225,10 +225,10 @@ export const TrackerMini: React.FC = () => {
               /* Fixed slot: a missing icon must not collapse the badge row. */
               <div className="w-6 h-6 rounded bg-m3-surface-container-highest" aria-hidden="true" />
             )}
-            <div className="text-[10px] font-bold text-m3-on-surface leading-tight truncate max-w-full">
+            <div className="text-micro font-bold text-m3-on-surface leading-tight truncate max-w-full">
               {mini.rank}
             </div>
-            <div className="text-[8px] font-bold uppercase tracking-wider text-m3-primary">
+            <div className="text-micro font-bold uppercase tracking-wider text-m3-primary">
               {mini.rr} RR
             </div>
           </div>
@@ -240,10 +240,10 @@ export const TrackerMini: React.FC = () => {
             ) : (
               <div className="w-6 h-6 rounded bg-m3-surface-container-highest" aria-hidden="true" />
             )}
-            <div className="text-[10px] font-bold text-m3-tertiary leading-tight truncate max-w-full">
+            <div className="text-micro font-bold text-m3-tertiary leading-tight truncate max-w-full">
               {mini.peak}
             </div>
-            <div className="text-[8px] font-bold uppercase tracking-wider text-m3-outline">
+            <div className="text-micro font-bold uppercase tracking-wider text-m3-outline">
               Peak
             </div>
           </div>

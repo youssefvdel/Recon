@@ -208,7 +208,11 @@ export const AccountsView: React.FC<{
       );
       await load();
     } catch (e) {
-      say(false, String(e ?? 'Switch failed.').replace(/^.*?-\s*/, ''));
+      // Wave-1 Rust returns the full reason ("A match is live (PREGAME) — …",
+      // "Could not verify the match state — …"). Show it verbatim: stripping
+      // text here is how the real cause got lost before.
+      const msg = typeof e === 'string' ? e : e instanceof Error ? e.message : 'Switch failed.';
+      say(false, msg || 'Switch failed.');
     } finally {
       setBusy(false);
       setProgress(null);

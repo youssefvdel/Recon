@@ -13,6 +13,37 @@ const CrosshairView = lazy(() => import('./components/CrosshairView').then((m) =
 const PrepickView = lazy(() => import('./components/PrepickView').then((m) => ({ default: m.PrepickView })));
 const AccountsView = lazy(() => import('./components/AccountsView').then((m) => ({ default: m.AccountsView })));
 const DevDashboard = lazy(() => import('./components/DevDashboard').then((m) => ({ default: m.DevDashboard })));
+
+/* ui #8 — never show a blank pane on tab switch. The lazy boundary only
+ * blanks when the chunk is not cached yet, so we warm it the moment the user
+ * commits to a tab (and again on idle for everything else). The Suspense
+ * fallback then never paints in practice. */
+const VIEW_LOADERS: Partial<Record<TabType, () => Promise<unknown>>> = {
+  switcher: () => import('./components/UtilityView'),
+  visualizer: () => import('./components/UtilityView'),
+  borderless: () => import('./components/UtilityView'),
+  gpu: () => import('./components/UtilityView'),
+  game_config: () => import('./components/ValorantConfig'),
+  valorant: () => import('./components/ValorantConfig'),
+  settings: () => import('./components/AppSettingsView'),
+  store: () => import('./components/StoreView'),
+  chat: () => import('./components/RiotChatView'),
+  crosshair: () => import('./components/CrosshairView'),
+  prepick: () => import('./components/PrepickView'),
+  accounts: () => import('./components/AccountsView'),
+  dev: () => import('./components/DevDashboard'),
+};
+
+/** Warm the chunk for a tab. Fire-and-forget; a failed preload just means the
+ *  Suspense fallback shows, exactly as before. */
+function preloadView(tab: TabType): void {
+  void VIEW_LOADERS[tab]?.().catch(() => {});
+}
+
+/** Idle-prefetch every view once, after first paint. */
+function preloadAllViews(): void {
+  for (const load of Object.values(VIEW_LOADERS)) void load?.().catch(() => {});
+}
 import { OverlayView } from './components/OverlayView';
 import { TooltipHost } from './components/ReconTooltip';
 import type { DisplayInfo, ShortcutBinding, GpuInfo, TabType } from './types';
@@ -262,6 +293,13 @@ export const App: React.FC = () => {
   useEffect(() => {
     loadAllTelemetry();
 
+    // ui #8: warm every view chunk after the first paint so later tab
+    // switches never wait on the network.
+    const idle = (window as unknown as { requestIdleCallback?: (cb: () => void) => number })
+      .requestIdleCallback;
+    if (idle) idle(() => preloadAllViews());
+    else window.setTimeout(preloadAllViews, 1500);
+
     // Listen for background global hotkey toggle events from Rust backend
     let unlistenFn: (() => void) | undefined;
     let unlistenBlFn: (() => void) | undefined;
@@ -294,6 +332,7 @@ export const App: React.FC = () => {
     // Poll for tab switch requests (e.g. from automation or scripts) with low-overhead 2000ms interval
     const applyTabRequest = (req: string | null) => {
       if (!req) return;
+      preloadView(req as TabType);
       if (['switcher', 'visualizer', 'game_config', 'settings', 'gpu', 'valorant', 'overview', 'matches'].includes(req)) {
         setCurrentTab(req as TabType);
       } else if (req === 'borderless' || req === 'display' || req === 'monitors') {
@@ -468,6 +507,7 @@ export const App: React.FC = () => {
         onSelectTab={(tab) => {
           // Sidebar entry = plain editor, never a stale account banner.
           if (tab === 'game_config') setConfigAccount(null);
+          preloadView(tab);
           setCurrentTab(tab);
         }}
         displayInfo={displayInfo}

@@ -17,13 +17,93 @@ import { logger } from './logger';
    - history: { Total, History: [{ MatchID, GameStartTime, QueueID }] }
    - match-details/v1/matches/{id}: { matchInfo, players[] (subject/teamId/characterId/stats/roundDamage), teams[], roundResults[] } */
 
+/* ------------------------------------------------------------------ *
+ * REAL Riot-client status (ux-gaps #2)
+ *
+ * `is_riot_client_running` only proves a lockfile exists. A logged-out or
+ * crashed client leaves that file behind, so the UI used to sit on skeletons
+ * forever while the only error was a toast. This is the persistent answer,
+ * derived from the responses the reads actually got back:
+ *   'ok'          a local read just succeeded
+ *   'locked-out'  401/403 / Unauthorized / BAD_AUTH from a local endpoint
+ *   'crashed'     lockfile present but the socket refuses (stale file)
+ *   'not-running' no lockfile / client not found
+ * Never persisted: a restart must re-probe. Module state + listeners, so any
+ * view can read it without a round trip.
+ * ------------------------------------------------------------------ */
+export type RiotClientStatus = 'ok' | 'locked-out' | 'crashed' | 'not-running';
+
+let riotClientStatus: RiotClientStatus = 'ok';
+let riotClientDetail = '';
+const riotStatusListeners = new Set<() => void>();
+
+/** Current status. Cheap, synchronous, safe in render. */
+export function getRiotClientStatus(): RiotClientStatus {
+  return riotClientStatus;
+}
+
+/** Subscribe to status changes (store mirror / view subscriptions). */
+export function subscribeRiotClientStatus(fn: () => void): () => void {
+  riotStatusListeners.add(fn);
+  return () => {
+    riotStatusListeners.delete(fn);
+  };
+}
+
+/** One-line human reason for the status; '' when ok. */
+export function getRiotClientDetail(): string {
+  return riotClientDetail;
+}
+
+/** Record a status. No emit when nothing changed. */
+export function setRiotClientStatus(status: RiotClientStatus, detail = ''): void {
+  if (riotClientStatus === status && riotClientDetail === detail) return;
+  riotClientStatus = status;
+  riotClientDetail = detail;
+  for (const fn of riotStatusListeners) fn();
+}
+
+/** Classify a failed local Riot call, or null when it proves nothing about
+ *  the client (a 404 on one route, a parse error, a timeout). PURE. */
+export function classifyRiotClientError(e: unknown): RiotClientStatus | null {
+  const s = (typeof e === 'string' ? e : e instanceof Error ? e.message : String(e ?? '')).toLowerCase();
+  if (s.includes('lockfile missing') || s.includes('riot client not found') || s.includes('no active session')) {
+    return 'not-running';
+  }
+  if (
+    s.includes('econnrefused') ||
+    s.includes('connection refused') ||
+    s.includes('connection failed') ||
+    s.includes('os error 10061') ||
+    s.includes('error sending request')
+  ) {
+    // We only get here after the lockfile check passed, so a refusal means the
+    // process is gone and the file is stale.
+    return 'crashed';
+  }
+  if (
+    s.includes('401') ||
+    s.includes('403') ||
+    s.includes('unauthorized') ||
+    s.includes('bad_auth') ||
+    s.includes('riot_expired')
+  ) {
+    return 'locked-out';
+  }
+  return null;
+}
+
 /** Fast check (<0.1ms) if the local Riot Client lockfile exists. */
 export async function isRiotClientRunning(): Promise<boolean> {
   // Static gate so prod DCE drops the dev-only call entirely (hot poll path).
   if (import.meta.env.DEV && isDevNoClient()) return false;
   if (!isTauri()) return false;
   try {
-    return await invoke<boolean>('is_riot_client_running');
+    const running = await invoke<boolean>('is_riot_client_running');
+    // A lockfile proves nothing POSITIVE (a crashed client leaves it behind),
+    // but its absence is a real 'not-running'.
+    if (!running) setRiotClientStatus('not-running', 'Riot Client is not running');
+    return running;
   } catch {
     return false;
   }
@@ -64,6 +144,8 @@ async function detectLocalAccountLive(): Promise<LocalRiotAccount> {
     }
     return { ...acc, game_name: name, tagline: tag };
   } catch (e) {
+    const kind = classifyRiotClientError(e);
+    if (kind) setRiotClientStatus(kind, kind === 'locked-out' ? 'Riot Client is logged out' : 'Riot Client is not responding');
     throw new Error(typeof e === 'string' ? e : 'Auto-detect failed — is the Riot Client open?');
   }
 }
@@ -310,13 +392,33 @@ export async function riotGet(host: string, path: string): Promise<any> {
     const j = JSON.parse(raw);
     if (j?.httpStatus === 401 || j?.errorCode === 'BAD_AUTH' || j?.message === 'Unauthorized') {
       clearEntitlements();
-      return JSON.parse(await withRiotSlot(async () => call(await getEntitlements())));
+      const retried = JSON.parse(await withRiotSlot(async () => call(await getEntitlements())));
+      // Still 401/403 after a fresh entitlements read = the session is gone.
+      if (retried?.httpStatus === 401 || retried?.httpStatus === 403) {
+        setRiotClientStatus('locked-out', 'Riot Client is logged out');
+      } else {
+        setRiotClientStatus('ok');
+      }
+      return retried;
     }
+    // An answered read proves the client is alive and authenticated.
+    setRiotClientStatus('ok');
     return j;
   } catch (e) {
     if (String(e).includes('RIOT_EXPIRED')) {
       clearEntitlements();
       return JSON.parse(await withRiotSlot(async () => call(await getEntitlements())));
+    }
+    const kind = classifyRiotClientError(e);
+    if (kind) {
+      setRiotClientStatus(
+        kind,
+        kind === 'locked-out'
+          ? 'Riot Client is logged out'
+          : kind === 'not-running'
+            ? 'Riot Client is not running'
+            : 'Riot Client is not responding'
+      );
     }
     throw e;
   }
@@ -2380,13 +2482,27 @@ async function loadActSample(
  *
  *  NOT computed here, because the payload does not carry them: headshot %,
  *  KAST, damage delta, percentiles, Tracker Score. They stay blank. */
+/** Everything one act scan needs. `preloadedRank` skips a duplicate /mmr read
+ *  when the caller already has the row (the lobby fill always does). */
+export interface LocalActCtx extends LocalRiotCtx {
+  puuid: string;
+  preloadedRank?: LocalRankRow;
+}
+
 export async function fetchLocalActStats(
-  puuid: string,
-  region: string,
-  queue = 'competitive',
-  rank?: LocalRankRow
+  ctx: LocalActCtx,
+  opts?: { allowAct?: boolean }
 ): Promise<ActAggregate> {
-  const r = rank ?? (await fetchLocalRank(puuid, region));
+  const puuid = ctx.puuid;
+  const region = ctx.region;
+  const queue = ctx.queue || 'competitive';
+  // In-game guard, second line of defence: the fill already returns early for
+  // every automatic caller, but this is the choke point, so an explicit
+  // `allowAct: true` is the ONLY way past it while the game is in coregame.
+  if (opts?.allowAct !== true && getTrnMatchPhase() === 'coregame') {
+    throw new Error('LOCAL_ACT_IN_MATCH');
+  }
+  const r = ctx.preloadedRank ?? (await fetchLocalRank(puuid, region));
   const want = Number(r.actGames) || 0;
   if (want <= 0) throw new Error('LOCAL_NO_ACT_GAMES');
   if (want > LOCAL_ACT_MAX_MATCHES) throw new Error('LOCAL_ACT_TOO_LONG');
@@ -2458,6 +2574,10 @@ export interface LocalRiotCtx {
   region: string;
   queue: string;
   drain?: boolean;
+  /** Opt IN to the act scan while VALORANT is in coregame. Default false: the
+   *  wave-1 in-game guard stays for every automatic caller. Only an explicit
+   *  user action (opening the player modal) sets this. */
+  allowAct?: boolean;
 }
 
 function fetchTrnStatsNow(
@@ -2489,11 +2609,14 @@ function fetchTrnStatsNow(
     // paid above) and leave the act window to the next out-of-game fill; the
     // rank row still renders, and no retry gate is armed so the act data
     // lands as soon as the match ends.
-    if (getTrnMatchPhase() === 'coregame') {
+    if (ctx.allowAct !== true && getTrnMatchPhase() === 'coregame') {
       if (import.meta.env.DEV) trnLog('act deferred', `in-match ${puuid.slice(0, 8)}`);
       return update;
     }
-    const agg = await fetchLocalActStats(puuid, ctx.region, ctx.queue, rank).catch((e: unknown) => {
+    const agg = await fetchLocalActStats(
+      { ...ctx, puuid, preloadedRank: rank },
+      { allowAct: ctx.allowAct === true }
+    ).catch((e: unknown) => {
       update.actState = actStateFor(String(e));
       // Rank read fine, act window not. Back off so this does not re-run one
       // mmr read per poll; a too-long act cannot shrink, so it backs off far

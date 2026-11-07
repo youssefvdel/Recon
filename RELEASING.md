@@ -142,6 +142,50 @@ only update itself if it already contains the plugin — 0.3.0 was the first.
 
 ---
 
+## Releases from CI (one command)
+
+CI is the normal path now; the manual steps above stay for offline recovery.
+
+```bash
+git tag v0.5.0-alpha && git push origin v0.5.0-alpha
+# or re-run an existing tag without a new push:
+gh workflow run release.yml --ref v0.5.0-alpha
+```
+
+`.github/workflows/release.yml` builds the NSIS bundle with updater artifacts,
+signs it with `TAURI_SIGNING_PRIVATE_KEY`, generates `latest.json`, and publishes
+a GitHub Release with `Recon_<v>_x64-setup.exe`, its `.sig`, and `latest.json`.
+The run refuses to start unless the tag is `v*` and matches the `package.json`
+version — `bun run bump` keeps those in sync.
+
+### When signing fails
+
+The run goes red before publishing anything. In the "Build signed bundle" log:
+
+```
+A public key has been found, but no private key.
+Make sure to set `TAURI_SIGNING_PRIVATE_KEY` environment variable.
+```
+
+means the key secret is missing. A stall at
+
+```
+Decrypting updater signing key, expect a prompt for password
+```
+
+means the password env did not reach Tauri (an empty password is fine, a missing
+variable is not). The generator is the last line of defence: it refuses to write
+the manifest with
+
+```
+missing signature ... — was the build signed?
+```
+
+If a release page has the exe but no `.sig`, do not announce it: installed apps
+refuse the update.
+
+---
+
 ## Code signing
 
 `recon.exe` downloads are Authenticode-signed in CI with a **self-signed**

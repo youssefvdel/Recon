@@ -1,10 +1,12 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { X, Swords, Clock, Copy, Check } from 'lucide-react';
 import type { TrackerMatchDetail, TrackerMmrPoint } from '../types';
 import { tierName, resolvePlayerNames, gameData } from '../utils/tracker';
 import { getPartyStyle } from '../utils/playerDisplay';
 import { PlayerOverviewModal, type SelectedPlayerInfo } from './PlayerOverviewModal';
 import { ScoreBadge, scoreTier } from './ScoreBadge';
+import { StatValue } from './StatValue';
+import { formatPct } from '../utils/format';
 import { calculateTrsFallback, fetchTrnMatchDetails } from '../utils/trn';
 import { useTrackerData } from '../hooks/useTrackerData';
 
@@ -34,6 +36,11 @@ interface MatchDetailModalProps {
 }
 
 type ModalTab = 'scoreboard' | 'duels';
+
+const MODAL_TABS: { id: ModalTab; label: string }[] = [
+  { id: 'scoreboard', label: 'Scoreboard' },
+  { id: 'duels', label: 'Duels' },
+];
 
 const formatDuration = (ms: number): string => {
   if (!ms || ms <= 0) return '0m 0s';
@@ -78,6 +85,21 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
   const [weaponMap, setWeaponMap] = useState<Record<string, string>>({});
   const [trnTrsMap, setTrnTrsMap] = useState<Record<string, number>>({});
   const [copiedPuuid, setCopiedPuuid] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+
+  // Dialog behaviour: move focus in on open, restore it on close. Without
+  // this, Tab walks the page behind the overlay (docs/audit/ui.md #4).
+  useEffect(() => {
+    if (!isOpen) return;
+    restoreFocusRef.current = document.activeElement as HTMLElement | null;
+    const t = window.setTimeout(() => closeRef.current?.focus(), 0);
+    return () => {
+      window.clearTimeout(t);
+      restoreFocusRef.current?.focus?.();
+    };
+  }, [isOpen]);
 
   const copyPlayerRiotId = (e: React.MouseEvent, p: { displayName: string; displayTag?: string; puuid: string }) => {
     e.stopPropagation();
@@ -99,7 +121,8 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
     fetchTrnMatchDetails(currentMatchId).then(setTrnTrsMap).catch(() => {});
   }, [isOpen, currentMatchId]);
 
-  // Keyboard escape listener to close modal
+  // Escape closes; Tab is trapped inside the panel while no nested player
+  // modal is open (that modal owns focus itself).
   useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -109,6 +132,29 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
         } else {
           onClose();
         }
+        return;
+      }
+      if (e.key !== 'Tab' || selectedPlayer) return;
+      const panel = panelRef.current;
+      if (!panel) return;
+      const focusables = Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          'button:not([disabled]):not([tabindex="-1"]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (!active || !panel.contains(active)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      } else if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -415,20 +461,25 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
       {/* Blurred Backdrop */}
-      <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/80" onClick={onClose} />
 
       {/* Modal Dialog Card (Google Material 3 Theme) */}
-      <div className="relative w-full max-w-[96vw] h-[94vh] max-h-[94vh] bg-m3-surface-container-low border border-m3-outline-subtle rounded-3xl shadow-m3-3 flex flex-col overflow-hidden text-m3-on-surface z-10">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mdm-title"
+        className="relative w-full max-w-[96vw] h-[94vh] max-h-[94vh] bg-m3-surface-container-low border border-m3-outline-subtle rounded-3xl shadow-m3-3 flex flex-col overflow-hidden text-m3-on-surface z-10">
         {/* Header */}
         <div className="px-4 py-2.5 bg-m3-surface-container border-b border-m3-outline-subtle flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3 shrink-0 min-w-0">
             {/* Map & Mode & Date */}
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-display font-black text-xl text-m3-on-surface tracking-tight leading-none">
+                <span id="mdm-title" className="font-display font-black text-xl text-m3-on-surface tracking-tight leading-none">
                   {mapName}
                 </span>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-m3-surface-container-highest text-m3-outline border border-m3-outline-subtle">
+                <span className="px-2 py-0.5 rounded text-micro font-bold uppercase tracking-wider bg-m3-surface-container-highest text-m3-outline border border-m3-outline-subtle">
                   {queue || 'Competitive'}
                 </span>
               </div>
@@ -470,7 +521,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
               <div className="flex flex-col gap-0.5 bg-m3-surface-container-high border border-m3-outline-subtle px-2 py-1 rounded-xl max-w-[360px] sm:max-w-[440px] md:max-w-[560px] lg:max-w-[660px] overflow-x-auto custom-scrollbar shrink">
                 {/* Team Blue Row */}
                 <div className="flex items-center gap-1 min-w-max">
-                  <span className="w-7 text-[8.5px] font-bold text-m3-mint shrink-0">
+                  <span className="w-7 text-micro font-bold text-m3-mint shrink-0">
                     Blue
                   </span>
                   <div className="flex items-center gap-0.5">
@@ -496,7 +547,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
 
                 {/* Team Red Row */}
                 <div className="flex items-center gap-1 min-w-max">
-                  <span className="w-7 text-[8.5px] font-bold text-m3-coral shrink-0">
+                  <span className="w-7 text-micro font-bold text-m3-coral shrink-0">
                     Red
                   </span>
                   <div className="flex items-center gap-0.5">
@@ -524,9 +575,11 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
 
             {/* Persistent Close Button — shrink-0 so X NEVER disappears */}
             <button
+              ref={closeRef}
               type="button"
               onClick={onClose}
               data-tip="Close"
+              aria-label="Close match details"
               className="w-8 h-8 rounded-xl bg-m3-surface-container-high hover:bg-rose-600 hover:text-white text-m3-outline flex items-center justify-center transition-colors cursor-pointer shrink-0 border border-m3-outline-subtle shadow-xs"
             >
               <X className="w-4 h-4" />
@@ -535,17 +588,31 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
         </div>
 
         {/* Modal Navigation Tabs */}
-        <div className="flex items-center gap-6 px-4 bg-m3-surface-container-high/60 border-b border-m3-outline-subtle text-xs sm:text-[13px] font-bold shrink-0 h-10">
-          {[
-            { id: 'scoreboard', label: 'Scoreboard' },
-            { id: 'duels', label: 'Duels' },
-          ].map((t) => {
+        <div
+          role="tablist"
+          aria-label="Match detail sections"
+          className="flex items-center gap-6 px-4 bg-m3-surface-container-high/60 border-b border-m3-outline-subtle text-xs sm:text-[13px] font-bold shrink-0 h-10">
+          {MODAL_TABS.map((t) => {
             const active = activeTab === t.id;
             return (
               <button
                 key={t.id}
                 type="button"
-                onClick={() => setActiveTab(t.id as ModalTab)}
+                role="tab"
+                id={`mdm-tab-${t.id}`}
+                aria-selected={active}
+                aria-controls="mdm-panel"
+                tabIndex={active ? 0 : -1}
+                onClick={() => setActiveTab(t.id)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+                  e.preventDefault();
+                  const i = MODAL_TABS.findIndex((x) => x.id === activeTab);
+                  const delta = e.key === 'ArrowRight' ? 1 : MODAL_TABS.length - 1;
+                  const next = MODAL_TABS[(i + delta) % MODAL_TABS.length];
+                  setActiveTab(next.id);
+                  document.getElementById(`mdm-tab-${next.id}`)?.focus();
+                }}
                 className={`relative h-full flex items-center justify-center px-2 transition-colors cursor-pointer whitespace-nowrap font-bold ${
                   active ? 'text-m3-on-surface' : 'text-m3-outline hover:text-m3-on-surface'
                 }`}
@@ -564,7 +631,11 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
         </div>
 
         {/* Body Content */}
-        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-3 sm:p-3.5 flex flex-col gap-2.5">
+        <div
+          role="tabpanel"
+          id="mdm-panel"
+          aria-labelledby={`mdm-tab-${activeTab}`}
+          className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-3 sm:p-3.5 flex flex-col gap-2.5">
           {/* Tab 1: Scoreboard */}
           {activeTab === 'scoreboard' && (
             isDeathmatch ? (
@@ -585,7 +656,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                 <div className="flex-1 overflow-x-auto min-h-0">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
-                      <tr className="border-b border-m3-outline-subtle/60 bg-m3-surface-container-highest/40 text-[10px] font-bold uppercase tracking-wider text-m3-outline select-none">
+                      <tr className="border-b border-m3-outline-subtle/60 bg-m3-surface-container-highest/40 text-micro font-bold uppercase tracking-wider text-m3-outline select-none">
                         <th className="py-2 px-3 min-w-[36px]">#</th>
                         <th className="py-2 px-3 min-w-[44px]">Agent</th>
                         <th className="py-2 px-3 min-w-[140px]">Player</th>
@@ -633,7 +704,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                                   <div className="w-full h-full bg-m3-surface-container-highest" />
                                 )}
                                 {p.accountLevel ? (
-                                  <span className="absolute bottom-0 right-0 text-[7px] bg-black/80 px-0.5 rounded-tl font-bold text-white leading-tight">
+                                  <span className="absolute bottom-0 right-0 text-micro bg-black/80 px-0.5 rounded-tl font-bold text-white leading-tight">
                                     {p.accountLevel}
                                   </span>
                                 ) : null}
@@ -652,7 +723,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                                     {p.displayName}
                                   </span>
                                   {p.displayTag ? (
-                                    <span className="text-[10px] text-m3-outline font-normal">#{p.displayTag}</span>
+                                    <span className="text-micro text-m3-outline font-normal">#{p.displayTag}</span>
                                   ) : null}
                                 </button>
                                 <button
@@ -672,7 +743,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                                   <img src={rIcon} alt="" className="w-3.5 h-3.5 object-contain" />
                                 ) : null}
                                 {isFirst && (
-                                  <span className="px-1 py-px rounded text-[8px] font-black uppercase tracking-wider bg-amber-400/15 text-amber-300 border border-amber-400/40">
+                                  <span className="px-1 py-px rounded text-micro font-black uppercase tracking-wider bg-amber-400/15 text-amber-300 border border-amber-400/40">
                                     Winner
                                   </span>
                                 )}
@@ -701,7 +772,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                             <td className="py-1.5 px-2 text-center text-m3-on-surface font-medium text-xs">{p.damage}</td>
 
                             {/* HS% */}
-                            <td className="py-1.5 px-2 text-center text-m3-on-surface font-medium text-xs">{p.hsPct > 0 ? `${p.hsPct}%` : '—'}</td>
+                            <td className="py-1.5 px-2 text-center text-m3-on-surface font-medium text-xs">{p.hsPct > 0 ? formatPct(p.hsPct, 1) : <StatValue reason="Headshot % not recorded for this match" />}</td>
                           </tr>
                         );
                       })}
@@ -744,7 +815,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                       <col className="w-[38px]" />
                     </colgroup>
                     <thead>
-                      <tr className="border-b border-m3-outline-subtle/60 bg-m3-surface-container-highest/40 text-[10px] font-bold uppercase tracking-wider text-m3-outline select-none">
+                      <tr className="border-b border-m3-outline-subtle/60 bg-m3-surface-container-highest/40 text-micro font-bold uppercase tracking-wider text-m3-outline select-none">
                         <th className="py-2 px-3">Agent</th>
                         <th className="py-2 px-3">Player</th>
                         <th className="py-2 px-1 text-center">TRS</th>
@@ -792,7 +863,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                                   <div className="w-full h-full bg-m3-surface-container-highest" />
                                 )}
                                 {p.accountLevel ? (
-                                  <span className="absolute bottom-0 right-0 text-[7px] bg-black/80 px-0.5 rounded-tl font-bold text-white leading-tight">
+                                  <span className="absolute bottom-0 right-0 text-micro bg-black/80 px-0.5 rounded-tl font-bold text-white leading-tight">
                                     {p.accountLevel}
                                   </span>
                                 ) : null}
@@ -811,7 +882,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                                     {p.displayName}
                                   </span>
                                   {p.displayTag ? (
-                                    <span className="text-[10px] text-m3-outline font-normal shrink-0">#{p.displayTag}</span>
+                                    <span className="text-micro text-m3-outline font-normal shrink-0">#{p.displayTag}</span>
                                   ) : null}
                                 </button>
                                 <button
@@ -831,11 +902,11 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                                   <img src={rIcon} alt="" className="w-3.5 h-3.5 object-contain shrink-0" />
                                 ) : null}
                                 {isMatchMvp ? (
-                                  <span className="px-1 py-px rounded text-[8px] font-black uppercase tracking-wider bg-m3-tertiary/15 text-m3-tertiary border border-m3-tertiary/40 shrink-0">
+                                  <span className="px-1 py-px rounded text-micro font-black uppercase tracking-wider bg-m3-tertiary/15 text-m3-tertiary border border-m3-tertiary/40 shrink-0">
                                     Match MVP
                                   </span>
                                 ) : isTeamMvp ? (
-                                  <span className="px-1 py-px rounded text-[8px] font-black uppercase tracking-wider bg-m3-primary/15 text-m3-primary border border-m3-primary/40 shrink-0">
+                                  <span className="px-1 py-px rounded text-micro font-black uppercase tracking-wider bg-m3-primary/15 text-m3-primary border border-m3-primary/40 shrink-0">
                                     Team MVP
                                   </span>
                                 ) : null}
@@ -856,11 +927,11 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                                   <span className="flex items-baseline justify-center gap-0.5">
                                     <ScoreBadge tier={scoreTier(p.trs).tier} size={20} />
                                     {p.trsEstimated && (
-                                      <span className="text-[7px] font-bold uppercase text-zinc-500">est.</span>
+                                      <span className="text-micro font-bold uppercase text-m3-outline">est.</span>
                                     )}
                                   </span>
                                 ) : (
-                                  <span className="text-[10px] font-mono text-zinc-500">—</span>
+                                  <StatValue reason="Tracker Rating unavailable for this match" />
                                 )}
                               </div>
                             </td>
@@ -892,7 +963,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                             <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.adr}</td>
 
                             {/* HS% */}
-                            <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.hsPct > 0 ? `${p.hsPct}%` : '—'}</td>
+                            <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.hsPct > 0 ? formatPct(p.hsPct, 1) : <StatValue reason="Headshot % not recorded for this match" />}</td>
 
                             {/* KAST */}
                             <td className="py-1.5 px-1 text-center text-m3-outline font-medium text-xs">{p.kast}%</td>
@@ -946,7 +1017,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                       <col className="w-[38px]" />
                     </colgroup>
                     <thead>
-                      <tr className="border-b border-m3-outline-subtle/60 bg-m3-surface-container-highest/40 text-[10px] font-bold uppercase tracking-wider text-m3-outline select-none">
+                      <tr className="border-b border-m3-outline-subtle/60 bg-m3-surface-container-highest/40 text-micro font-bold uppercase tracking-wider text-m3-outline select-none">
                         <th className="py-2 px-3">Agent</th>
                         <th className="py-2 px-3">Player</th>
                         <th className="py-2 px-1 text-center">TRS</th>
@@ -994,7 +1065,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                                   <div className="w-full h-full bg-m3-surface-container-highest" />
                                 )}
                                 {p.accountLevel ? (
-                                  <span className="absolute bottom-0 right-0 text-[7px] bg-black/80 px-0.5 rounded-tl font-bold text-white leading-tight">
+                                  <span className="absolute bottom-0 right-0 text-micro bg-black/80 px-0.5 rounded-tl font-bold text-white leading-tight">
                                     {p.accountLevel}
                                   </span>
                                 ) : null}
@@ -1013,7 +1084,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                                     {p.displayName}
                                   </span>
                                   {p.displayTag ? (
-                                    <span className="text-[10px] text-m3-outline font-normal shrink-0">#{p.displayTag}</span>
+                                    <span className="text-micro text-m3-outline font-normal shrink-0">#{p.displayTag}</span>
                                   ) : null}
                                 </button>
                                 <button
@@ -1033,11 +1104,11 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                                   <img src={rIcon} alt="" className="w-3.5 h-3.5 object-contain shrink-0" />
                                 ) : null}
                                 {isMatchMvp ? (
-                                  <span className="px-1 py-px rounded text-[8px] font-black uppercase tracking-wider bg-m3-tertiary/15 text-m3-tertiary border border-m3-tertiary/40 shrink-0">
+                                  <span className="px-1 py-px rounded text-micro font-black uppercase tracking-wider bg-m3-tertiary/15 text-m3-tertiary border border-m3-tertiary/40 shrink-0">
                                     Match MVP
                                   </span>
                                 ) : isTeamMvp ? (
-                                  <span className="px-1 py-px rounded text-[8px] font-black uppercase tracking-wider bg-m3-primary/15 text-m3-primary border border-m3-primary/40 shrink-0">
+                                  <span className="px-1 py-px rounded text-micro font-black uppercase tracking-wider bg-m3-primary/15 text-m3-primary border border-m3-primary/40 shrink-0">
                                     Team MVP
                                   </span>
                                 ) : null}
@@ -1058,11 +1129,11 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                                   <span className="flex items-baseline justify-center gap-0.5">
                                     <ScoreBadge tier={scoreTier(p.trs).tier} size={20} />
                                     {p.trsEstimated && (
-                                      <span className="text-[7px] font-bold uppercase text-zinc-500">est.</span>
+                                      <span className="text-micro font-bold uppercase text-m3-outline">est.</span>
                                     )}
                                   </span>
                                 ) : (
-                                  <span className="text-[10px] font-mono text-zinc-500">—</span>
+                                  <StatValue reason="Tracker Rating unavailable for this match" />
                                 )}
                               </div>
                             </td>
@@ -1094,7 +1165,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                             <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.adr}</td>
 
                             {/* HS% */}
-                            <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.hsPct > 0 ? `${p.hsPct}%` : '—'}</td>
+                            <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.hsPct > 0 ? formatPct(p.hsPct, 1) : <StatValue reason="Headshot % not recorded for this match" />}</td>
 
                             {/* KAST */}
                             <td className="py-1.5 px-1 text-center text-m3-outline font-medium text-xs">{p.kast}%</td>
@@ -1131,7 +1202,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                   .flatMap((c) => (c.pair ? [{ title: c.title, pair: c.pair }] : []))
                   .map((c) => (
                     <div key={c.title} className="rounded-2xl border border-m3-outline-subtle bg-m3-surface-container overflow-hidden">
-                      <div className="text-center text-[10px] font-bold uppercase tracking-wider text-m3-outline pt-2">
+                      <div className="text-center text-micro font-bold uppercase tracking-wider text-m3-outline pt-2">
                         {c.title}
                       </div>
                       <div className="grid grid-cols-[1fr_auto_1fr] items-stretch">
@@ -1143,7 +1214,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                               <div className="w-10 h-10 rounded-xl bg-m3-surface-container-highest border border-m3-outline-subtle" />
                             )}
                           </button>
-                          <span className="text-[9px] font-semibold text-m3-outline">Kills vs Rival</span>
+                          <span className="text-micro font-semibold text-m3-outline">Kills vs Rival</span>
                           <span className="min-w-7 h-7 px-1.5 rounded-lg bg-m3-mint/20 border border-m3-mint/40 text-m3-mint font-mono font-extrabold text-sm flex items-center justify-center">
                             {c.pair.aKills}
                           </span>
@@ -1160,7 +1231,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                               <div className="w-10 h-10 rounded-xl bg-m3-surface-container-highest border border-m3-outline-subtle" />
                             )}
                           </button>
-                          <span className="text-[9px] font-semibold text-m3-outline">Kills vs Rival</span>
+                          <span className="text-micro font-semibold text-m3-outline">Kills vs Rival</span>
                           <span className="min-w-7 h-7 px-1.5 rounded-lg bg-m3-coral/20 border border-m3-coral/40 text-m3-coral font-mono font-extrabold text-sm flex items-center justify-center">
                             {c.pair.bKills}
                           </span>
@@ -1191,7 +1262,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                               ) : null}
                               <span className="text-left leading-tight">
                                 <span className="block font-bold text-m3-on-surface truncate max-w-[90px]">{b.displayName}</span>
-                                <span className="block text-[10px] font-medium text-m3-outline">{b.agent}</span>
+                                <span className="block text-micro font-medium text-m3-outline">{b.agent}</span>
                               </span>
                             </button>
                           </th>
@@ -1208,7 +1279,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                               ) : null}
                               <span className="text-left leading-tight">
                                 <span className="block font-bold text-m3-on-surface truncate max-w-[110px]">{a.displayName}</span>
-                                <span className="block text-[10px] font-medium text-m3-outline">{a.agent}</span>
+                                <span className="block text-micro font-medium text-m3-outline">{a.agent}</span>
                               </span>
                             </button>
                           </th>
@@ -1217,14 +1288,14 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                             const d = duelData.count(b.puuid, a.puuid);
                             const tied = k === d;
                             const kCls = k === 0 && d === 0
-                              ? 'bg-m3-surface-container-highest/60 border-m3-outline-subtle/40 text-m3-outline/50'
+                              ? 'bg-m3-surface-container-highest/60 border-m3-outline-subtle/40 text-m3-outline'
                               : tied
                                 ? 'bg-m3-tertiary/20 border-m3-tertiary/40 text-m3-tertiary'
                                 : k > d
                                   ? 'bg-m3-mint/25 border-m3-mint/50 text-m3-mint'
                                   : 'bg-m3-surface-container-highest/60 border-m3-outline-subtle/40 text-m3-outline';
                             const dCls = k === 0 && d === 0
-                              ? 'bg-m3-surface-container-highest/60 border-m3-outline-subtle/40 text-m3-outline/50'
+                              ? 'bg-m3-surface-container-highest/60 border-m3-outline-subtle/40 text-m3-outline'
                               : tied
                                 ? 'bg-m3-tertiary/20 border-m3-tertiary/40 text-m3-tertiary'
                                 : d > k
@@ -1260,7 +1331,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     {/* Nemesis */}
                     <div className="p-3 rounded-xl bg-m3-coral/10 border border-m3-coral/30 flex flex-col gap-1">
-                      <span className="text-[9px] font-bold uppercase tracking-wider text-m3-coral">
+                      <span className="text-micro font-bold uppercase tracking-wider text-m3-coral">
                         Your Nemesis
                       </span>
                       {personalDuels.nemesis ? (
@@ -1274,7 +1345,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                             <span className="block font-bold text-xs text-m3-on-surface truncate">
                               {personalDuels.nemesis.opponent.displayName}
                             </span>
-                            <span className="block text-[10px] font-mono font-bold text-m3-coral">
+                            <span className="block text-micro font-mono font-bold text-m3-coral">
                               {personalDuels.nemesis.deaths} Deaths vs {personalDuels.nemesis.kills} Kills
                             </span>
                           </div>
@@ -1286,7 +1357,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
 
                     {/* Prey / Dominated */}
                     <div className="p-3 rounded-xl bg-m3-mint/10 border border-m3-mint/30 flex flex-col gap-1">
-                      <span className="text-[9px] font-bold uppercase tracking-wider text-m3-mint">
+                      <span className="text-micro font-bold uppercase tracking-wider text-m3-mint">
                         Most Dominated
                       </span>
                       {personalDuels.prey ? (
@@ -1300,7 +1371,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                             <span className="block font-bold text-xs text-m3-on-surface truncate">
                               {personalDuels.prey.opponent.displayName}
                             </span>
-                            <span className="block text-[10px] font-mono font-bold text-m3-mint">
+                            <span className="block text-micro font-mono font-bold text-m3-mint">
                               {personalDuels.prey.kills} Kills vs {personalDuels.prey.deaths} Deaths
                             </span>
                           </div>
@@ -1314,7 +1385,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                   {/* Opening Duels (First Bloods) */}
                   <div className="p-3 rounded-xl bg-m3-surface-container-high border border-m3-outline-subtle/50 flex items-center justify-between">
                     <div>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-m3-outline block">
+                      <span className="text-micro font-bold uppercase tracking-wider text-m3-outline block">
                         Opening Duels (First Bloods)
                       </span>
                       <span className="font-display font-extrabold text-xs text-m3-on-surface mt-0.5 block">
@@ -1322,7 +1393,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                       </span>
                     </div>
                     <div className="text-right">
-                      <span className="text-[10px] text-m3-outline font-medium block">
+                      <span className="text-micro text-m3-outline font-medium block">
                         Blue FB Conversion
                       </span>
                       <span className="font-mono font-black text-sm text-m3-mint">
@@ -1336,7 +1407,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                 <div className="rounded-2xl border border-m3-outline-subtle bg-m3-surface-container p-4 flex flex-col gap-3">
                   <div className="text-[11px] font-bold uppercase tracking-wider text-m3-outline flex items-center justify-between">
                     <span>Round Win Conditions</span>
-                    <span className="text-m3-outline font-mono text-[10px]">
+                    <span className="text-m3-outline font-mono text-micro">
                       {detail.rounds.length} Total Rounds
                     </span>
                   </div>
@@ -1367,14 +1438,14 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                   {/* Weapon Kill Distribution */}
                   {weaponKills.length > 0 && (
                     <div className="pt-2 border-t border-m3-outline-subtle/40">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-m3-outline block mb-1.5">
+                      <span className="text-micro font-bold uppercase tracking-wider text-m3-outline block mb-1.5">
                         Arsenal Kill Distribution
                       </span>
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {weaponKills.slice(0, 6).map((w) => (
                           <span
                             key={w.name}
-                            className="px-2.5 py-1 rounded-lg bg-m3-surface-container-highest border border-m3-outline-subtle text-[10px] font-mono font-bold flex items-center gap-1.5"
+                            className="px-2.5 py-1 rounded-lg bg-m3-surface-container-highest border border-m3-outline-subtle text-micro font-mono font-bold flex items-center gap-1.5"
                           >
                             <span className="text-m3-on-surface">{w.name}</span>
                             <span className="text-m3-primary">({w.count})</span>

@@ -1,5 +1,8 @@
-/* Server-driven broadcasts + usage pulse. No hardcoded messages, no tracking
- * beyond one heartbeat per launch (riot id + timestamp + version).
+import { isPulseOptIn } from './consent';
+
+/* Server-driven broadcasts + opt-in usage pulse. The pulse carries the Riot
+ * ID, so it is OFF unless the player enabled it (consent.ts `isPulseOptIn`);
+ * `sendPulse` is the single gate, so no caller can bypass it.
  *
  * Notices ride a JSON file in this repo (CDN-cached, editable by commit):
  *   ops/notices.json
@@ -75,8 +78,10 @@ export function dismissNotice(id: string): void {
   } catch {}
 }
 
-/** One heartbeat per launch. Fire-and-forget: never awaited, never retried. */
+/** One heartbeat per launch, only after the player opted in. Fire-and-forget:
+ *  never awaited, never retried. */
 export function sendPulse(riotId: string | null, version: string): void {
+  if (!isPulseOptIn()) return;
   try {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), 5000);

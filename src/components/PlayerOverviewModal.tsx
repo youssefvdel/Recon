@@ -1,10 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Copy, Check, Lock } from 'lucide-react';
-import { ScoreBadge, scoreTier } from './ScoreBadge';
-import { fetchTrnActStats, fetchTrnAgents, isTrnPrivateError, isTrnCaptcha, trnNegativeKind, type TrnActStats, type TrnAgentStat } from '../utils/trn';
-import { fetchMmrDirect, gameData, getCachedLivePlayerStats } from '../utils/tracker';
-import { getCountryName, getTrackerUrls, TRN_PRIVATE_TOOLTIP } from '../utils/playerDisplay';
+import { X, Copy, Check } from 'lucide-react';
+import { actStateFor, fetchLocalActStats, fetchMmrDirect } from '../utils/tracker';
+import type { ActAggregate } from '../utils/actStats';
+import { getCountryName, getTrackerUrls } from '../utils/playerDisplay';
 import { openExternalUrl } from '../utils/ipc';
 import type { TrackerProfile } from '../types';
 
@@ -45,106 +44,116 @@ interface Props {
   onViewFullProfile?: (name: string, tag: string) => void;
 }
 
+/** Difficulty of the local act read, named so the copy can be exact. */
+type ActFail = ReturnType<typeof actStateFor> | '';
+
+/* Player detail modal, opened explicitly from the scoreboard.
+ *
+ * Data path (2026-11): the act numbers come from the LOCAL Riot client, not
+ * tracker.gg (Warden captcha killed that source). The explicit open is the one
+ * place allowed to scan a full act during a live game — hence allowAct: true;
+ * no automatic caller may copy that option.
+ *
+ * Honesty: ActAggregate only carries games / K/D / ACS / win%. ADR, HS%,
+ * KAST, Tracker Score and per-agent splits are NOT computed from local data,
+ * so this modal does not render them at all — it does not print guesses. */
 export const PlayerOverviewModal: React.FC<Props> = ({
   player,
-  seasonId,
   onClose,
   onViewFullProfile,
 }) => {
-  const [trnStats, setTrnStats] = useState<TrnActStats | null>(null);
-  const [trnAgents, setTrnAgents] = useState<TrnAgentStat[]>([]);
-  const [agentIconMap, setAgentIconMap] = useState<Record<string, string>>({});
+  const [act, setAct] = useState<ActAggregate | null>(null);
   const [mmrProfile, setMmrProfile] = useState<TrackerProfile | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [isPrivate, setIsPrivate] = useState(false);
-  /** Why the act panel is empty, when we can name it. Never "private" unless
-   *  TRN actually proved it — a local Riot failure is not a locked profile. */
-  const [failKind, setFailKind] = useState<'captcha' | 'rate-limited' | 'too-long' | 'local' | ''>('');
+  const [failKind, setFailKind] = useState<ActFail>('');
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    gameData().then((d) => {
-      const map: Record<string, string> = {};
-      Object.values(d.agentInfo).forEach((a) => {
-        map[a.name.toLowerCase()] = a.icon;
-      });
-      setAgentIconMap(map);
-    }).catch(() => {});
-  }, []);
+  const puuid = player?.puuid ?? '';
+  const name = player?.name ?? '';
+  const tag = player?.tag ?? '';
+  const isMe = player?.isMe === true;
 
   useEffect(() => {
-    if (!player || !player.name || player.name === player.agent) {
-      setTrnStats(null);
-      setTrnAgents([]);
+    if (!puuid) {
+      setAct(null);
       setMmrProfile(null);
-      setIsPrivate(false);
+      setFailKind('');
       return;
     }
-
     let active = true;
     setIsLoading(true);
-    setIsPrivate(false);
     setFailKind('');
-
-    const name = player.name;
-    const tag = player.tag || '';
-
-    // MMR (rank + RR) comes from the LOCAL client's session, so it is only
-    // valid for the logged-in player — never fetch it for lobby opponents.
-    const mmrJob = player.isMe
-      ? fetchMmrDirect('eu', name, tag)
-      : Promise.resolve(null);
-    Promise.allSettled([
-      fetchTrnActStats(name, tag, seasonId),
-      fetchTrnAgents(name, tag, seasonId || ''),
-      mmrJob,
-    ]).then(([trnRes, agentsRes, mmrRes]) => {
+    void (async () => {
+      const [mmrRes, actRes] = await Promise.allSettled([
+        // Rank + RR belong to the logged-in player only; lobby opponents
+        // already carry their rank on the row.
+        isMe ? fetchMmrDirect('eu', name, tag) : Promise.resolve(null),
+        fetchLocalActStats(
+          { puuid, region: 'eu', queue: 'competitive' },
+          { allowAct: true }
+        ),
+      ]);
       if (!active) return;
-      if (trnRes.status === 'fulfilled') {
-        setTrnStats(trnRes.value.stats);
+      setMmrProfile(mmrRes.status === 'fulfilled' ? mmrRes.value : null);
+      if (actRes.status === 'fulfilled') {
+        setAct(actRes.value);
+        setFailKind('');
       } else {
-        setTrnStats(null);
-        const reason = String(
-          trnRes.reason instanceof Error ? trnRes.reason.message : trnRes.reason
+        setAct(null);
+        setFailKind(
+          actStateFor(String(actRes.reason instanceof Error ? actRes.reason.message : actRes.reason))
         );
-        // Proven private (fresh 451 or registry) → lock panel, not spinner/error.
-        if (isTrnPrivateError(trnRes.reason) || trnNegativeKind(name, tag) === 'private') {
-          setIsPrivate(true);
-        } else if (isTrnCaptcha(reason)) {
-          setFailKind('captcha');
-        } else if (reason.includes('TRN_RATE_LIMITED') || reason.includes(' 429')) {
-          setFailKind('rate-limited');
-        } else if (getCachedLivePlayerStats(player.puuid)?.actState === 'too-long') {
-          // The local read worked; the act is simply bigger than we will page.
-          setFailKind('too-long');
-        } else {
-          // Local Riot read failed / no readable act window. NOT private data.
-          setFailKind('local');
-        }
-      }
-      if (agentsRes.status === 'fulfilled') {
-        setTrnAgents(agentsRes.value);
-      } else {
-        setTrnAgents([]);
-      }
-      if (mmrRes.status === 'fulfilled') {
-        setMmrProfile(mmrRes.value);
-      } else {
-        setMmrProfile(null);
       }
       setIsLoading(false);
-    });
-
+    })();
     return () => {
       active = false;
     };
-  }, [player, seasonId]);
+  }, [puuid, name, tag, isMe]);
+
+  /* Modal a11y: labelled dialog, Esc closes, Tab is trapped, focus returns. */
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = React.useId();
+  useEffect(() => {
+    if (!player) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const node = dialogRef.current;
+    node?.focus();
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab' || !node) return;
+      const focusable = Array.from(
+        node.querySelectorAll<HTMLElement>(
+          'button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((el) => !el.hasAttribute('disabled'));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const activeEl = document.activeElement;
+      if (e.shiftKey && (activeEl === first || activeEl === node)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && activeEl === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('keydown', onKey, true);
+      previous?.focus?.();
+    };
+  }, [player, onClose]);
 
   if (!player) return null;
 
   // Strict: RR + local rank belong to the logged-in player only (player.isMe
   // is set from puuid match at open time — never by name comparison).
-  const isMe = player.isMe === true;
   const currentRank = player.rankName || (isMe ? mmrProfile?.rank : undefined) || 'Unranked';
   const currentRr = isMe ? mmrProfile?.rr ?? 0 : 0;
   const countryName = getCountryName(player.country);
@@ -158,6 +167,15 @@ export const PlayerOverviewModal: React.FC<Props> = ({
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
   };
+
+  const failReason =
+    failKind === 'too-long'
+      ? 'This act has more games than one local scan can cover — act numbers are hidden rather than shown from a partial window.'
+      : failKind === 'timeout'
+        ? 'The local Riot client took too long to answer — reopen this player in a moment.'
+        : failKind === 'incomplete'
+          ? 'This act could not be read completely, so no act numbers are shown.'
+          : 'Could not read this player\'s act stats from the local Riot client.';
 
   return (
     <AnimatePresence>
@@ -173,11 +191,16 @@ export const PlayerOverviewModal: React.FC<Props> = ({
 
         {/* Modal Container (Google Material 3) */}
         <motion.div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          tabIndex={-1}
           initial={{ opacity: 0, scale: 0.96, y: 10 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 10 }}
           transition={{ duration: 0.2, ease: 'easeOut' }}
-          className="relative w-full max-w-2xl rounded-3xl bg-m3-surface-container-low border border-m3-outline-subtle shadow-m3-3 overflow-hidden flex flex-col z-10 max-h-[90vh]"
+          className="relative w-full max-w-2xl rounded-3xl bg-m3-surface-container-low border border-m3-outline-subtle shadow-m3-3 overflow-hidden flex flex-col z-10 max-h-[90vh] focus:outline-none"
         >
           {/* Header */}
           <div className="p-5 border-b border-m3-outline-subtle bg-m3-surface-container flex items-center justify-between gap-4">
@@ -201,7 +224,7 @@ export const PlayerOverviewModal: React.FC<Props> = ({
               {/* Name & Tag */}
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h3 className="font-display font-black text-lg text-m3-on-surface truncate">
+                  <h3 id={titleId} className="font-display font-black text-lg text-m3-on-surface truncate">
                     {player.name}
                   </h3>
                   {player.tag && (
@@ -215,6 +238,7 @@ export const PlayerOverviewModal: React.FC<Props> = ({
                       onClick={handleCopyRiotId}
                       className="p-1 rounded-md hover:bg-white/10 text-m3-outline hover:text-white cursor-pointer transition-colors"
                       data-tip={copied ? 'Copied!' : `Copy ${player.name}#${player.tag}`}
+                      aria-label={copied ? 'Riot ID copied' : `Copy ${player.name}#${player.tag}`}
                     >
                       {copied ? <Check className="w-3.5 h-3.5 text-m3-mint" /> : <Copy className="w-3.5 h-3.5" />}
                     </button>
@@ -254,7 +278,7 @@ export const PlayerOverviewModal: React.FC<Props> = ({
                     type="button"
                     onClick={() => openExternalUrl(trackerUrls.trn)}
                     className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-white/5 hover:bg-[#b6abf7]/25 hover:text-[#b6abf7] border border-white/10 text-zinc-300 transition-colors cursor-pointer"
-                    data-tip="Open on Tracker.gg (TRN)"
+                    data-tip="Open this player's external Tracker.gg page"
                   >
                     TRN
                   </button>
@@ -283,6 +307,7 @@ export const PlayerOverviewModal: React.FC<Props> = ({
               <button
                 type="button"
                 onClick={onClose}
+                aria-label="Close player overview"
                 className="w-8 h-8 rounded-full bg-m3-surface-container-high hover:bg-m3-surface-bright text-m3-outline hover:text-m3-on-surface flex items-center justify-center transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -296,7 +321,12 @@ export const PlayerOverviewModal: React.FC<Props> = ({
             <div className="rounded-2xl bg-m3-surface-container-low border border-m3-outline-subtle p-4">
               <div className="text-[10px] font-bold uppercase tracking-wider text-m3-outline mb-3 flex items-center justify-between">
                 <span>Match Scoreboard Snapshot</span>
-                <span className="text-m3-primary font-mono font-bold">TRS: {player.trs}{player.trsEstimated ? " (est.)" : ""}</span>
+                {player.trs > 0 && (
+                  <span className="text-m3-primary font-mono font-bold">
+                    TRS: {player.trs}
+                    {player.trsEstimated ? ' (est.)' : ''}
+                  </span>
+                )}
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
                 <div className="p-2.5 rounded-xl bg-m3-surface-container border border-m3-outline-subtle/50">
@@ -326,115 +356,59 @@ export const PlayerOverviewModal: React.FC<Props> = ({
               </div>
             </div>
 
-            {/* Act-Wide TRN Overview */}
+            {/* This Act — read from the local Riot client */}
             {isLoading ? (
               <div className="p-8 rounded-2xl bg-m3-surface-container-low border border-m3-outline-subtle text-center text-xs text-m3-outline">
                 <div className="w-6 h-6 border-2 border-m3-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-                <span>Fetching act statistics for {player.name}...</span>
+                <span>Reading this act from the local Riot client…</span>
               </div>
-            ) : trnStats ? (
+            ) : act ? (
               <div className="rounded-2xl bg-m3-surface-container-low border border-m3-outline-subtle p-4 flex flex-col gap-4">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-[10px] font-bold uppercase tracking-wider text-m3-outline">
-                      Act-Wide Competitive Stats
+                      This Act — Local Riot Client
                     </div>
                     <div className="font-display font-black text-base text-m3-on-surface mt-0.5">
-                      {trnStats.wins}W - {trnStats.losses}L ({trnStats.winPct.toFixed(1)}% Win Rate)
+                      {act.games} {act.games === 1 ? 'game' : 'games'}
+                      {act.winPct != null ? ` · ${act.winPct.toFixed(0)}% Win Rate` : ''}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <ScoreBadge tier={scoreTier(trnStats.trnScore).tier} size={36} />
-                    <div>
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-m3-outline">
-                        Tracker Score
-                      </div>
-                      <div className="font-display font-extrabold text-sm text-m3-on-surface">
-                        {trnStats.trnScore} / 1,000
-                      </div>
-                    </div>
-                  </div>
+                  <span className="text-[10px] font-mono text-m3-outline text-right">
+                    current act only
+                  </span>
                 </div>
 
-                {/* Metric Strip */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs font-mono">
-                  <div className="p-2 rounded-xl bg-m3-surface-container border border-m3-outline-subtle/40">
-                    <div className="text-[10px] text-m3-outline uppercase font-semibold">Damage/Round</div>
-                    <div className="font-bold text-sm text-m3-on-surface mt-0.5">{trnStats.adr.toFixed(1)}</div>
-                  </div>
+                <div className="grid grid-cols-3 gap-2 text-center text-xs font-mono">
                   <div className="p-2 rounded-xl bg-m3-surface-container border border-m3-outline-subtle/40">
                     <div className="text-[10px] text-m3-outline uppercase font-semibold">K/D Ratio</div>
-                    <div className={`font-bold text-sm mt-0.5 ${trnStats.kd >= 1 ? 'text-m3-mint' : 'text-m3-coral'}`}>
-                      {trnStats.kd.toFixed(2)}
+                    <div className={`font-bold text-sm mt-0.5 ${act.kd != null && act.kd >= 1 ? 'text-m3-mint' : act.kd != null ? 'text-m3-coral' : 'text-m3-outline'}`}>
+                      {act.kd != null ? act.kd.toFixed(2) : '—'}
                     </div>
                   </div>
                   <div className="p-2 rounded-xl bg-m3-surface-container border border-m3-outline-subtle/40">
-                    <div className="text-[10px] text-m3-outline uppercase font-semibold">Headshot %</div>
-                    <div className="font-bold text-sm text-m3-on-surface mt-0.5">{trnStats.hsPct.toFixed(1)}%</div>
+                    <div className="text-[10px] text-m3-outline uppercase font-semibold">ACS</div>
+                    <div className="font-bold text-sm text-m3-on-surface mt-0.5">
+                      {act.acs != null ? act.acs.toFixed(1) : '—'}
+                    </div>
                   </div>
                   <div className="p-2 rounded-xl bg-m3-surface-container border border-m3-outline-subtle/40">
-                    <div className="text-[10px] text-m3-outline uppercase font-semibold">KAST</div>
-                    <div className="font-bold text-sm text-m3-on-surface mt-0.5">{trnStats.kast.toFixed(1)}%</div>
+                    <div className="text-[10px] text-m3-outline uppercase font-semibold">Win Rate</div>
+                    <div className="font-bold text-sm text-m3-on-surface mt-0.5">
+                      {act.winPct != null ? `${act.winPct.toFixed(0)}%` : '—'}
+                    </div>
                   </div>
                 </div>
 
-                {/* Top Agents Played */}
-                {trnAgents.length > 0 && (
-                  <div className="pt-2 border-t border-m3-outline-subtle/40 flex flex-col gap-2">
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-m3-outline flex items-center justify-between">
-                      <span>Top Agents This Act</span>
-                      <span className="text-[10px] font-mono text-m3-outline">{trnAgents.length} Agents</span>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      {trnAgents.slice(0, 3).map((ag) => {
-                        const icon = agentIconMap[ag.agent.toLowerCase()];
-                        return (
-                          <div
-                            key={ag.agent}
-                            className="p-2 rounded-xl bg-m3-surface-container border border-m3-outline-subtle/50 flex items-center gap-2"
-                          >
-                            {icon ? (
-                              <img src={icon} alt={ag.agent} className="w-8 h-8 rounded-lg object-cover border border-m3-outline-subtle shrink-0" />
-                            ) : (
-                              <div className="w-8 h-8 rounded-lg bg-m3-surface-container-highest flex items-center justify-center font-bold text-xs shrink-0">
-                                {ag.agent.slice(0, 2)}
-                              </div>
-                            )}
-                            <div className="min-w-0 flex-1 leading-tight">
-                              <span className="block font-bold text-xs text-m3-on-surface truncate">
-                                {ag.agent}
-                              </span>
-                              <div className="flex items-center gap-1.5 text-[10px] font-mono mt-0.5">
-                                <span className={ag.winPct >= 50 ? 'text-m3-mint font-bold' : 'text-m3-coral font-bold'}>
-                                  {ag.winPct.toFixed(0)}% WR
-                                </span>
-                                <span className="text-m3-outline">•</span>
-                                <span className="text-m3-outline">{ag.kd.toFixed(2)} KD</span>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : isPrivate ? (
-              <div className="p-6 rounded-2xl bg-m3-surface-container-low border border-m3-outline-subtle text-center text-xs text-m3-outline flex flex-col items-center gap-2">
-                <Lock className="w-5 h-5 text-zinc-400" />
-                <span data-tip={TRN_PRIVATE_TOOLTIP}>Private tracker profile — sign in on tracker.gg to make it public.</span>
+                <p className="text-[10px] text-m3-outline leading-snug">
+                  Computed only from matches your local Riot client could read for this act. A value it
+                  could not prove stays <span className="font-mono">—</span> — never filled with a guess.
+                  Headshot %, KAST and Tracker Score are not in the local payload, so they are not shown.
+                </p>
               </div>
             ) : (
               <div className="p-6 rounded-2xl bg-m3-surface-container-low border border-m3-outline-subtle text-center text-xs text-m3-outline">
-                {failKind === 'captcha'
-                  ? 'tracker.gg needs a one-time verification — press Verify in the banner, then reopen this player.'
-                  : failKind === 'rate-limited'
-                    ? 'tracker.gg is rate-limiting right now — these stats return on their own.'
-                    : failKind === 'too-long'
-                      ? 'Act stats not computed — this act has more games than a local scan covers.'
-                      : failKind === 'local'
-                        ? 'Act stats could not be read from the local Riot client for this player.'
-                        : 'Act stats are not available for this player.'}
+                {failReason}
               </div>
             )}
           </div>

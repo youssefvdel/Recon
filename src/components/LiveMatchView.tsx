@@ -45,12 +45,17 @@ import {
   getPartyStyle,
   splitTeams,
   byAcsDesc,
-  TRN_PRIVATE_TOOLTIP,
-  TRN_PENDING_TOOLTIP,
-  TRN_UNAVAILABLE_TOOLTIP,
 } from '../utils/playerDisplay';
 import { isTauri, openExternalUrl } from '../utils/ipc';
 import { listen } from '@tauri-apps/api/event';
+
+/* Dash / pending cell wording for the LOCAL-Riot path. The shared TRN_*
+ * constants still promise tracker.gg, which stopped serving data on
+ * 2026-11-02; these say what actually happened to the cell. */
+const LIVE_PENDING_TIP = 'Reading from the local Riot client…';
+const LIVE_UNAVAILABLE_TIP = 'Not read yet — the local Riot client has no value for this cell';
+const LIVE_PRIVATE_TIP = 'This player hides their profile from Riot';
+const TS_RETIRED_TIP = 'Tracker Score is retired — tracker.gg stopped serving it (Nov 2026). Rank, ACS, K/D and Win% still fill from the local Riot client.';
 
 /* In-app Live Match page.
 
@@ -555,14 +560,18 @@ const PlayerTable: React.FC<{
         <span>Player</span>
         <span className="text-center" data-tip="External tracker pages for this player">Links</span>
         <span className="text-center" data-tip="Equipped weapon skins & cosmetics">Skins</span>
-        <span className="text-center" data-tip="Tracker Score tier">TS</span>
+        <span className="text-center" data-tip={TS_RETIRED_TIP}>TS</span>
         <span className="text-left pl-1">Rank</span>
         <span className="text-left pl-1" data-tip="Peak rank — the act it was earned in is shown under the emblem">Peak</span>
         <span className="text-right" data-tip="Act-wide average combat score — the column this board is sorted by">ACS</span>
         <span className="text-right" data-tip="Act-wide K/D (Riot exposes no live kill data)">K/D</span>
         <span className="text-right" data-tip="Act-wide win rate">Win%</span>
-        <span className="text-right" data-tip="Act-wide headshot %">HS%</span>
+        <span className="text-right" data-tip="Act-wide headshot % — not available from the local Riot client yet">HS%</span>
         <span className="text-right">Lvl</span>
+      </div>
+      {/* One-line legend: the dash and the dot must never be a mystery. */}
+      <div className="px-2 pb-0.5 text-[8.5px] font-mono text-m3-outline/80 uppercase tracking-wider">
+        — not fetched yet · ● fetching
       </div>
 
       <div className="flex flex-col gap-1.5 overflow-hidden shrink-0">
@@ -601,7 +610,7 @@ const PlayerRow: React.FC<{
   // users read "locked", not "broken". Rank/peak/level are Riot-local and stay.
   const locked = p.isTrnPrivate === true;
   const lockCell = (
-    <span data-tip={TRN_PRIVATE_TOOLTIP} className="inline-flex items-center justify-center text-zinc-500">
+    <span data-tip={LIVE_PRIVATE_TIP} className="inline-flex items-center justify-center text-zinc-500">
       <Lock className="w-2.5 h-2.5" />
     </span>
   );
@@ -611,12 +620,13 @@ const PlayerRow: React.FC<{
   // majority of cells in a fresh lobby.
   const trnBlank = (state: LiveMatchPlayer['trnState']) =>
     state === 'pending' ? (
-      <span data-tip={TRN_PENDING_TOOLTIP} className="inline-flex items-center justify-center">
+      <span data-tip={LIVE_PENDING_TIP} className="inline-flex items-center justify-center">
         <span className="block h-[3px] w-[3px] rounded-full bg-m3-outline/60" />
       </span>
     ) : (
-      <span className="text-m3-outline" data-tip={state === 'unavailable' ? TRN_UNAVAILABLE_TOOLTIP : undefined}>
-        —
+      <span className="text-m3-outline" data-tip={LIVE_UNAVAILABLE_TIP}>
+        <span aria-hidden="true">—</span>
+        <span className="sr-only">{LIVE_UNAVAILABLE_TIP}</span>
       </span>
     );
   const party = getPartyStyle(p.partyIndex);
@@ -739,7 +749,7 @@ const PlayerRow: React.FC<{
             {p.isTrnPrivate && (
               <span
                 className="flex items-center px-1 py-px rounded bg-white/5 text-zinc-400 border border-white/10 shrink-0"
-                data-tip={TRN_PRIVATE_TOOLTIP}
+                data-tip={LIVE_PRIVATE_TIP}
               >
                 <Lock className="w-2.5 h-2.5" />
               </span>
@@ -816,8 +826,8 @@ const PlayerRow: React.FC<{
           p.trnScore != null
             ? `Tracker Score: ${p.trnScore} / 1000 — Tier ${scoreTier(p.trnScore).tier}`
             : p.trnState === 'pending'
-            ? TRN_PENDING_TOOLTIP
-            : 'Tracker Score unavailable'
+            ? LIVE_PENDING_TIP
+            : TS_RETIRED_TIP
         }
       >
         {p.trnScore != null ? (
@@ -909,7 +919,7 @@ const PlayerRow: React.FC<{
       </div>
 
       {/* 11. Account level */}
-      <div className="text-right font-mono text-[9.5px] text-m3-outline" data-tip="Account level">
+      <div className="text-right font-mono text-[9.5px] text-m3-outline" data-tip={p.accountLevel > 0 ? 'Account level' : 'Account level not read yet'}>
         {p.accountLevel > 0 ? p.accountLevel : '—'}
       </div>
     </div>

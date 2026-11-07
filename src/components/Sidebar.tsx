@@ -199,7 +199,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             type="button"
             onClick={() => onSelectTab('settings')}
             data-tip={hasUpdate ? "New update available — click to open Settings" : `Recon v${appVer}`}
-            className={`shrink-0 relative px-2.5 py-0.5 text-[10px] font-mono font-semibold rounded-full flex items-center gap-1.5 transition-all cursor-pointer ${
+            aria-label={hasUpdate ? `Recon ${appVer}, update available` : `Recon ${appVer}`}
+            className={`shrink-0 relative px-2.5 py-0.5 text-micro font-mono font-semibold rounded-full flex items-center gap-1.5 transition-all cursor-pointer ${
               hasUpdate
                 ? 'text-m3-on-primary bg-m3-primary shadow-sm hover:opacity-90'
                 : 'text-m3-primary bg-m3-primary-container/50 hover:bg-m3-primary/20 border border-m3-primary/40'
@@ -209,9 +210,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span className="w-1.5 h-1.5 rounded-full bg-m3-on-primary" />
             )}
             <span>v{appVer}</span>
-            {hasUpdate && (
-              <span className="text-[9px] uppercase font-bold tracking-wider">UPDATE</span>
-            )}
           </button>
         </div>
 
@@ -221,7 +219,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Navigation Tabs List (Clean M3 Navigation Rail with Pill Items) */}
-        <nav className="px-3 pt-1 space-y-1">
+        <nav className="px-3 pt-1 space-y-1" aria-label="Main sections">
           {allTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive =
@@ -234,6 +232,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 key={tab.id}
                 onClick={() => onSelectTab(tab.id)}
+                aria-current={isActive ? 'page' : undefined}
+                aria-label={
+                  tab.id === 'chat' && chatUnread > 0
+                    ? `Riot Chat, ${chatUnread > 99 ? '99+' : chatUnread} unread`
+                    : undefined
+                }
                 className={`relative w-full group flex items-center justify-between px-3 py-2 rounded-full text-left transition-all duration-150 cursor-pointer ${
                   isActive
                     ? 'bg-m3-primary-container text-m3-on-primary-container shadow-m3-1'
@@ -257,7 +261,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 </div>
                 {tab.id === 'chat' && chatUnread > 0 && (
-                  <span className="ml-2 px-1.5 rounded-full bg-m3-primary text-m3-on-primary text-[10px] font-bold shrink-0">
+                  <span className="ml-2 px-1.5 rounded-full bg-m3-primary text-m3-on-primary text-micro font-bold shrink-0">
                     {chatUnread > 99 ? '99+' : chatUnread}
                   </span>
                 )}
@@ -276,7 +280,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span>Active Display</span>
             </span>
             <span
-              className={`text-[10px] font-mono font-semibold uppercase px-2 py-0.5 rounded-full whitespace-nowrap leading-relaxed ${
+              className={`text-micro font-mono font-semibold uppercase px-2 py-0.5 rounded-full whitespace-nowrap leading-relaxed ${
                 isStretched
                   ? 'bg-m3-tertiary text-m3-on-tertiary shadow-sm'
                   : 'bg-m3-surface-container-high text-m3-secondary border border-m3-outline-subtle'

@@ -10,8 +10,12 @@ import {
   fetchLiveMatchState,
   fetchMmrDirect,
   gameData,
+  getRiotClientDetail,
+  getRiotClientStatus,
   isRiotClientRunning,
   readCachedAccount,
+  subscribeRiotClientStatus,
+  type RiotClientStatus,
   shortMapName,
   type AggStats,
 } from '../utils/tracker';
@@ -113,6 +117,12 @@ export interface TrackerData {
   ready: boolean;
   hasCached: boolean;
   clientClosed: boolean;
+  /** TRUE state of the local Riot client (ux-gaps #2). `clientClosed` only says
+   *  "we showed the closed chrome"; this says WHY: ok / locked-out / crashed /
+   *  not-running. Views should render their message from this. */
+  riotClient: RiotClientStatus;
+  /** One short human line for riotClient; '' when ok. */
+  riotClientDetail: string;
   banner: string | null;
   setBanner: (m: string | null) => void;
   refresh: () => Promise<void>;
@@ -135,6 +145,13 @@ function updateStore(partial: Partial<TrackerData>) {
   }
   emitStore();
 }
+
+/* Mirror the Riot-client status into the store so every view already
+ * subscribed to TrackerData gets it with no extra hook. The tracker module
+ * owns the truth and emits on change; this runs once at module load. */
+subscribeRiotClientStatus(() => {
+  updateStore({ riotClient: getRiotClientStatus(), riotClientDetail: getRiotClientDetail() });
+});
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
@@ -175,6 +192,8 @@ function initStore(): TrackerData {
     ready: hasData,
     hasCached: hasData,
     clientClosed: false,
+    riotClient: getRiotClientStatus(),
+    riotClientDetail: getRiotClientDetail(),
     banner: null,
     setBanner: (m: string | null) => updateStore({ banner: m }),
     refresh: triggerGlobalRefresh,

@@ -7,6 +7,12 @@ html, body {
   padding: 0;
 }
 
+/* Native controls (select popups, date pickers, scrollbars) follow the theme.
+   Without this, Windows renders the 4 <select> menus light on a dark app. */
+html {
+  color-scheme: dark;
+}
+
 /* Smooth scrolling everywhere — wheel, touch, and programmatic scrolls. */
 html {
   scroll-behavior: smooth;
@@ -225,5 +231,21 @@ input[type='color'].m3-color::-moz-color-swatch {
   .m3-modal-backdrop,
   .m3-modal-panel {
     animation-duration: 0.01ms;
+  }
+}
+
+/* Reduced motion for everything that is not a dialog: smooth scrolling and
+   the skeleton pulse. Framer animations are gated in JS by MotionConfig
+   reducedMotion="user" (App.tsx, owned by another task). */
+@media (prefers-reduced-motion: reduce) {
+  html,
+  .custom-scrollbar,
+  .overflow-y-auto,
+  .overflow-x-auto,
+  .overflow-auto {
+    scroll-behavior: auto !important;
+  }
+  .animate-pulse {
+    animation: none !important;
   }
 }

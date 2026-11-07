@@ -10,6 +10,8 @@ import { HistorySkeletons } from './TrackerSkeletons';
 import { CustomDropdown } from './ValorantConfig';
 import { MatchDetailModal } from './MatchDetailModal';
 import { ScoreBadge, scoreTier } from './ScoreBadge';
+import { StatValue } from './StatValue';
+import { formatKd, formatPct } from '../utils/format';
 
 const ago = (ms: number): string => {
   if (!ms) return '';
@@ -83,7 +85,7 @@ const countClutch = (detail: TrackerMatchDetail, puuid: string): { won: number; 
 
 const Pill: React.FC<{ label: string; tone: 'gold' | 'red' }> = ({ label, tone }) => (
   <span
-    className={`px-1.5 py-px rounded-md text-[10px] font-bold border whitespace-nowrap ${
+    className={`px-1.5 py-px rounded-md text-micro font-bold border whitespace-nowrap ${
       tone === 'gold'
         ? 'bg-m3-tertiary/10 border-m3-tertiary/40 text-m3-tertiary'
         : 'bg-m3-coral/10 border-m3-coral/40 text-m3-coral'
@@ -99,7 +101,7 @@ const Stat: React.FC<{ label: string; children: React.ReactNode; className?: str
   width = 'w-12',
 }) => (
   <div className={`flex flex-col items-center shrink-0 ${width} ${className}`}>
-    <span className="text-[9px] font-bold uppercase tracking-wider text-m3-outline whitespace-nowrap">{label}</span>
+    <span className="text-micro font-bold uppercase tracking-wider text-m3-outline whitespace-nowrap">{label}</span>
     <span className="text-[14px] font-mono font-bold tabular-nums whitespace-nowrap">{children}</span>
   </div>
 );
@@ -142,6 +144,9 @@ const MatchRow: React.FC<{
   }, [r.detail]);
   const tips = useMemo(() => (r.detail && puuid ? buildTips(r.detail, puuid) : []), [r.detail, puuid]);
   const kd = r.d > 0 ? r.k / r.d : r.k;
+  /* No detail means "not fetched", not "zero kills". Every stat cell below
+     checks this before rendering a number (docs/audit/ui.md #1). */
+  const hasDetail = !!r.detail;
 
   const pills: { label: string; tone: 'gold' | 'red' }[] = [];
   if (r.k3 > 0) {
@@ -174,13 +179,15 @@ const MatchRow: React.FC<{
       className={`rounded-xl border overflow-hidden ${
         r.won ? 'bg-m3-mint/[0.07] border-m3-mint/25' : 'bg-m3-surface-container border-m3-outline-subtle'
       }`}>
-      <button
-        onClick={() => {
-          if (r.detail) onOpenModal();
-        }}
-        className={`w-full px-2.5 py-2 flex items-center gap-2.5 text-left ${
-          r.detail ? 'cursor-pointer hover:bg-m3-surface-container-high/30' : ''
-        }`}>
+      <div className="flex items-stretch">
+        <button
+          onClick={() => {
+            if (r.detail) onOpenModal();
+          }}
+          aria-haspopup={r.detail ? 'dialog' : undefined}
+          className={`flex-1 min-w-0 px-2.5 py-2 flex items-center gap-2.5 text-left ${
+            r.detail ? 'cursor-pointer hover:bg-m3-surface-container-high/30' : ''
+          }`}>
         <span className={`w-1 self-stretch rounded-full shrink-0 ${r.won ? 'bg-m3-mint' : 'bg-m3-coral/70'}`} />
         {icon ? (
           <img src={icon} alt={r.agent} className="w-9 h-9 rounded-lg object-cover bg-m3-surface-container-high shrink-0" />
@@ -190,13 +197,13 @@ const MatchRow: React.FC<{
 
         {/* Map + mode + placement */}
         <div className="w-32 sm:w-40 shrink-0 min-w-0">
-          <div className="text-[10px] text-m3-outline truncate">
+          <div className="text-micro text-m3-outline truncate">
             {ago(r.g.when)} // {queue}
           </div>
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="text-[15px] font-display font-extrabold text-m3-on-surface truncate">{map}</span>
             {r.place > 0 && (
-              <span className="text-[9px] font-mono font-bold text-m3-outline border border-m3-outline-subtle rounded px-1 py-px shrink-0">
+              <span className="text-micro font-mono font-bold text-m3-outline border border-m3-outline-subtle rounded px-1 py-px shrink-0">
                 {ordinal(r.place)}
               </span>
             )}
@@ -214,17 +221,21 @@ const MatchRow: React.FC<{
 
         {/* Score */}
         <div className="flex flex-col items-center shrink-0 w-16">
-          <span className="text-[9px] font-bold uppercase tracking-wider text-m3-outline">Score</span>
-          <span className="text-[15px] font-mono font-extrabold tabular-nums whitespace-nowrap">
-            <span className="text-m3-mint">{r.us}</span>
-            <span className="text-m3-outline"> : </span>
-            <span className="text-m3-coral">{r.them}</span>
-          </span>
+          <span className="text-micro font-bold uppercase tracking-wider text-m3-outline">Score</span>
+          {hasDetail ? (
+            <span className="text-[15px] font-mono font-extrabold tabular-nums whitespace-nowrap">
+              <span className="text-m3-mint">{r.us}</span>
+              <span className="text-m3-outline"> : </span>
+              <span className="text-m3-coral">{r.them}</span>
+            </span>
+          ) : (
+            <StatValue reason="Score not fetched yet" className="text-[15px]" />
+          )}
         </div>
 
         {/* TRS */}
         <div className="flex-col items-center shrink-0 w-12 hidden md:flex">
-          <span className="text-[9px] font-bold uppercase tracking-wider text-m3-outline">TRS</span>
+          <span className="text-micro font-bold uppercase tracking-wider text-m3-outline">TRS</span>
           <div
             className="flex items-center justify-center h-6 cursor-default"
             data-tip={
@@ -237,11 +248,11 @@ const MatchRow: React.FC<{
               <span className="flex items-baseline gap-0.5">
                 <ScoreBadge tier={scoreTier(r.trs).tier} size={22} />
                 {r.trsEstimated && (
-                  <span className="text-[7px] font-bold uppercase text-m3-outline">est.</span>
+                  <span className="text-micro font-bold uppercase text-m3-outline">est.</span>
                 )}
               </span>
             ) : (
-              <span className="text-[10px] font-mono text-m3-outline">—</span>
+              <StatValue reason="Tracker Rating unavailable for this match" />
             )}
           </div>
         </div>
@@ -259,55 +270,88 @@ const MatchRow: React.FC<{
         {/* Stat columns */}
         <div className="hidden sm:flex items-center gap-2 md:gap-3 lg:gap-4 shrink-0">
           <Stat label="K/D" width="w-12">
-            <span className={kd >= 1 ? 'text-m3-mint' : 'text-m3-coral'}>{kd.toFixed(1)}</span>
+            {hasDetail ? (
+              <span className={kd >= 1 ? 'text-m3-mint' : 'text-m3-coral'}>{formatKd(kd)}</span>
+            ) : (
+              <StatValue reason="Match detail not fetched yet" />
+            )}
           </Stat>
           <Stat label="K/D/A" width="w-[84px]">
-            <span className="text-m3-on-surface">
-              {r.k} <span className="text-m3-outline">/</span> {r.d} <span className="text-m3-outline">/</span> {r.a}
-            </span>
+            {hasDetail ? (
+              <span className="text-m3-on-surface">
+                {r.k} <span className="text-m3-outline">/</span> {r.d} <span className="text-m3-outline">/</span> {r.a}
+              </span>
+            ) : (
+              <StatValue reason="Match detail not fetched yet" />
+            )}
           </Stat>
           <Stat label="DDΔ" width="w-14">
-            <span className={r.dd >= 0 ? 'text-m3-mint' : 'text-m3-coral'}>
-              {r.dd > 0 ? `+${r.dd}` : r.dd}
-            </span>
+            {hasDetail ? (
+              <span className={r.dd >= 0 ? 'text-m3-mint' : 'text-m3-coral'}>
+                {r.dd > 0 ? `+${r.dd}` : r.dd}
+              </span>
+            ) : (
+              <StatValue reason="Match detail not fetched yet" />
+            )}
           </Stat>
           <Stat label="HS%" width="w-12" className="hidden lg:flex">
-            <span className="text-m3-on-surface">{r.hsPct > 0 ? Math.round(r.hsPct) : '—'}</span>
+            {hasDetail ? (
+              r.hsPct > 0 ? (
+                <span className="text-m3-on-surface">{formatPct(r.hsPct, 1)}</span>
+              ) : (
+                <StatValue reason="No hit data recorded for this match" />
+              )
+            ) : (
+              <StatValue reason="Match detail not fetched yet" />
+            )}
           </Stat>
           <Stat label="ACS" width="w-12">
-            <span className="text-m3-on-surface">{r.acs}</span>
+            {hasDetail ? (
+              <span className="text-m3-on-surface">{r.acs}</span>
+            ) : (
+              <StatValue reason="Match detail not fetched yet" />
+            )}
           </Stat>
         </div>
 
         {/* Mobile compact */}
         <div className="sm:hidden ml-auto shrink-0 text-right">
-          <div className="text-[13px] font-mono font-bold text-m3-on-surface tabular-nums">
-            {r.k}/{r.d}/{r.a}
-          </div>
-          <div className="text-[10px] font-mono text-m3-outline">ACS {r.acs}</div>
+          {hasDetail ? (
+            <>
+              <div className="text-[13px] font-mono font-bold text-m3-on-surface tabular-nums">
+                {r.k}/{r.d}/{r.a}
+              </div>
+              <div className="text-micro font-mono text-m3-outline">ACS {r.acs}</div>
+            </>
+          ) : (
+            <StatValue reason="Match detail not fetched yet" className="text-[13px]" />
+          )}
         </div>
 
-        <span
-          role="button"
-          onClick={(e) => {
-            e.stopPropagation();
+        </button>
+        <button
+          type="button"
+          onClick={() => {
             if (r.detail) onToggle();
           }}
-          className="text-m3-outline hover:text-m3-on-surface p-1 rounded-md text-sm leading-none shrink-0 select-none cursor-pointer"
+          disabled={!r.detail}
+          aria-expanded={r.detail ? open : undefined}
+          aria-label={open ? 'Collapse match summary' : 'Expand match summary'}
+          className="shrink-0 px-2 text-m3-outline hover:text-m3-on-surface disabled:opacity-40 disabled:cursor-default cursor-pointer text-sm leading-none select-none"
         >
           {open ? '▾' : '⋮'}
-        </span>
-      </button>
+        </button>
+      </div>
 
       {open && r.detail && (
         <div className="px-2.5 pb-2.5 pt-1 border-t border-m3-outline-subtle/50">
-          <div className="flex items-center gap-2 px-1 py-1.5 text-[10px] font-mono text-m3-outline">
+          <div className="flex items-center gap-2 px-1 py-1.5 text-micro font-mono text-m3-outline">
             <span>
               {r.g.change > 0 ? `+${r.g.change}` : r.g.change} RR
             </span>
             <span>•</span>
             <span>
-              HS {r.hsPct > 0 ? `${r.hsPct.toFixed(1)}%` : '—'}
+              HS {r.hsPct > 0 ? formatPct(r.hsPct, 1) : '—'}
             </span>
             <span>•</span>
             <span>KAST {r.kast}%</span>
@@ -322,7 +366,7 @@ const MatchRow: React.FC<{
           </div>
           {teams.map((t) => (
             <div key={t.team} className="mt-1.5">
-              <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-m3-outline mb-1">
+              <div className="text-micro font-bold uppercase tracking-[0.12em] text-m3-outline mb-1">
                 Team {t.team} • {t.score}
               </div>
               {t.players.map((p) => {
@@ -344,6 +388,7 @@ const MatchRow: React.FC<{
                         onClick={(e) => handleCopyPlayer(e, p)}
                         className="p-0.5 rounded hover:bg-white/10 text-m3-outline hover:text-white transition-colors cursor-pointer shrink-0"
                         data-tip={copiedKey === (p.puuid || p.name || p.agent) ? 'Copied!' : `Copy ${p.name || p.agent}${p.tag ? '#' + p.tag : ''}`}
+                        aria-label={copiedKey === (p.puuid || p.name || p.agent) ? 'Copied' : `Copy ${p.name || p.agent}${p.tag ? '#' + p.tag : ''}`}
                       >
                         {copiedKey === (p.puuid || p.name || p.agent) ? (
                           <Check className="w-2.5 h-2.5 text-emerald-400" />
@@ -363,7 +408,7 @@ const MatchRow: React.FC<{
           {tips.length > 0 && (
             <div className="mt-2 rounded-lg bg-m3-tertiary/10 border border-m3-tertiary/30 p-2 space-y-1">
               {tips.map((t, i) => (
-                <div key={i} className="flex items-start gap-1.5 text-[10px] text-m3-tertiary/90 leading-snug">
+                <div key={i} className="flex items-start gap-1.5 text-micro text-m3-tertiary/90 leading-snug">
                   <Lightbulb className="w-3 h-3 shrink-0 mt-px" />
                   <span>{t}</span>
                 </div>
@@ -512,11 +557,16 @@ export const MatchHistory: React.FC = () => {
     let d = 0;
     let dmg = 0;
     let rds = 0;
+    // Aggregates count only matches whose detail arrived; a missing detail
+    // must not drag the summary K/D toward zero.
+    let withStats = 0;
     for (const r of rows) {
       if (r.won) w++;
+      if (!r.detail) continue;
+      withStats++;
       k += r.k;
       d += r.d;
-      const me = r.detail?.players.find((p) => p.puuid === puuid);
+      const me = r.detail.players.find((p) => p.puuid === puuid);
       if (me) {
         dmg += me.damage;
         rds += me.rounds;
@@ -527,6 +577,7 @@ export const MatchHistory: React.FC = () => {
       l: rows.length - w,
       kd: d > 0 ? k / d : k,
       adr: rds > 0 ? dmg / rds : 0,
+      withStats,
     };
   }, [rows, puuid]);
 
@@ -563,19 +614,23 @@ export const MatchHistory: React.FC = () => {
       let hs = 0;
       let hits = 0;
       let dmg = 0;
+      let dmgTaken = 0;
       let rds = 0;
+      let withStats = 0;
       for (const r of rs) {
         if (r.won) w++;
-        k += r.k;
-        d += r.d;
-        a += r.a;
-        const me = r.detail?.players.find((p) => p.puuid === puuid);
-        if (me) {
-          hs += me.headshots;
-          hits += me.headshots + me.bodyshots + me.legshots;
-          dmg += me.damage;
-          rds += me.rounds;
-        }
+        if (!r.detail) continue;
+        withStats++;
+        const me = r.detail.players.find((p) => p.puuid === puuid);
+        if (!me) continue;
+        k += me.kills;
+        d += me.deaths;
+        a += me.assists;
+        hs += me.headshots;
+        hits += me.headshots + me.bodyshots + me.legshots;
+        dmg += me.damage;
+        dmgTaken += me.damageTaken;
+        rds += me.rounds;
       }
       return {
         label,
@@ -585,9 +640,10 @@ export const MatchHistory: React.FC = () => {
         kd: d > 0 ? k / d : k,
         kda: `${k}K // ${d}D // ${a}A`,
         kdaNum: d + a > 0 ? (k + a) / Math.max(1, d) : k + a,
-        dd: dmg - rs.reduce((s, r) => s + (r.detail?.players.find((p) => p.puuid === puuid)?.damageTaken ?? 0), 0),
+        dd: dmg - dmgTaken,
         hsPct: hits > 0 ? (hs / hits) * 100 : 0,
         acs: rds > 0 ? Math.round(dmg / rds) : 0,
+        withStats,
       };
     });
   }, [rows, puuid]);
@@ -614,6 +670,11 @@ export const MatchHistory: React.FC = () => {
   return (
     <div className="h-full min-h-0 max-w-6xl mx-auto w-full overflow-y-auto custom-scrollbar px-4 sm:px-6 py-3.5 pb-8">
       <div className="flex flex-col gap-3">
+        <header className="shrink-0 px-1">
+          <h1 className="font-display font-black text-xl text-m3-on-surface tracking-tight">Match History</h1>
+          <p className="text-xs text-m3-outline mt-0.5">Competitive matches, newest first</p>
+        </header>
+
         {banner && (
           <div className="p-2.5 rounded-xl bg-m3-primary-container/40 border border-m3-primary/40 text-m3-on-primary-container text-xs font-semibold flex items-center justify-between shrink-0">
             <div className="flex items-center space-x-2">
@@ -655,10 +716,12 @@ export const MatchHistory: React.FC = () => {
                   <span className="text-m3-mint">{sum.w}W</span>
                   <span className="text-m3-outline"> - </span>
                   <span className="text-m3-coral">{sum.l}L</span>
-                  <span className="text-m3-outline text-sm"> ({Math.round(sumWr)}%)</span>
+                  <span className="text-m3-outline text-sm"> ({formatPct(sumWr, 0)})</span>
                 </div>
-                <div className="text-[11px] font-mono font-bold text-m3-mint mt-0.5 whitespace-nowrap">
-                  {sum.kd.toFixed(2)} K/D | {Math.round(sum.adr)} ADR
+                <div className="text-micro font-mono font-bold text-m3-mint mt-0.5 whitespace-nowrap">
+                  {sum.withStats > 0
+                    ? `${formatKd(sum.kd)} K/D | ${Math.round(sum.adr)} ADR`
+                    : '— K/D | — ADR'}
                 </div>
               </div>
               <div className="flex items-stretch gap-2 ml-auto flex-wrap">
@@ -673,9 +736,9 @@ export const MatchHistory: React.FC = () => {
                       ) : null}
                       <div className="min-w-0">
                         <div className="text-[12px] font-bold text-m3-on-surface whitespace-nowrap tabular-nums">
-                          {a.w}W - {a.n - a.w}L ({Math.round(a.wr)}%)
+                          {a.w}W - {a.n - a.w}L ({formatPct(a.wr, 0)})
                         </div>
-                        <div className="text-[10px] font-mono text-m3-outline">K/D {a.kd.toFixed(2)}</div>
+                        <div className="text-micro font-mono text-m3-outline">K/D {formatKd(a.kd)}</div>
                       </div>
                       <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-m3-outline-subtle/50">
                         <span className="block h-full bg-m3-mint" style={{ width: `${Math.round(a.wr)}%` }} />
@@ -688,13 +751,19 @@ export const MatchHistory: React.FC = () => {
           </section>
         )}
 
+        {rows.some((r) => !r.detail) && (
+          <p className="px-1 text-micro text-m3-outline">
+            — = match detail not fetched yet · open that match to load its scoreboard
+          </p>
+        )}
+
         {/* Day groups */}
         {days.map((day) => {
           return (
             <div key={day.label} className="flex flex-col gap-2 shrink-0">
               <div className="flex items-center gap-2 sm:gap-3 px-1 flex-wrap">
                 <span className="text-[13px] font-display font-bold text-m3-on-surface">{day.label}</span>
-                <span className="text-[10px] font-mono font-bold text-m3-outline bg-m3-surface-container-high border border-m3-outline-subtle rounded-md px-1.5 py-px">
+                <span className="text-micro font-mono font-bold text-m3-outline bg-m3-surface-container-high border border-m3-outline-subtle rounded-md px-1.5 py-px">
                   {day.rs.length}
                 </span>
                 <span className="text-[13px] font-display font-extrabold mx-auto">
@@ -704,24 +773,42 @@ export const MatchHistory: React.FC = () => {
                 </span>
                 <span className="ml-auto hidden xl:flex items-center gap-4">
                   <Stat label="K/D">
-                    <span className={day.kd >= 1 ? 'text-m3-mint' : 'text-m3-coral'}>{day.kd.toFixed(1)}</span>
+                    {day.withStats > 0 ? (
+                      <span className={day.kd >= 1 ? 'text-m3-mint' : 'text-m3-coral'}>{formatKd(day.kd)}</span>
+                    ) : (
+                      <StatValue reason="No match details for this day yet" />
+                    )}
                   </Stat>
                   <span className="flex flex-col items-center">
-                    <span className="text-[10px] font-mono text-m3-outline whitespace-nowrap">{day.kda}</span>
+                    <span className="text-micro font-mono text-m3-outline whitespace-nowrap">
+                      {day.withStats > 0 ? day.kda : '—'}
+                    </span>
                     <span className="text-[13px] font-mono font-bold text-m3-on-surface tabular-nums">
-                      {day.kdaNum.toFixed(2)} K/D/A
+                      {day.withStats > 0 ? `${day.kdaNum.toFixed(2)} K/D/A` : '— K/D/A'}
                     </span>
                   </span>
                   <Stat label="DDΔ">
-                    <span className={day.dd >= 0 ? 'text-m3-mint' : 'text-m3-coral'}>
-                      {day.dd > 0 ? `+${day.dd}` : day.dd}
-                    </span>
+                    {day.withStats > 0 ? (
+                      <span className={day.dd >= 0 ? 'text-m3-mint' : 'text-m3-coral'}>
+                        {day.dd > 0 ? `+${day.dd}` : day.dd}
+                      </span>
+                    ) : (
+                      <StatValue reason="No match details for this day yet" />
+                    )}
                   </Stat>
                   <Stat label="HS%">
-                    <span className="text-m3-on-surface">{Math.round(day.hsPct)}</span>
+                    {day.withStats > 0 ? (
+                      <span className="text-m3-on-surface">{formatPct(day.hsPct, 0)}</span>
+                    ) : (
+                      <StatValue reason="No match details for this day yet" />
+                    )}
                   </Stat>
                   <Stat label="ACS">
-                    <span className="text-m3-on-surface">{day.acs}</span>
+                    {day.withStats > 0 ? (
+                      <span className="text-m3-on-surface">{day.acs}</span>
+                    ) : (
+                      <StatValue reason="No match details for this day yet" />
+                    )}
                   </Stat>
                 </span>
               </div>
@@ -753,8 +840,25 @@ export const MatchHistory: React.FC = () => {
           );
         })}
 
+        {profile && !isLoading && rows.length === 0 && (
+          <div className="p-6 rounded-2xl bg-m3-surface-container border border-m3-outline-subtle text-center text-xs text-m3-outline shrink-0">
+            <p>No competitive matches match these filters.</p>
+            {(agentFilter !== 'All' || mapFilter !== 'All') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setAgentFilter('All');
+                  setMapFilter('All');
+                }}
+                className="mt-2 text-m3-primary font-bold hover:underline cursor-pointer">
+                Clear filters
+              </button>
+            )}
+          </div>
+        )}
+
         {!profile && !isLoading && (
-          <div className="p-4 rounded-xl bg-m3-surface-container-high/40 border border-m3-outline-subtle text-center text-[11px] text-m3-on-surface-variant shrink-0">
+          <div className="p-4 rounded-xl bg-m3-surface-container-high/40 border border-m3-outline-subtle text-center text-micro text-m3-on-surface-variant shrink-0">
             Open the Riot Client and this tab fills itself — matches, scoreboards, roles, weapons.
           </div>
         )}

@@ -167,11 +167,9 @@ export const TopBar: React.FC<TopBarProps> = ({
     }
   });
   const [showClove, setShowClove] = useState(false);
-  const [dodgeOffset, setDodgeOffset] = useState({ x: 0, y: 0 });
-  const [dodgeCount, setDodgeCount] = useState(0);
   const [liveActive, setLiveActive] = useState(false);
 
-  // Live-match shortcut: surface a jump pill next to APIs Ready while a
+  // Live-match shortcut: surface a jump pill next to the stats pill while a
   // pregame/coregame lobby exists. Driven by the shared live-match sync bus.
   useEffect(() => {
     let alive = true;
@@ -244,21 +242,25 @@ export const TopBar: React.FC<TopBarProps> = ({
     };
   }, []);
 
-  const handleXDodge = () => {
-    if (dodgeCount < 3) {
-      setDodgeCount((c) => c + 1);
-      // Playfully jump/scramble away from the cursor
-      const randX = (Math.random() > 0.5 ? 1 : -1) * (26 + Math.floor(Math.random() * 30));
-      const randY = (Math.random() > 0.5 ? 1 : -1) * (18 + Math.floor(Math.random() * 22));
-      setDodgeOffset({ x: randX, y: randY });
-    }
-  };
-
+  // Dismiss the support popover like a real popover: Escape or a click
+  // outside. The close button stays still (it used to dodge the cursor).
   useEffect(() => {
-    if (showClove) {
-      setDodgeOffset({ x: 0, y: 0 });
-      setDodgeCount(0);
-    }
+    if (!showClove) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowClove(false);
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (cloveRef.current?.contains(target) || coffeeBtnRef.current?.contains(target)) return;
+      setShowClove(false);
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('pointerdown', onPointerDown);
+    };
   }, [showClove]);
 
   // Option A: delayed milestone trigger (3 minutes after app start)
@@ -387,7 +389,7 @@ export const TopBar: React.FC<TopBarProps> = ({
       data-tauri-drag-region
       onMouseDown={handleStartDrag}
       onDoubleClick={handleToggle}
-      className="h-14 px-4 sm:px-6 border-b border-m3-outline-subtle bg-m3-surface/85 backdrop-blur-md flex items-center justify-between shrink-0 select-none z-20 cursor-default relative"
+      className="h-14 px-4 sm:px-6 border-b border-m3-outline-subtle bg-m3-surface flex items-center justify-between shrink-0 select-none z-20 cursor-default relative"
     >
       {/* Active Section Info */}
       <div
@@ -422,29 +424,30 @@ export const TopBar: React.FC<TopBarProps> = ({
           <button
             type="button"
             onClick={handleGotoLive}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/15 border border-red-400/50 text-red-300 text-[10px] font-mono font-bold cursor-pointer hover:bg-red-500/25 active:scale-95 transition-all"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/15 border border-red-400/50 text-red-300 text-micro font-mono font-bold cursor-pointer hover:bg-red-500/25 active:scale-95 transition-all"
             data-tip="Live match in progress — jump to Live Match tab"
           >
             <span className="inline-flex rounded-full h-1.5 w-1.5 bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.9)]" />
             <span>LIVE</span>
           </button>
         )}
-        {/* API Health Indicator (Tracker OFF setting only — cooldowns stay invisible) */}
+        {/* Stats indicator. It reflects the dev kill-switch only, so it says
+            exactly that instead of claiming tracker.gg is reachable. */}
         {!trackerOn ? (
           <div
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-500/15 border border-zinc-400/40 text-zinc-300 text-[10px] font-mono font-bold"
-            data-tip="Tracker kill-switch is OFF (Dev QA page) — TRN requests throw immediately, no network. Distinct from rate-limit cooling."
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-500/15 border border-zinc-400/40 text-zinc-300 text-micro font-mono font-bold"
+            data-tip="External stat lookups are disabled (developer kill-switch in the Dev QA page)."
           >
             <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
-            <span>Tracker OFF</span>
+            <span>Stats off</span>
           </div>
         ) : (
           <div
-            className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-m3-surface-container border border-m3-outline-subtle text-[9.5px] font-mono text-m3-outline"
-            data-tip="All external APIs (TRN, Blitz & Riot) are connected and healthy"
+            className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-m3-surface-container border border-m3-outline-subtle text-micro font-mono text-m3-outline"
+            data-tip="External stat lookups are allowed. This does not confirm tracker.gg is reachable right now."
           >
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            <span>APIs Ready</span>
+            <span>Stats on</span>
           </div>
         )}
 
@@ -528,22 +531,21 @@ export const TopBar: React.FC<TopBarProps> = ({
               className="relative flex items-end gap-3 filter drop-shadow-[0_16px_32px_rgba(0,0,0,0.65)]"
             >
               {/* Left: Speech Bubble */}
-              <div className="relative w-64 bg-m3-surface-container-high/95 border border-m3-outline-subtle rounded-3xl p-3.5 shadow-2xl backdrop-blur-md flex flex-col gap-2.5">
+              <div className="relative w-64 bg-m3-surface-container-high/95 border border-m3-outline-subtle rounded-3xl p-3.5 shadow-2xl flex flex-col gap-2.5">
                 {/* Speech Bubble Arrow pointing RIGHT toward Clove's mouth */}
                 <div className="absolute bottom-6 -right-1.5 w-3.5 h-3.5 bg-m3-surface-container-high border-t border-r border-m3-outline-subtle transform rotate-45 z-10" />
 
-                {/* Close X button that playfully runs away / dodges on hover */}
-                <motion.button
+                {/* Static close button. It used to run away from the cursor,
+                    which made the only dismiss control hard to hit; Escape and
+                    outside click also close the popover now. */}
+                <button
                   onClick={handleSnooze}
-                  onMouseEnter={handleXDodge}
-                  animate={{ x: dodgeOffset.x, y: dodgeOffset.y }}
-                  transition={{ type: 'spring', stiffness: 600, damping: 18 }}
                   className="absolute top-2.5 right-2.5 w-6 h-6 rounded-full bg-m3-surface-container border border-m3-outline hover:bg-rose-600 hover:border-rose-500 hover:text-white text-m3-on-surface flex items-center justify-center transition-colors cursor-pointer shadow-sm z-30"
-                  data-tip={dodgeCount < 3 ? "Catch me if you can! 😝" : "Dismiss (snooze 7 days)"}
+                  data-tip="Dismiss (snooze 7 days)"
                   aria-label="Dismiss"
                 >
                   <X className="w-3.5 h-3.5" />
-                </motion.button>
+                </button>
 
                 {/* Bubble Text */}
                 <div className="space-y-1 pr-7 text-left">
@@ -551,7 +553,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                     <span>Can you buy me a coffee?</span>
                     <span className="text-sm leading-none">🥺☕</span>
                   </h3>
-                  <p className="text-[10.5px] text-m3-outline leading-snug">
+                  <p className="text-micro text-m3-outline leading-snug">
                     Keeping Recon fast, free, and open-source for everyone!
                   </p>
                 </div>
@@ -568,18 +570,15 @@ export const TopBar: React.FC<TopBarProps> = ({
                 </div>
               </div>
 
-              {/* Right: Floating Clove sticker (comfortably below header, feet aligned with bubble) */}
-              <motion.div
-                animate={{ y: [0, -3, 0], rotate: [0, 1, 0] }}
-                transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
-                className="relative w-24 h-24 shrink-0 drop-shadow-[0_12px_24px_rgba(244,114,182,0.45)] flex items-center justify-center pointer-events-none self-end mb-1"
-              >
+              {/* Right: Floating Clove sticker (static; the perpetual bob cost
+                  frames for no information and is gone). */}
+              <div className="relative w-24 h-24 shrink-0 drop-shadow-[0_12px_24px_rgba(244,114,182,0.45)] flex items-center justify-center pointer-events-none self-end mb-1">
                 <img
                   src="/clove-coffee.png"
                   alt="Cute Clove"
                   className="w-full h-full object-contain"
                 />
-              </motion.div>
+              </div>
             </motion.div>
           </div>
         )}

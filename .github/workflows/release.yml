@@ -1,0 +1,94 @@
+name: Release Windows App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        shell: bash
+        run: bun install --frozen-lockfile
+
+      - name: Validate tag, version and signing secrets
+        shell: bash
+        env:
+          TAURI_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" != refs/tags/v* ]]; then
+            echo "::error::release.yml must run on a v* tag. Push one, or: gh workflow run release.yml --ref v0.5.0"
+            exit 1
+          fi
+          VERSION="${GITHUB_REF_NAME#v}"
+          PKG=$(node -p 'require("./package.json").version')
+          if [[ "$VERSION" != "$PKG" ]]; then
+            echo "::error::Tag v$VERSION does not match package.json version $PKG (use 'bun run bump')."
+            exit 1
+          fi
+          if [[ -z "${TAURI_KEY}" ]]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is not set; refusing to build an unsigned release."
+            exit 1
+          fi
+          git log -1 --pretty=%B > release-notes.md
+
+      - name: Build signed bundle
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: bunx tauri build
+
+      - name: Generate latest.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          bun scripts/make-latest-json.mjs "$VERSION" release-notes.md latest.json
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          B=src-tauri/target/release/bundle/nsis
+          ASSETS=(
+            "$B/Recon_${VERSION}_x64-setup.exe"
+            "$B/Recon_${VERSION}_x64-setup.exe.sig"
+            latest.json
+          )
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo "Release v${VERSION} already exists; replacing its assets (retry after a failed run)."
+            gh release upload "v${VERSION}" "${ASSETS[@]}" --clobber
+          else
+            gh release create "v${VERSION}" "${ASSETS[@]}" \
+              --title "Recon v${VERSION}" \
+              --notes-file release-notes.md \
+              --latest
+          fi

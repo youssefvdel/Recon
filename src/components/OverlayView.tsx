@@ -26,7 +26,9 @@ import {
 import { computeMapAgentStats, getRankTierLabel, type AgentStatSummary } from '../utils/mapMeta';
 import { fetchBlitzAgentStats, peekBlitzAgentStats, type BlitzAgentStat } from '../utils/blitzMeta';
 import { getOverlayEditMode, setOverlayEditMode, isTabDown, isTauri } from '../utils/ipc';
+import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { logger } from '../utils/logger';
 import { getPrepickConfig } from '../utils/prepick';
 
 export interface WidgetPos {
@@ -180,6 +182,25 @@ function persistOverlayConfig(next: OverlayConfig): void {
     localStorage.setItem(OVERLAY_CONFIG_STORAGE_KEY, JSON.stringify(next));
   } catch {
     /* Storage full or blocked: the in-memory config still applies this run. */
+  }
+}
+
+/* Overlay failures are shown inline for ~6 s, then gone — the window is
+ * click-through in-game, so the row cannot be dismissed and must not linger.
+ * The durable half: a capped ring of one-line records any diagnostics view can
+ * read later (key `recon_overlay_notices_v1`, newest last). */
+const OVERLAY_NOTICE_STORAGE_KEY = 'recon_overlay_notices_v1';
+const OVERLAY_NOTICE_MAX = 20;
+
+function persistOverlayNotice(text: string): void {
+  try {
+    const raw = localStorage.getItem(OVERLAY_NOTICE_STORAGE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    const list = Array.isArray(parsed) ? parsed.slice(-(OVERLAY_NOTICE_MAX - 1)) : [];
+    list.push({ at: new Date().toISOString(), text });
+    localStorage.setItem(OVERLAY_NOTICE_STORAGE_KEY, JSON.stringify(list));
+  } catch {
+    /* Storage blocked: the inline row and the logger still carry it. */
   }
 }
 
@@ -465,17 +486,29 @@ export const OverlayView: React.FC = () => {
 
   // Inline failure surface. Overlay IPC can fail (window gone, style call
   // refused, probe dead) and every caller used to swallow it: the HUD just
-  // silently missed data or refused to unlock. One dismissible row instead.
+  // silently missed data or refused to unlock. The row is click-through in
+  // game, so it cannot be dismissed there: it clears itself after 6 s and the
+  // durable record goes to `recon_overlay_notices_v1` for diagnostics.
   type OverlayNotice = { kind: 'command' | 'probe'; text: string };
   const [notice, setNotice] = useState<OverlayNotice | null>(null);
+  const lastNoticed = useRef<string | null>(null);
   const raiseNotice = useCallback((next: OverlayNotice) => {
-    // First failure wins until the player dismisses it — a broken probe every
-    // tick must not restart the banner or re-render the HUD 2x a second.
+    // First failure wins until it clears — a broken probe every tick must not
+    // restart the banner or re-render the HUD 2x a second.
     setNotice((prev) => prev ?? next);
+    if (lastNoticed.current === next.text) return;
+    lastNoticed.current = next.text;
+    logger.warn(`[overlay] ${next.text}`);
+    persistOverlayNotice(next.text);
   }, []);
   const clearNotice = useCallback((kind: OverlayNotice['kind']) => {
     setNotice((prev) => (prev && prev.kind === kind ? null : prev));
   }, []);
+  useEffect(() => {
+    if (!notice) return;
+    const id = setTimeout(() => setNotice(null), 6000);
+    return () => clearTimeout(id);
+  }, [notice]);
 
   // Widget config + positions (persisted)
   const [config, setConfig] = useState<OverlayConfig>(() => {
@@ -746,9 +779,6 @@ export const OverlayView: React.FC = () => {
     };
   }, []);
 
-  // Native DWM message handling strips non-client borders natively.
-  const forceRepaint = useCallback(() => {}, []);
-
   // Sync edit mode and config changes from main app
   useEffect(() => {
     getOverlayEditMode()
@@ -761,18 +791,13 @@ export const OverlayView: React.FC = () => {
           text: `Could not read HUD edit state (${String(e)}) — the overlay may capture clicks`,
         });
       });
-    // Fresh mounts (HMR reload, navigation, first show) start from a blank
-    // surface with nothing dirtying transparent regions — repaint now and
-    // once more after first paint settles, or stale white survives.
-    forceRepaint();
-    const mountRepaint = setTimeout(forceRepaint, 600);
     const unlistenEdit = listen<boolean>('overlay-edit-mode-changed', (event) => {
       setIsEditMode(event.payload);
-      forceRepaint();
     });
-    const unlistenCfg = listen<OverlayConfig>('overlay-config-changed', (event) => {
-      setConfig(event.payload);
-    });
+    // The real cross-window config path: both webviews share the WebView2
+    // profile, so a save in the main window fires a `storage` event here.
+    // The old `overlay-config-changed` Tauri listener is deleted — nothing in
+    // the app ever emitted that event, so it only looked like a sync path.
     const onStorage = (e: StorageEvent) => {
       if (e.key === 'recon_overlay_cfg_v7' && e.newValue) {
         try {
@@ -782,18 +807,11 @@ export const OverlayView: React.FC = () => {
       }
     };
     window.addEventListener('storage', onStorage);
-    // Resolution switches realloc DWM surfaces — repaint once it settles.
-    const unlistenDisp = listen<unknown>('display-mode-changed', () => {
-      setTimeout(forceRepaint, 350);
-    });
     return () => {
-      clearTimeout(mountRepaint);
       window.removeEventListener('storage', onStorage);
       unlistenEdit.then((fn) => fn()).catch(() => {});
-      unlistenCfg.then((fn) => fn()).catch(() => {});
-      unlistenDisp.then((fn) => fn()).catch(() => {});
     };
-  }, [forceRepaint, raiseNotice]);
+  }, [raiseNotice]);
 
   // Poll live match data ONLY when visible; idle backs off to ~1/3 rate
   // (agent select lasts ~60s+, so a 13s worst-case detect delay is fine).
@@ -1144,10 +1162,34 @@ export const OverlayView: React.FC = () => {
     !!config.showPrepick &&
     prepickArmed &&
     (isEditMode || (!isPregame && !isCoregame && !matchState?.isPreviousMatch));
+  // Audit overlay#4: tell Rust whether the HUD has content of its own right
+  // now. With `false` the daemon stops compositing the full-screen alpha layer
+  // for the whole match; its 100 ms guard thread still shows the layer while Tab
+  // is held, and the overlay is brought back the moment this flips true.
+  //
+  // The Tab peek is deliberately NOT part of this. Rust's guard owns that
+  // transition already, and reporting `present=true` for it would pin the layer
+  // on for up to the 2 s daemon tick after every Tab release — the opposite of
+  // the saving. Everything else that paints outside the peek must be listed.
+  const hudPresent =
+    isEditMode || pregameVisible || topAgentsVisible || prepickVisible || crosshairVisible;
+  const presentSent = useRef<boolean | null>(null);
   useEffect(() => {
-    const t = setTimeout(forceRepaint, 80);
+    // Debounced: phase transitions flip several gates at once and re-renders
+    // are frequent, but the backend only needs the settled value.
+    const t = setTimeout(() => {
+      if (presentSent.current === hudPresent) return;
+      presentSent.current = hudPresent;
+      if (!isTauri()) return;
+      // Rust names the argument `needed` (lib.rs: set_overlay_present(needed)),
+      // and Tauri matches JS keys to Rust parameter names — `{ present }` would
+      // fail with "missing required key needed" on every call.
+      invoke('set_overlay_present', { needed: hudPresent }).catch((e) => {
+        raiseNotice({ kind: 'command', text: `HUD layer switch failed (${String(e)})` });
+      });
+    }, 200);
     return () => clearTimeout(t);
-  }, [scoreVisible, pregameVisible, topAgentsVisible, prepickVisible, crosshairVisible, forceRepaint]);
+  }, [hudPresent, raiseNotice]);
 
   return (
     <div
@@ -1545,7 +1587,7 @@ export const OverlayView: React.FC = () => {
       {/* ============================================================ */}
       {/* WIDGET: Match Panel — agent select always on, in-match Tab-peek only */}
       {/* ============================================================ */}
-      {config.showLobby && showScorePanel && (
+      {scoreVisible && (
         <div
           ref={lobbyRef}
           onPointerDown={(e) => startDrag('lobby', e)}

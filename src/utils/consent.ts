@@ -1,13 +1,16 @@
 import { APP_VERSION } from './version';
 import { getRecentLogs, logger } from './logger';
 
-/* First-run consent + local-only crash opt-in. No backend exists: every
- * flag lives in localStorage, nothing is uploaded anywhere. The tracker
- * toggle is reused as the consent opt-out — there is intentionally no
- * second tracker flag. */
+/* Privacy flags, all localStorage. The only network feature that carries
+ * user data is the usage heartbeat (`ops.ts sendPulse`), and it is strictly
+ * opt-in — see `isPulseOptIn`. Everything else (updater, notices) is an
+ * anonymous GitHub GET. The tracker toggle is the data-source opt-out; there
+ * is intentionally no second tracker flag. */
 
 export const CONSENT_KEY = 'recon_consent_v1';
 export const CRASH_OPTIN_KEY = 'recon_crash_optin_v1';
+/** Usage heartbeat (Riot ID + version + timestamp, one POST per launch). */
+export const PULSE_OPTIN_KEY = 'recon_pulse_optin_v1';
 export const CRASH_EVENT = 'recon:crash-captured';
 export const CONSENT_EVENT = 'recon:open-consent';
 
@@ -39,6 +42,24 @@ export function setCrashOptIn(on: boolean): void {
   try {
     if (on) localStorage.setItem(CRASH_OPTIN_KEY, '1');
     else localStorage.removeItem(CRASH_OPTIN_KEY);
+  } catch {}
+}
+
+/** Usage heartbeat is strictly opt-in and OFF by default: the first-run
+ *  notice was removed, so nothing about the player may leave the PC until
+ *  they turn this on themselves (Settings → Data & privacy). */
+export function isPulseOptIn(): boolean {
+  try {
+    return localStorage.getItem(PULSE_OPTIN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function setPulseOptIn(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(PULSE_OPTIN_KEY, '1');
+    else localStorage.removeItem(PULSE_OPTIN_KEY);
   } catch {}
 }
 

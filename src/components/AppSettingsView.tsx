@@ -17,6 +17,7 @@ import {
   Edit3,
   Check,
   Coffee,
+  Trash2,
 } from 'lucide-react';
 import type { MonitorDevice } from '../types';
 import {
@@ -54,7 +55,7 @@ import {
 import { APP_VERSION, appVersion } from '../utils/version';
 import { listen } from '@tauri-apps/api/event';
 import { getRecentLogs } from '../utils/logger';
-import { isCrashOptIn, setCrashOptIn, CONSENT_EVENT } from '../utils/consent';
+import { isCrashOptIn, isPulseOptIn, setCrashOptIn, setPulseOptIn, CONSENT_EVENT } from '../utils/consent';
 
 interface AppSettingsViewProps {
   onUpdateStatusChange?: (hasUpdate: boolean, latestVersion: string) => void;
@@ -95,6 +96,8 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
 
   // Overlay state: window visibility and HUD edit/customization mode
   const [overlayOpen, setOverlayOpen] = useState(false);
+  /** Inline reason when an overlay command refuses (wave-1 Rust now returns Err). */
+  const [overlayStatus, setOverlayStatus] = useState<string | null>(null);
 
   // Diagnostics: log bundle + local-only crash opt-in. Nothing uploads.
   const [crashOn, setCrashOn] = useState<boolean>(() => {
@@ -105,11 +108,72 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
     }
   });
   const [logStatus, setLogStatus] = useState<string | null>(null);
+  const [pulseOn, setPulseOn] = useState<boolean>(() => {
+    try {
+      return isPulseOptIn();
+    } catch {
+      return false;
+    }
+  });
+  const [dataStatus, setDataStatus] = useState<string | null>(null);
 
   const flipCrashOptIn = (): void => {
     const next = !crashOn;
     setCrashOptIn(next);
     setCrashOn(next);
+  };
+
+  const flipPulseOptIn = (): void => {
+    const next = !pulseOn;
+    setPulseOptIn(next);
+    setPulseOn(next);
+  };
+
+  /** Stats caches written by the tracker/sidebar views. Settings, accounts and
+   *  the tracker kill-switch are deliberately NOT in this list. */
+  const CLEARABLE_PREFIXES = [
+    'recon_tracker_snapshot_v1',
+    'recon_live_player_stats_v2',
+    'recon_sidebar_mini_v2',
+    'recon_sidebar_mini',
+    'recon_trn_cooldown_until_v1',
+    'recon_notice_dismissed_',
+  ];
+
+  /** Clear cached stats without touching preferences. Returns entries/bytes. */
+  const clearCachedData = (): { keys: number; chars: number } => {
+    let keys = 0;
+    let chars = 0;
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (!key || !CLEARABLE_PREFIXES.some((p) => key.startsWith(p))) continue;
+        chars += (localStorage.getItem(key) ?? '').length;
+        localStorage.removeItem(key);
+        keys++;
+      }
+    } catch {
+      /* storage unavailable — the caller reports 0 cleared */
+    }
+    return { keys, chars };
+  };
+
+  const handleClearCachedData = (): void => {
+    const ok = window.confirm(
+      'Clear cached stats and lobby snapshots?\n\nThis removes locally cached stats, the live-lobby snapshot and any leftover tracker.gg cooldown. It does not touch your settings, accounts or login. Data refetches automatically.'
+    );
+    if (!ok) return;
+    const { keys, chars } = clearCachedData();
+    if (keys === 0) {
+      setDataStatus('Nothing to clear — the cache was already empty.');
+      return;
+    }
+    setDataStatus(
+      `Cleared ${keys} cached ${keys === 1 ? 'entry' : 'entries'} (${Math.max(1, Math.round(chars / 1024))} KB) — reloading to drop in-memory copies…`
+    );
+    // Module-level caches live in memory too; a reload is the only way to drop
+    // them without adding a reset API to every store.
+    setTimeout(() => window.location.reload(), 900);
   };
 
   const downloadLogs = (): void => {
@@ -143,8 +207,18 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
     getOverlayEditMode().then(setInEditMode).catch(() => {});
     try {
       const [mons, ovMon] = await Promise.all([fetchAllMonitors(), fetchOverlayMonitor()]);
-      setMonitors(mons.filter((m) => m.is_attached && !m.is_device_disabled));
-      setOverlayMonitorSel(ovMon || 'auto');
+      const attached = mons.filter((m) => m.is_attached && !m.is_device_disabled);
+      setMonitors(attached);
+      const saved = ovMon || 'auto';
+      if (saved !== 'auto' && !attached.some((m) => m.device_name === saved)) {
+        // A pinned monitor that disappeared is not silently dropped: fall back
+        // to Auto AND say so, instead of leaving a stale/blank picker.
+        setOverlayMonitorSel('auto');
+        setMonitorStatus('Saved monitor is disconnected — the HUD is back on the Valorant window (Auto).');
+        await setOverlayMonitor('auto').catch(() => {});
+      } else {
+        setOverlayMonitorSel(saved);
+      }
     } catch {
       /* Monitor list unavailable (dev browser) — picker stays on Auto. */
     }
@@ -365,6 +439,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
   };
 
   const handleToggleOverlay = async () => {
+    setOverlayStatus(null);
     try {
       const visible = await isOverlayVisible();
       if (visible) {
@@ -374,10 +449,15 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
         await showOverlay();
         setOverlayOpen(true);
       }
-    } catch {}
+    } catch (e) {
+      // Wave-1 Rust refuses when the overlay cannot be created/shown; say why.
+      setOverlayStatus(`Could not change the overlay: ${String(e)}`);
+      isOverlayVisible().then(setOverlayOpen).catch(() => {});
+    }
   };
 
   const handleToggleEditMode = async () => {
+    setOverlayStatus(null);
     try {
       const next = !inEditMode;
       await setOverlayEditMode(next);
@@ -386,7 +466,10 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
         await showOverlay();
         setOverlayOpen(true);
       }
-    } catch {}
+    } catch (e) {
+      setOverlayStatus(`Could not ${inEditMode ? 'lock' : 'unlock'} the HUD: ${String(e)}`);
+      getOverlayEditMode().then(setInEditMode).catch(() => {});
+    }
   };
 
   const autoDownloadingSame =
@@ -787,6 +870,19 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
               </button>
             </div>
 
+            {/* In-Game HUD exit chord — Esc can be swallowed by the game while
+                the overlay is NOACTIVATE, so the Rust-level chord is the one
+                guaranteed way out of edit mode. */}
+            <div className="px-3.5 sm:px-4 pb-1 -mt-1">
+              <p className="text-[11px] text-m3-outline leading-snug">
+                While the HUD is unlocked, <span className="font-mono font-bold text-m3-on-surface">Ctrl+Shift+H</span> always
+                leaves edit mode — even when the game owns the keyboard.
+              </p>
+              {overlayStatus && (
+                <p className="text-[11px] text-m3-coral font-medium mt-1 leading-snug">{overlayStatus}</p>
+              )}
+            </div>
+
             {/* In-Game Notifications */}
             <div className="p-3.5 sm:p-4 flex items-center justify-between gap-4">
               <div className="space-y-0.5">
@@ -897,7 +993,69 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
           </div>
         </div>
 
-        {/* Section 5: About & Repository */}
+        {/* Section 5: Data & Privacy */}
+        <div className="rounded-3xl bg-m3-surface-container border border-m3-outline-subtle p-5 sm:p-6 shadow-m3-1 flex flex-col space-y-4">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-2xl bg-m3-primary/10 border border-m3-primary/30 flex items-center justify-center text-m3-primary">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-sm sm:text-base font-bold text-m3-on-surface font-display">
+                Data & Privacy
+              </h2>
+              <p className="text-[11px] text-m3-outline">
+                Nothing about you leaves this PC unless you enable the heartbeat below.
+              </p>
+            </div>
+          </div>
+
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-m3-surface-container-lowest border border-m3-outline-subtle flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <div className="text-xs sm:text-sm font-semibold text-m3-on-surface">Usage heartbeat</div>
+              <div className="text-[11px] text-m3-outline">
+                One request per launch: Riot ID, app version and timestamp to the project's own server. Off by default.
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={pulseOn}
+              aria-label="Send the optional usage heartbeat"
+              onClick={flipPulseOptIn}
+              className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors shrink-0 ${
+                pulseOn ? 'bg-m3-primary' : 'bg-m3-surface-container-high'
+              }`}
+            >
+              <div
+                className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                  pulseOn ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-m3-surface-container-lowest border border-m3-outline-subtle flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <div className="text-xs sm:text-sm font-semibold text-m3-on-surface">Cached stats</div>
+              <div className="text-[11px] text-m3-outline">
+                Lobby snapshots, cached stats and any leftover tracker.gg cooldown. Settings and accounts stay.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleClearCachedData}
+              className="h-8 px-3 rounded-xl bg-m3-surface-container-high hover:bg-m3-surface-container-highest text-m3-on-surface text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Reset cached data</span>
+            </button>
+          </div>
+          {dataStatus && (
+            <p className="text-[11px] text-m3-primary font-medium leading-snug">{dataStatus}</p>
+          )}
+        </div>
+
+        {/* Section 6: About & Repository */}
         <div className="rounded-3xl bg-m3-surface-container-low border border-m3-outline-subtle p-5 sm:p-6 flex flex-col space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center space-x-2 text-xs font-semibold text-m3-on-surface">
