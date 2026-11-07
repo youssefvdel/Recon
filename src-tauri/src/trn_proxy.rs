@@ -104,17 +104,16 @@ const MAX_SLOT_CHARS: usize = 8_000_000;
 
 /// Idle teardown window for the proxy renderer.
 ///
-/// A hidden WebView2 window is still a full renderer process (~100MB), and
-/// without a deadline the window created by the very first TRN request of the
-/// session lives until the app exits. Five minutes is deliberate: it matches
-/// `TRN_DEAD_QUIET_MS` in `src/utils/trn.ts`, the window the TS layer already
-/// treats as "TRN is idle", so teardown can never fire while a ladder/cooldown
-/// is still in play. Shorter would thrash — each re-create forces a fresh
-/// navigation that has to re-earn Cloudflare clearance (up to the 10s
-/// `READINESS_TIMEOUT` park on the next fetch), which is strictly worse CPU
-/// than simply holding the window. Longer would just extend how long an idle
-/// install keeps the renderer alive, which is the cost this is here to remove.
-const PROXY_IDLE_TTL: Duration = Duration::from_secs(5 * 60);
+/// A hidden WebView2 window is still a full renderer process (~100 MB, and the
+/// repo's own perf sample measured that class at ~5.6% CPU while alive). With
+/// the local-Riot path shipped, this window is a COLD fallback: it exists only
+/// for the rare TRN request that the local path could not answer. Holding a
+/// resident renderer for minutes after one such attempt is the overhead the
+/// audit named; 60 s is long enough to serve a burst of retries and short
+/// enough that a cold session reclaims the renderer quickly. Re-creating costs
+/// one navigation plus the readiness park (≤10 s) on a call that would
+/// otherwise be cold anyway.
+const PROXY_IDLE_TTL: Duration = Duration::from_secs(60);
 
 /// Visible verification window: the one place a human can clear tracker.gg's
 /// Warden captcha (the hidden window can never solve one). Created with the
@@ -1985,11 +1984,11 @@ mod tests {
 
     #[test]
     fn idle_ttl_outlasts_an_active_trn_window() {
-        // Matches TRN_DEAD_QUIET_MS in src/utils/trn.ts: teardown must never
-        // land inside a ladder/cooldown the TS layer still considers active.
-        assert_eq!(PROXY_IDLE_TTL, Duration::from_secs(5 * 60));
-        // Re-create cost is a fresh navigation + Cloudflare re-clearance, so
-        // a TTL below the readiness budget would guarantee thrash.
+        // Wave-1 audit perf #5: the proxy is a cold fallback now (local Riot
+        // answers the common case), so the idle renderer is reclaimed after a
+        // minute instead of five. It must still outlast one readiness park, or
+        // every fetch would recreate a renderer it is about to use.
+        assert_eq!(PROXY_IDLE_TTL, Duration::from_secs(60));
         assert!(PROXY_IDLE_TTL > READINESS_TIMEOUT);
     }
 

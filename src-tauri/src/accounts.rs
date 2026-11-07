@@ -812,6 +812,12 @@ pub async fn account_switch(app: tauri::AppHandle, id: String) -> Result<SwitchR
     if id.contains(['/', '\\', '.', ':']) || id.is_empty() || id.len() > 128 {
         return Err("Invalid account.".to_string());
     }
+    // Audit ux-gaps#3: the updater already refuses to act mid-match; the
+    // account switch used to kill Riot Client + VALORANT unconditionally and
+    // hand the player a leaver penalty. Check BEFORE the kill ritual.
+    if let Some(blocker) = live_match_blocker().await {
+        return Err(blocker);
+    }
     tauri::async_runtime::spawn_blocking(move || {
         let snap = vault_root(&app)?.join(&id);
         if !snap.is_dir() {
@@ -938,4 +944,136 @@ pub async fn account_launch_client() -> Result<(), String> {
     })
     .await
     .map_err(|e| format!("Task failed: {}", e))?
+}
+
+/// Refuse an account switch while a VALORANT match is live (audit ux-gaps#3).
+///
+/// Reads the same signal the UI uses (`sessionLoopState` in the local presence
+/// blob: PREGAME / INGAME). No game process -> nothing to protect. Game process
+/// up but presences unreadable -> refuse rather than gamble: killing a live
+/// match costs a leaver penalty, and the switch can be retried in a moment.
+async fn live_match_blocker() -> Option<String> {
+    let game_running =
+        process_running("VALORANT.exe") || process_running("VALORANT-Win64-Shipping.exe");
+    if !game_running {
+        return None;
+    }
+    match live_match_phase().await {
+        Ok(Some(phase)) => Some(format!(
+            "A match is live ({phase}) — finish it before switching accounts."
+        )),
+        Ok(None) => None,
+        Err(_) => Some(
+            "Could not verify the match state — close VALORANT or try again in a moment."
+                .to_string(),
+        ),
+    }
+}
+
+/// The player's own presence loop state, when one is readable.
+///
+/// Mirrors TS `presenceLoopToPhase`: only PREGAME and INGAME count as live, so
+/// menus never block a switch. Presences are filtered by puuid because every
+/// friends' blob carries its own loop state.
+async fn live_match_phase() -> Result<Option<String>, String> {
+    // No resolvable local account = logged out / client mid-shutdown, which is
+    // a normal moment to switch accounts and cannot be a live match. Only a
+    // failure AFTER a session exists is treated conservatively by the caller.
+    let account = match crate::tracker::detect_local_account().await {
+        Ok(account) => account,
+        Err(_) => return Ok(None),
+    };
+    let raw = crate::tracker::local_presences().await?;
+    let json: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let presences = json
+        .get("presences")
+        .and_then(|p| p.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mine = presences.iter().find(|p| {
+        p.get("puuid")
+            .and_then(|v| v.as_str())
+            .map(|s| s.eq_ignore_ascii_case(&account.puuid))
+            .unwrap_or(false)
+    });
+    let Some(blob_b64) = mine.and_then(|p| p.get("private")).and_then(|v| v.as_str()) else {
+        return Ok(None);
+    };
+    let bytes = decode_base64(blob_b64).ok_or("presence blob is not valid base64")?;
+    let blob: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|e| format!("presence blob: {e}"))?;
+    let loop_state = blob
+        .pointer("/matchPresenceData/sessionLoopState")
+        .and_then(|v| v.as_str())
+        .or_else(|| blob.get("sessionLoopState").and_then(|v| v.as_str()))
+        .unwrap_or("");
+    Ok(if presence_loop_is_live(loop_state) {
+        Some(loop_state.trim().to_ascii_uppercase())
+    } else {
+        None
+    })
+}
+
+/// Only agent-select and in-match are live. Pure — unit-tested.
+fn presence_loop_is_live(loop_state: &str) -> bool {
+    matches!(
+        loop_state.trim().to_ascii_uppercase().as_str(),
+        "PREGAME" | "INGAME"
+    )
+}
+
+/// Minimal standard-alphabet base64 decoder (RFC 4648 §4), tolerant of missing
+/// padding and of the URL-safe alphabet. Hand-rolled because the crate has no
+/// base64 dependency and the presence blob is the only decode site. Returns
+/// None on an invalid byte; never panics.
+fn decode_base64(input: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(input.len() * 3 / 4);
+    let mut buf: u32 = 0;
+    let mut bits: u32 = 0;
+    for byte in input.bytes() {
+        let v = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' | b'-' => 62,
+            b'/' | b'_' => 63,
+            b'=' => break,
+            _ if byte.is_ascii_whitespace() => continue,
+            _ => return None,
+        } as u32;
+        buf = (buf << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(((buf >> bits) & 0xFF) as u8);
+        }
+    }
+    Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_pregame_and_ingame_block_an_account_switch() {
+        assert!(presence_loop_is_live("PREGAME"));
+        assert!(presence_loop_is_live(" ingame "));
+        assert!(!presence_loop_is_live(""));
+        assert!(!presence_loop_is_live("MENUS"));
+        // The field is a loop-state enum; a lookalike must never block.
+        assert!(!presence_loop_is_live("MATCHMAKING"));
+    }
+
+    #[test]
+    fn base64_decoder_round_trips_the_presence_shape() {
+        // RFC 4648 vectors, then a real-looking blob prefix.
+        assert_eq!(decode_base64("Zm9vYmFy").unwrap(), b"foobar".to_vec());
+        assert_eq!(decode_base64("Zm9v YmFy").unwrap(), b"foobar".to_vec());
+        assert_eq!(decode_base64("Zg==").unwrap(), b"f".to_vec());
+        assert_eq!(decode_base64("Zg").unwrap(), b"f".to_vec());
+        assert!(decode_base64("!!not-base64!!").is_none());
+        // The decoder must accept the URL-safe alphabet too.
+        assert_eq!(decode_base64("-_8").unwrap(), vec![0xfb, 0xff]);
+    }
 }

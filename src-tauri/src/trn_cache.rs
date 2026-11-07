@@ -124,6 +124,20 @@ const MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
 /// `fetched_at`, so what leaves is the most stale thing on disk.
 const MAX_ENTRIES: usize = 100;
 
+/// Hard cap on the WHOLE directory: 8 MiB.
+///
+/// The entry cap alone bounds count, not bytes: 100 x 4 MiB is a 400 MB worst
+/// case, and the wave-1 audit measured an install holding ~67 MB after TRN went
+/// cold. Eviction used to run only on write, and with TRN dead there are no
+/// writes, so those bytes stayed forever. 8 MiB is ~3.5x the largest real body
+/// measured, i.e. ample for a live session, and the rest is reclaimed.
+const MAX_TOTAL_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Entries older than a week are dead weight. tracker.gg payloads only describe
+/// the current act/mode window and the TS layer applies its own short TTLs on
+/// top; a week keeps a vacation gap warm without pinning dead matches forever.
+const MAX_AGE_MS: u64 = 7 * 24 * 60 * 60 * 1000;
+
 /// Bytes read per file when scanning for eviction. The header line is
 /// `<magic> <13-digit ms> <path>` and a TRN request path tops out around 160
 /// chars, so 1 KB holds any of them whole; a header that does not fit is
@@ -464,6 +478,9 @@ pub async fn trn_cache_read(
     let _guard = CACHE_LOCK
         .lock()
         .map_err(|_| "cache lock poisoned".to_string())?;
+    // Audit perf#1: reclaim dead bytes once per process, on the first read.
+    // This used to be write-only, and a cold TRN writes nothing.
+    AGE_TOTAL_SWEEP.call_once(|| enforce_age_and_total(&dir));
     // Corrupt (unparseable, path mismatch, bad JSON, absurd size): miss AND
     // delete the bad file, traced — never silent, never partial data.
     match read_and_sweep(&dir, &path) {
@@ -519,6 +536,66 @@ pub async fn trn_cache_get(
     trn_cache_read(app, path).await
 }
 
+/// Which entries the age/total sweep removes: everything past `max_age_ms`,
+/// then oldest-first until the survivors fit `max_total_bytes`. Newest data
+/// wins; the returned names are all deleted. Pure over the scan — unit-tested.
+fn over_age_or_total_victims(
+    entries: &[(String, u64, u64)], // (filename, fetched_at, bytes)
+    now: u64,
+    max_age_ms: u64,
+    max_total_bytes: u64,
+) -> Vec<String> {
+    let fresh = |at: &u64| now.saturating_sub(*at) <= max_age_ms;
+    let mut victims: Vec<String> = entries
+        .iter()
+        .filter(|(_, at, _)| !fresh(at))
+        .map(|(n, _, _)| n.clone())
+        .collect();
+    let mut kept: Vec<&(String, u64, u64)> = entries.iter().filter(|(_, at, _)| fresh(at)).collect();
+    kept.sort_by_key(|(_, at, _)| *at); // oldest first
+    let mut total: u64 = kept.iter().map(|(_, _, b)| *b).sum();
+    for (name, _, bytes) in kept {
+        if total <= max_total_bytes {
+            break;
+        }
+        victims.push(name.clone());
+        total = total.saturating_sub(*bytes);
+    }
+    victims
+}
+
+/// Scan with each entry's byte size, for the age/total sweep.
+fn scan_sized(dir: &Path) -> Vec<(String, u64, u64)> {
+    scan(dir)
+        .into_iter()
+        .map(|(name, at)| {
+            let bytes = fs::metadata(dir.join(&name)).map(|m| m.len()).unwrap_or(0);
+            (name, at, bytes)
+        })
+        .collect()
+}
+
+/// Apply the age and total-bytes bounds, tracing every victim.
+fn enforce_age_and_total(dir: &Path) {
+    for name in over_age_or_total_victims(&scan_sized(dir), now_ms(), MAX_AGE_MS, MAX_TOTAL_BYTES)
+    {
+        let victim = dir.join(&name);
+        match read_header(&victim) {
+            Some(h) => cache_trace!("CACHE swept path={} reason=age-or-total", h.path),
+            None => cache_trace!("CACHE swept path=? reason=age-or-total (unreadable header)"),
+        }
+        let _ = fs::remove_file(&victim);
+    }
+}
+
+/// Run the age/total sweep once per process on the first cache read.
+///
+/// This is the fix for the audit's dead-cache finding: eviction ran only on
+/// write, so a cold TRN left tens of MB untouched forever. Reads are the one
+/// thing that still happens on every refresh, so the reclaim hangs off the first
+/// one and costs a single directory scan per session.
+static AGE_TOTAL_SWEEP: std::sync::Once = std::sync::Once::new();
+
 /// Drop the oldest entries until the directory holds at most `MAX_ENTRIES`.
 /// Run after a commit, so the file just written is part of the count and a
 /// same-path rewrite never inflates it. Every victim is reported by the path
@@ -564,6 +641,8 @@ pub async fn trn_cache_write(
     }
     cache_trace!("CACHE write path={} bytes={}", path, out.bytes);
     enforce_bound(&dir);
+    // Keep the byte/age bounds too: the entry cap alone allows 100 x 4 MiB.
+    enforce_age_and_total(&dir);
     Ok(())
 }
 
@@ -605,6 +684,7 @@ pub async fn trn_cache_put(
     }
     cache_trace!("CACHE write path={} bytes={}", path, out.bytes);
     enforce_bound(&dir);
+    enforce_age_and_total(&dir);
     Ok(out)
 }
 
@@ -783,6 +863,38 @@ mod tests {
             vec!["old".to_string(), "mid".to_string()]
         );
         assert_eq!(victims(&[], 3).len(), 0);
+    }
+
+    #[test]
+    fn age_and_total_sweep_keeps_the_newest_data() {
+        let e = |v: Vec<(&str, u64, u64)>| -> Vec<(String, u64, u64)> {
+            v.into_iter()
+                .map(|(n, at, b)| (n.to_string(), at, b))
+                .collect()
+        };
+        let now = 10 * MAX_AGE_MS;
+        // Expired entries go regardless of how small the directory is.
+        assert_eq!(
+            over_age_or_total_victims(
+                &e(vec![("old", 1, 10), ("new", now, 10)]),
+                now,
+                MAX_AGE_MS,
+                MAX_TOTAL_BYTES
+            ),
+            vec!["old".to_string()]
+        );
+        // Fresh entries over the byte cap: oldest goes first, newest survives.
+        assert_eq!(
+            over_age_or_total_victims(
+                &e(vec![("a", now - 3, 6), ("b", now - 2, 6), ("c", now - 1, 6)]),
+                now,
+                MAX_AGE_MS,
+                12
+            ),
+            vec!["a".to_string()]
+        );
+        // Everything fits (and a zero-byte directory never trips the age line).
+        assert!(over_age_or_total_victims(&e(vec![("a", now, 1)]), now, MAX_AGE_MS, 8).is_empty());
     }
 
     #[test]

@@ -119,7 +119,7 @@ export interface TrackerData {
 }
 
 // Global module state
-let store: TrackerData;
+let store: TrackerData | null = null;
 const listeners = new Set<() => void>();
 
 function emitStore() {
@@ -129,7 +129,7 @@ function emitStore() {
 }
 
 function updateStore(partial: Partial<TrackerData>) {
-  store = { ...store, ...partial };
+  store = { ...ensureStore(), ...partial };
   if (import.meta.env.DEV && typeof window !== 'undefined') {
     (window as unknown as Record<string, unknown>).__reconStore = store;
   }
@@ -144,7 +144,7 @@ function subscribe(listener: () => void) {
 }
 
 function getSnapshot() {
-  return store;
+  return ensureStore();
 }
 
 function initStore(): TrackerData {
@@ -181,7 +181,13 @@ function initStore(): TrackerData {
   };
 }
 
-store = initStore();
+// perf #8: initialised on first read instead of at module evaluation, so the
+// synchronous localStorage + JSON.parse of the cached snapshot no longer sits
+// on the module-load path to first paint.
+function ensureStore(): TrackerData {
+  if (!store) store = initStore();
+  return store;
+}
 
 let refreshPromise: Promise<void> | null = null;
 let hasAutoRefreshed = false;
@@ -331,7 +337,7 @@ async function runRefresh(): Promise<void> {
        the host page seeds localStorage, and a store hydrated before that seed
        landed would otherwise keep rendering stale values. */
     const fresh = readSnapshot();
-    const profileNow = fresh?.profile ?? store.profile;
+    const profileNow = fresh?.profile ?? ensureStore().profile;
     const hasData = Boolean(profileNow);
 
     if (!isTauri() && hasData) {
@@ -344,7 +350,7 @@ async function runRefresh(): Promise<void> {
         banner: null,
         ...(fresh
           ? {
-              profile: fresh.profile ?? store.profile,
+              profile: fresh.profile ?? ensureStore().profile,
               games: fresh.games ?? [],
               agg: fresh.agg ?? null,
               mapById: fresh.mapById ?? {},
@@ -391,7 +397,7 @@ async function runRefresh(): Promise<void> {
 
   try {
     const liveAcc = await detectLocalAccount();
-    const prevPuuid = store.profile?.puuid ?? readCachedAccount()?.puuid;
+    const prevPuuid = ensureStore().profile?.puuid ?? readCachedAccount()?.puuid;
 
     // Account switched: different PUUID!
     if (prevPuuid && liveAcc.puuid && prevPuuid.toLowerCase() !== liveAcc.puuid.toLowerCase()) {
@@ -472,7 +478,7 @@ async function runRefresh(): Promise<void> {
      * cross-realm hand-off depends on it: the overlay adopts whatever the
      * owner last wrote, so a snapshot taken before `fetchTrnAgents` resolved
      * would hand over empty `trnAgents`/`trnMaps` and never correct itself.
-     * `store.*` is read fresh on every call, so each write is the whole
+     * `ensureStore().*` is read fresh on every call, so each write is the whole
      * current state, never a stale partial. */
     const saveSnapshot = (): void =>
       writeSnapshot({
@@ -480,16 +486,21 @@ async function runRefresh(): Promise<void> {
         puuid: prof.puuid || liveAcc.puuid,
         profile: fullProfile,
         games: comp,
-        agg: store.agg,
+        agg: ensureStore().agg,
         mapById: mm,
         queueById: meta.queueById,
-        trn: store.trn,
-        trnAgents: store.trnAgents,
-        trnMaps: store.trnMaps,
-        trnPrev: store.trnPrev,
-        trnMatchTrs: store.trnMatchTrs,
-        detailsById: store.detailsById,
-        detailsReady: store.detailsReady,
+        trn: ensureStore().trn,
+        trnAgents: ensureStore().trnAgents,
+        trnMaps: ensureStore().trnMaps,
+        trnPrev: ensureStore().trnPrev,
+        trnMatchTrs: ensureStore().trnMatchTrs,
+        // perf #6: detailsById was 928 kB of the ~938 kB snapshot, and a write
+        // that large is REJECTED by the localStorage quota (see the note at the
+        // top of this file) — so the JSON was built on every refresh and thrown
+        // away. It is not persisted any more: a cold realm re-derives details
+        // from Riot-local, which is cheap and not the rate-limited path.
+        detailsById: {},
+        detailsReady: 0,
       });
     saveSnapshot();
 
@@ -557,11 +568,11 @@ async function runRefresh(): Promise<void> {
       saveSnapshot();
       if (ownsRefresh()) {
         void broadcastTrn({
-          trn: store.trn,
-          trnAgents: store.trnAgents,
-          trnMaps: store.trnMaps,
-          trnPrev: store.trnPrev,
-          trnMatchTrs: store.trnMatchTrs,
+          trn: ensureStore().trn,
+          trnAgents: ensureStore().trnAgents,
+          trnMaps: ensureStore().trnMaps,
+          trnPrev: ensureStore().trnPrev,
+          trnMatchTrs: ensureStore().trnMatchTrs,
         });
       }
     });
@@ -579,7 +590,7 @@ async function runRefresh(): Promise<void> {
               detailsById: byId,
               detailsReady: Object.keys(byId).length,
             });
-            // `saveSnapshot` reads `store.*`, which the updateStore above has
+            // `saveSnapshot` reads `ensureStore().*`, which the updateStore above has
             // already folded in, so this publishes the details without a second
             // copy of the snapshot literal.
             saveSnapshot();
@@ -597,7 +608,7 @@ async function runRefresh(): Promise<void> {
   }
 }
 
-/** Single shared tracker hook. Returns synchronous state from module store. */
+/** Single shared tracker hook. Returns synchronous state from module ensureStore(). */
 export function useTrackerData(): TrackerData {
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 

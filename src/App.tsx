@@ -1,18 +1,18 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
-import { UtilityView } from './components/UtilityView';
-import { ValorantConfig } from './components/ValorantConfig';
+const UtilityView = lazy(() => import('./components/UtilityView').then((m) => ({ default: m.UtilityView })));
+const ValorantConfig = lazy(() => import('./components/ValorantConfig').then((m) => ({ default: m.ValorantConfig })));
 import type { ConfigAccountCtx } from './utils/accountVideo';
-import { AppSettingsView } from './components/AppSettingsView';
+const AppSettingsView = lazy(() => import('./components/AppSettingsView').then((m) => ({ default: m.AppSettingsView })));
 import { TrackerView } from './components/TrackerView';
-import { StoreView } from './components/StoreView';
-import { RiotChatView } from './components/RiotChatView';
-import { CrosshairView } from './components/CrosshairView';
-import { PrepickView } from './components/PrepickView';
-import { AccountsView } from './components/AccountsView';
-import { DevDashboard } from './components/DevDashboard';
+const StoreView = lazy(() => import('./components/StoreView').then((m) => ({ default: m.StoreView })));
+const RiotChatView = lazy(() => import('./components/RiotChatView').then((m) => ({ default: m.RiotChatView })));
+const CrosshairView = lazy(() => import('./components/CrosshairView').then((m) => ({ default: m.CrosshairView })));
+const PrepickView = lazy(() => import('./components/PrepickView').then((m) => ({ default: m.PrepickView })));
+const AccountsView = lazy(() => import('./components/AccountsView').then((m) => ({ default: m.AccountsView })));
+const DevDashboard = lazy(() => import('./components/DevDashboard').then((m) => ({ default: m.DevDashboard })));
 import { OverlayView } from './components/OverlayView';
 import { TooltipHost } from './components/ReconTooltip';
 import type { DisplayInfo, ShortcutBinding, GpuInfo, TabType } from './types';
@@ -43,6 +43,7 @@ import {
   setupGlobalWindowDrag,
 } from './utils/ipc';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { IS_DEV } from './utils/devTools';
 import { ConsentModal } from './components/ConsentModal';
 import { OpsNotices } from './components/OpsNotices';
@@ -306,19 +307,50 @@ export const App: React.FC = () => {
         setCurrentTab('switcher');
       }
     };
-    const tabInterval = setInterval(async () => {
-      // Hidden-tab skip: exact 2000ms cadence kept when visible.
-      if (typeof document !== 'undefined' && document.hidden) return;
-      try {
-        applyTabRequest(await checkRequestedTab());
-      } catch (_) {}
-    }, 2000);
+    // Tab-switch requests (automation/scripts) poll ONLY while this window
+    // owns focus. `document.hidden` is always false in a Tauri window even
+    // when native-hidden (see DevDashboard.tsx:1034), so the old unconditional
+    // 2s interval kept ~30 IPC calls/minute alive in the tray forever. Focus is
+    // the real signal: hiding to tray always blurs the window.
+    let tabTimer: ReturnType<typeof setInterval> | null = null;
+    const startTabPoll = () => {
+      if (tabTimer) return;
+      tabTimer = setInterval(() => {
+        checkRequestedTab().then(applyTabRequest).catch(() => {});
+      }, 2000);
+    };
+    const stopTabPoll = () => {
+      if (!tabTimer) return;
+      clearInterval(tabTimer);
+      tabTimer = null;
+    };
     // Immediate tick on return (OverlayView/LiveMatchView pattern) so a
     // request filed while hidden never waits a full interval.
     const onTabVis = () => {
-      if (typeof document !== 'undefined' && document.hidden) return;
       checkRequestedTab().then(applyTabRequest).catch(() => {});
     };
+    let unlistenFocus: (() => void) | undefined;
+    if (isTauri()) {
+      const win = getCurrentWindow();
+      // `onFocusChanged` only fires on CHANGE, so seed from the current state
+      // (a boot-to-tray start is already unfocused and must poll nothing).
+      void win.isFocused().then((f) => {
+        if (f) startTabPoll();
+      }).catch(() => {});
+      win.onFocusChanged(({ payload: focused }) => {
+        if (focused) {
+          startTabPoll();
+          onTabVis();
+        } else {
+          stopTabPoll();
+        }
+      }).then((un) => {
+        unlistenFocus = un;
+      }).catch(() => {});
+    } else {
+      // Browser preview: no Tauri focus events, cadence unchanged.
+      startTabPoll();
+    }
     document.addEventListener('visibilitychange', onTabVis);
     window.addEventListener('focus', onTabVis);
 
@@ -331,7 +363,10 @@ export const App: React.FC = () => {
     window.addEventListener('recon_navigate_tab', handleNavigateTab);
 
     return () => {
-      clearInterval(tabInterval);
+      stopTabPoll();
+      try {
+        unlistenFocus?.();
+      } catch {}
       window.removeEventListener('blur', handleBlur);
       window.removeEventListener('recon_navigate_tab', handleNavigateTab);
       document.removeEventListener('visibilitychange', onTabVis);
@@ -415,13 +450,16 @@ export const App: React.FC = () => {
   if (isDevWindow) {
     return (
       <div className="h-screen w-screen bg-m3-surface text-m3-on-surface flex flex-col overflow-hidden selection:bg-m3-primary-container selection:text-m3-on-primary-container antialiased font-sans">
-        <DevDashboard />
+        <Suspense fallback={null}>
+          <DevDashboard />
+        </Suspense>
         <TooltipHost />
       </div>
     );
   }
 
   return (
+    <MotionConfig reducedMotion="user">
     <div className="h-screen w-screen bg-m3-surface text-m3-on-surface flex overflow-hidden selection:bg-m3-primary-container selection:text-m3-on-primary-container antialiased font-sans">
       <TooltipHost />
       {/* Left Sidebar Navigation */}
@@ -464,6 +502,7 @@ export const App: React.FC = () => {
           }
         >
           <div className="h-full min-h-0 w-full">
+            <Suspense fallback={null}>
             <AnimatePresence mode="wait">
               <motion.div
                 key={effectiveTab}
@@ -541,6 +580,7 @@ export const App: React.FC = () => {
                 )}
               </motion.div>
             </AnimatePresence>
+            </Suspense>
           </div>
         </main>
       </div>
@@ -598,6 +638,7 @@ export const App: React.FC = () => {
         )}
       </AnimatePresence>
     </div>
+    </MotionConfig>
   );
 };
 

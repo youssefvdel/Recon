@@ -7,7 +7,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetClassNameW, GetForegroundWindow, GetSystemMetrics, GetWindowLongPtrW,
     GetWindowRect, GetWindowTextLengthW, GetWindowTextW, IsWindow, IsWindowVisible,
-    SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_EXSTYLE, GWL_STYLE,
+    SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_EXSTYLE, GWL_STYLE,
     HWND_TOP, HWND_TOPMOST, SM_CXSCREEN, SM_CYSCREEN, SWP_FRAMECHANGED, SWP_NOACTIVATE,
     SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOW, WINDOW_STYLE, WS_BORDER, WS_CAPTION, WS_EX_TOOLWINDOW,
     WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_SYSMENU, WS_THICKFRAME,
@@ -25,6 +25,48 @@ extern "system" {
     ) -> BOOL;
 
     fn DefSubclassProc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT;
+}
+
+/// Last mouse activity delivered to the overlay while edit mode was on (epoch
+/// ms; 0 = never). Written by the subclass proc, read by the overlay guard
+/// thread's watchdog. A window that has seen no mouse message for the watchdog
+/// budget is presumed abandoned — exactly the state that used to swallow every
+/// click until the process exited (audit overlay#1).
+pub static OVERLAY_EDIT_ACTIVITY_MS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Mark edit-mode activity. Called by the subclass on mouse messages over the
+/// non-click-through overlay and on every entry into edit mode.
+pub fn overlay_edit_touch() {
+    OVERLAY_EDIT_ACTIVITY_MS.store(now_ms(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Milliseconds since the last edit-mode mouse activity.
+pub fn overlay_edit_idle_ms() -> u64 {
+    now_ms().saturating_sub(OVERLAY_EDIT_ACTIVITY_MS.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// Ctrl+Shift+H — the always-available "leave edit mode" chord.
+///
+/// Polled rather than hooked on purpose: a low-level keyboard hook sits in the
+/// system input path and taxes every keystroke, while this only reads key
+/// state on the guard thread's 100 ms tick. Works regardless of focus and
+/// regardless of whether the overlay webview is alive, which is the whole point
+/// (audit overlay#1a).
+pub fn overlay_edit_exit_chord_down() -> bool {
+    unsafe {
+        let ctrl = (GetAsyncKeyState(0x11) as u16 & 0x8000) != 0; // VK_CONTROL
+        let shift = (GetAsyncKeyState(0x10) as u16 & 0x8000) != 0; // VK_SHIFT
+        let h = (GetAsyncKeyState(0x48) as u16 & 0x8000) != 0; // 'H'
+        ctrl && shift && h
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -387,9 +429,11 @@ pub fn set_overlay_windowed(hwnd_val: isize, windowed: bool) -> Result<(), Strin
             let new_style: i32 = 0x14CF0000; // WS_VISIBLE | WS_CLIPSIBLINGS | WS_OVERLAPPEDWINDOW
             SetWindowLongPtrW(hwnd, GWL_STYLE, new_style as isize);
 
-            // Eat clicks, activatable, normal z-order, NOT toolwindow
-            let mut ex_style = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32) | 0x00080000; // WS_EX_LAYERED
-            ex_style &= !(0x00000020 | 0x08000000 | 0x00000008 | 0x00000080);
+            // Eat clicks, activatable, normal z-order, NOT toolwindow.
+            // No WS_EX_LAYERED: banned (AGENTS.md) — it breaks the
+            // DirectComposition surface even in the debug window.
+            let mut ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+            ex_style &= !(0x00080000 | 0x00000020 | 0x08000000 | 0x00000008 | 0x00000080);
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style as isize);
 
             // Center a 1280x800 window on the nearest monitor.
@@ -660,6 +704,14 @@ unsafe extern "system" fn overlay_subclass_proc(
         // 5. WM_ERASEBKGND (0x0014):
         // Return 1 so GDI never paints a white background before DirectX composites.
         0x0014 => return LRESULT(1),
+        // 6. Mouse activity while edit mode is on: the fail-safe heartbeat.
+        // Not swallowed — falls through to DefSubclassProc like any normal
+        // message; we only stamp that a human is still there.
+        0x0200 | 0x0201 | 0x0202 | 0x020A => {
+            if crate::OVERLAY_EDIT_MODE.load(std::sync::atomic::Ordering::Relaxed) {
+                overlay_edit_touch();
+            }
+        }
         _ => {}
     }
     DefSubclassProc(hwnd, msg, wparam, lparam)
@@ -708,8 +760,13 @@ pub fn setup_overlay_window(hwnd_val: isize, clickthrough: bool) -> Result<(), S
         let mut ex_style = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32)
             | 0x00000008  // WS_EX_TOPMOST
             | 0x00000080; // WS_EX_TOOLWINDOW
+        // Click-through is already guaranteed twice: WS_EX_TRANSPARENT here and
+        // the WM_NCHITTEST -> HTTRANSPARENT subclass below. WS_EX_LAYERED is
+        // the banned legacy per-pixel-alpha flag (AGENTS.md): it forces DWM
+        // composition over a borderless game and breaks DirectComposition.
+        // Audit overlay#2: never set it on this path.
         if clickthrough {
-            ex_style |= 0x00080000 | 0x00000020 | 0x08000000; // WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
+            ex_style |= 0x00000020 | 0x08000000; // WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
         } else {
             ex_style &= !(0x00080000 | 0x00000020 | 0x08000000);
         }
@@ -745,8 +802,9 @@ pub fn setup_overlay_window(hwnd_val: isize, clickthrough: bool) -> Result<(), S
 /// Edit-mode styles: like click-through PLUS mouse input, but WITHOUT
 /// activation. Stealing the foreground deactivates Valorant, which blanks
 /// its top strip to pure white until refocused. Mouse drag/clicks do not
-/// need activation (only keyboard does), and the on-screen Lock button
-/// covers exiting, so NOACTIVATE stays on.
+/// need activation (only keyboard does), and the on-screen Lock button and the
+/// global Ctrl+Shift+H fail-safe cover exiting, so NOACTIVATE stays on and
+/// this function NEVER calls SetForegroundWindow (audit overlay#5).
 pub fn set_overlay_editable(hwnd_val: isize) -> Result<(), String> {
     unsafe {
         let hwnd = HWND(hwnd_val as *mut std::ffi::c_void);
@@ -790,7 +848,9 @@ pub fn set_overlay_editable(hwnd_val: isize) -> Result<(), String> {
         );
 
         let _ = ShowWindow(hwnd, SW_SHOW);
-        let _ = SetForegroundWindow(hwnd);
+        // No SetForegroundWindow here: audit overlay#5. The overlay keeps
+        // WS_EX_NOACTIVATE; the game never loses the foreground just because
+        // the user opened HUD edit, and the chord/Lock button do not need it.
 
         restore_blur_behind(hwnd);
         redraw_all(hwnd);
@@ -802,6 +862,11 @@ pub fn set_overlay_editable(hwnd_val: isize) -> Result<(), String> {
 /// True when the visible overlay lost its click-through flag — i.e. something
 /// re-applied default styles after our setup, leaving an opaque layer that
 /// eats game input. The daemon heals exactly this case, nothing else.
+///
+/// Audit overlay#2: WS_EX_LAYERED is no longer part of click-through, so the
+/// predicate must only look for WS_EX_TRANSPARENT. Keeping the old LAYERED half
+/// would report "missing" forever and make the daemon re-assert styles every
+/// tick.
 pub fn overlay_clickthrough_missing(hwnd_val: isize) -> bool {
     unsafe {
         let hwnd = HWND(hwnd_val as *mut std::ffi::c_void);
@@ -809,7 +874,7 @@ pub fn overlay_clickthrough_missing(hwnd_val: isize) -> bool {
             return false;
         }
         let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-        (ex & 0x00000020 == 0) || (ex & 0x00080000 == 0) // WS_EX_TRANSPARENT or WS_EX_LAYERED
+        ex & 0x00000020 == 0 // WS_EX_TRANSPARENT
     }
 }
 
@@ -839,8 +904,11 @@ pub fn toggle_overlay_clickthrough(hwnd_val: isize, clickthrough: bool) -> Resul
         let mut ex_style = (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32)
             | 0x00000008  // WS_EX_TOPMOST
             | 0x00000080; // WS_EX_TOOLWINDOW
+        // Audit overlay#2: WS_EX_LAYERED is deliberately NOT part of
+        // click-through. TRANSPARENT + the HTTRANSPARENT subclass carry it, and
+        // the layered flag would force DWM composition over the game.
         if clickthrough {
-            ex_style |= 0x00080000 | 0x00000020 | 0x08000000; // WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
+            ex_style |= 0x00000020 | 0x08000000; // WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
         } else {
             ex_style &= !(0x00080000 | 0x00000020 | 0x08000000);
         }

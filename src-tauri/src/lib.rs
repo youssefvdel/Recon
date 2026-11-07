@@ -24,6 +24,17 @@ static AUTO_BORDERLESS_ENABLED: AtomicBool = AtomicBool::new(false);
 pub static OVERLAY_EDIT_MODE: AtomicBool = AtomicBool::new(false);
 static OVERLAY_WINDOWED: AtomicBool = AtomicBool::new(false);
 
+/// Whether the HUD has content worth compositing right now (audit overlay#4).
+/// TRUE at boot: the daemon's pre-audit behaviour is preserved until the UI
+/// reports its own render gates through `set_overlay_present`.
+static OVERLAY_PRESENT: AtomicBool = AtomicBool::new(true);
+
+/// Abandoned-edit budget: edit mode with no mouse activity for this long is
+/// force-exited by the overlay guard thread (audit overlay#1b). 90 s is the
+/// audit's number: long enough to think, short enough that a stuck fullscreen
+/// layer cannot own the mouse for a whole match.
+const OVERLAY_EDIT_WATCHDOG_MS: u64 = 90_000;
+
 /// Main window's logical CONTENT size at launch. Mirrored in `tauri.conf.json`
 /// (main window `width`/`height`/`minWidth`/`minHeight`). The runtime floor in
 /// `setup` uses this single constant because config min sizes are not reliably
@@ -335,103 +346,141 @@ fn restore_window_framed(hwnd: isize) -> Result<String, String> {
 
 #[tauri::command]
 fn show_overlay(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("overlay") {
-        let _ = window.set_shadow(false);
-        let clickthrough = !OVERLAY_EDIT_MODE.load(Ordering::Relaxed);
-        let _ = window.set_ignore_cursor_events(clickthrough);
-        window.show().map_err(|e| e.to_string())?;
-        let _ = window.set_shadow(false);
-        #[cfg(windows)]
-        {
-            if let Ok(hwnd) = window.hwnd() {
-                let _ = window_manager::setup_overlay_window(hwnd.0 as isize, clickthrough);
-            }
+    let window = app
+        .get_webview_window("overlay")
+        .ok_or_else(|| "Overlay window not found".to_string())?;
+    let _ = window.set_shadow(false);
+    let clickthrough = !OVERLAY_EDIT_MODE.load(Ordering::Relaxed);
+    // Audit overlay#10: a swallowed style error here is how the overlay ends up
+    // visible but opaque (eating clicks) with the UI claiming success. Report.
+    window
+        .set_ignore_cursor_events(clickthrough)
+        .map_err(|e| format!("Overlay click-through failed: {e}"))?;
+    window.show().map_err(|e| format!("Overlay show failed: {e}"))?;
+    let _ = window.set_shadow(false);
+    #[cfg(windows)]
+    {
+        if let Ok(hwnd) = window.hwnd() {
+            window_manager::setup_overlay_window(hwnd.0 as isize, clickthrough)?;
         }
-        Ok(())
-    } else {
-        Err("Overlay window not found".to_string())
     }
+    Ok(())
 }
 
 #[tauri::command]
 fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("overlay") {
-        window.hide().map_err(|e| e.to_string())?;
-        Ok(())
-    } else {
-        Err("Overlay window not found".to_string())
-    }
+    let window = app
+        .get_webview_window("overlay")
+        .ok_or_else(|| "Overlay window not found".to_string())?;
+    window.hide().map_err(|e| format!("Overlay hide failed: {e}"))
 }
 
 #[tauri::command]
 fn set_overlay_clickthrough(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let window = app
+        .get_webview_window("overlay")
+        .ok_or_else(|| "Overlay window not found".to_string())?;
+    window
+        .set_ignore_cursor_events(enabled)
+        .map_err(|e| format!("Overlay click-through failed: {e}"))?;
+    #[cfg(windows)]
+    {
+        if let Ok(hwnd) = window.hwnd() {
+            window_manager::toggle_overlay_clickthrough(hwnd.0 as isize, enabled)?;
+        }
+    }
+    // Deliberately no set_focus() when disabling: focus belongs to the game
+    // (audit overlay#5). Nothing here needs activation.
+    Ok(())
+}
+
+/// Re-assert click-through, the one state the process must never lose.
+///
+/// Single code path for the fail-safe exits (user exit, Ctrl+Shift+H, watchdog,
+/// overlay close/crash). It keeps going after a failed step and logs, because
+/// the caller is already in recovery: a half-applied exit that still eats
+/// clicks would be worse than the failure it is handling.
+fn apply_overlay_unlocked(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("overlay") {
-        let _ = window.set_ignore_cursor_events(enabled);
+        let _ = window.set_shadow(false);
+        if let Err(e) = window.set_ignore_cursor_events(true) {
+            log::warn!("overlay unlock: set_ignore_cursor_events failed: {e}");
+        }
         #[cfg(windows)]
         {
             if let Ok(hwnd) = window.hwnd() {
-                let _ = window_manager::toggle_overlay_clickthrough(hwnd.0 as isize, enabled);
+                if let Err(e) = window_manager::toggle_overlay_clickthrough(hwnd.0 as isize, true) {
+                    log::warn!("overlay unlock: click-through restore failed: {e}");
+                }
             }
         }
-        if !enabled {
-            let _ = window.set_focus();
-        }
-        Ok(())
-    } else {
-        Err("Overlay window not found".to_string())
+    }
+}
+
+/// Fail-safe exit from edit mode. Works without the overlay webview: the DOM
+/// Esc handler is gone the moment that renderer dies, and that is exactly when
+/// the process-global flag used to keep a fullscreen topmost window eating
+/// every click until the app exited (audit overlay#1).
+fn force_overlay_edit_mode_off(app: &tauri::AppHandle, reason: &str) {
+    let was_editing = OVERLAY_EDIT_MODE.swap(false, Ordering::AcqRel);
+    apply_overlay_unlocked(app);
+    if was_editing {
+        log::warn!("overlay edit mode force-exited ({reason})");
+        let _ = app.emit("overlay-edit-mode-changed", false);
     }
 }
 
 #[tauri::command]
 fn set_overlay_edit_mode(app: tauri::AppHandle, in_edit_mode: bool) -> Result<(), String> {
-    OVERLAY_EDIT_MODE.store(in_edit_mode, Ordering::Relaxed);
-    if let Some(window) = app.get_webview_window("overlay") {
-        let _ = window.set_shadow(false);
-        if in_edit_mode {
-            let _ = window.set_ignore_cursor_events(false);
-            let _ = window.show();
-            let _ = window.set_focus();
-            let _ = window.set_shadow(false);
-            #[cfg(windows)]
-            {
-                if let Ok(hwnd) = window.hwnd() {
-                    let _ = window_manager::set_overlay_editable(hwnd.0 as isize);
-                }
-            }
-        } else {
-            let _ = window.set_shadow(false);
-            let _ = window.set_ignore_cursor_events(true);
-            #[cfg(windows)]
-            {
-                if let Ok(hwnd) = window.hwnd() {
-                    let _ = window_manager::toggle_overlay_clickthrough(hwnd.0 as isize, true);
-                }
-                // Hand focus back: the overlay owned focus while editing, and
-                // a click-through layer that stays the ACTIVE window keeps DWM
-                // painting active-frame chrome (the pale top bar). Exiting from
-                // the app's button never hit this — the click itself had
-                // already deactivated the overlay.
-                unsafe {
-                    use windows::Win32::Foundation::HWND;
-                    use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
-                    let target = window_manager::find_valorant_game_window()
-                        .map(|w| w.hwnd)
-                        .or_else(|| {
-                            app.get_webview_window("main")
-                                .and_then(|m| m.hwnd().ok())
-                                .map(|h| h.0 as isize)
-                        });
-                    if let Some(raw) = target {
-                        let _ = SetForegroundWindow(HWND(raw as *mut std::ffi::c_void));
-                    }
-                }
+    if !in_edit_mode {
+        force_overlay_edit_mode_off(&app, "user exit");
+        return Ok(());
+    }
+    // Resolve the window BEFORE flipping the global flag: a missing overlay
+    // must fail the call, not leave the process believing it is editing.
+    let window = app
+        .get_webview_window("overlay")
+        .ok_or_else(|| "Overlay window not found".to_string())?;
+    OVERLAY_EDIT_MODE.store(true, Ordering::Relaxed);
+    #[cfg(windows)]
+    window_manager::overlay_edit_touch();
+    let _ = window.set_shadow(false);
+    window
+        .set_ignore_cursor_events(false)
+        .map_err(|e| format!("Overlay edit mode: input capture failed: {e}"))?;
+    window
+        .show()
+        .map_err(|e| format!("Overlay edit mode: show failed: {e}"))?;
+    let _ = window.set_shadow(false);
+    #[cfg(windows)]
+    {
+        match window.hwnd() {
+            Ok(hwnd) => window_manager::set_overlay_editable(hwnd.0 as isize)?,
+            Err(e) => {
+                OVERLAY_EDIT_MODE.store(false, Ordering::Relaxed);
+                return Err(format!("Overlay window handle unavailable: {e}"));
             }
         }
-        let _ = app.emit("overlay-edit-mode-changed", in_edit_mode);
-        Ok(())
-    } else {
-        Err("Overlay window not found".to_string())
     }
+    // No set_focus(): entering edit mode must not deactivate VALORANT
+    // (audit overlay#5). Mouse drag/click do not need activation, and the
+    // Ctrl+Shift+H chord plus the on-screen Lock button cover exiting.
+    let _ = app.emit("overlay-edit-mode-changed", true);
+    Ok(())
+}
+
+/// Tell the daemon whether the HUD has content worth a full-screen alpha layer
+/// right now (audit overlay#4). The overlay calls this as its render gates
+/// change (Tab-peek panel, pregame panel, crosshair): with `false` the daemon
+/// stops compositing the layer for the whole match and only brings it up while
+/// the Tab peek (or edit mode) needs it.
+///
+/// Defaults to TRUE at boot, so an older UI that never calls this keeps the
+/// pre-audit always-on behaviour instead of losing its HUD.
+#[tauri::command]
+fn set_overlay_present(needed: bool) -> Result<(), String> {
+    OVERLAY_PRESENT.store(needed, Ordering::Relaxed);
+    Ok(())
 }
 
 #[tauri::command]
@@ -1053,7 +1102,14 @@ pub fn run() {
                     // by showing while background.
                     let valorant_foreground =
                         valorant_present && window_manager::is_valorant_foreground();
-                    let should_show = valorant_present && valorant_foreground;
+                    // Audit overlay#4: a visible full-screen alpha layer is
+                    // composited every frame. When the UI reports no content
+                    // (`set_overlay_present(false)`) only the Tab peek needs the
+                    // layer; the 100 ms guard thread owns that fast transition,
+                    // and this slow tick must not fight it by re-showing.
+                    let present =
+                        OVERLAY_PRESENT.load(Ordering::Relaxed) || window_manager::is_tab_down();
+                    let should_show = valorant_present && valorant_foreground && present;
                     #[cfg(debug_assertions)]
                     {
                         let reason = if should_show {
@@ -1078,20 +1134,91 @@ pub fn run() {
                     if let Some(overlay) = auto_overlay_handle.get_webview_window("overlay") {
                         let is_vis = overlay.is_visible().unwrap_or(false);
                         if should_show && !is_vis {
-                            let _ = show_overlay(auto_overlay_handle.clone());
+                            if let Err(e) = show_overlay(auto_overlay_handle.clone()) {
+                                log::warn!("overlay daemon: show failed: {e}");
+                            }
                         } else if !should_show && is_vis {
-                            let _ = hide_overlay(auto_overlay_handle.clone());
+                            if let Err(e) = hide_overlay(auto_overlay_handle.clone()) {
+                                log::warn!("overlay daemon: hide failed: {e}");
+                            }
                         } else if should_show && is_vis {
                             #[cfg(windows)]
                             if let Ok(hwnd) = overlay.hwnd() {
-                                let _ = window_manager::align_overlay_to_valorant(hwnd.0 as isize);
+                                if let Err(e) =
+                                    window_manager::align_overlay_to_valorant(hwnd.0 as isize)
+                                {
+                                    log::warn!("overlay daemon: align failed: {e}");
+                                }
                                 // Self-heal: if something re-applied default styles
                                 // (opaque layer eating game input), reassert click-through.
                                 if window_manager::overlay_clickthrough_missing(hwnd.0 as isize) {
+                                    log::warn!("overlay daemon: click-through lost — reasserting");
                                     let _ = overlay.set_ignore_cursor_events(true);
-                                    let _ = window_manager::toggle_overlay_clickthrough(hwnd.0 as isize, true);
+                                    if let Err(e) = window_manager::toggle_overlay_clickthrough(
+                                        hwnd.0 as isize,
+                                        true,
+                                    ) {
+                                        log::warn!(
+                                            "overlay daemon: click-through reassert failed: {e}"
+                                        );
+                                    }
                                 }
                             }
+                        }
+                    }
+                }
+            });
+
+            // Overlay fail-safe guard (audit overlay#1 + #4). One 100 ms thread:
+            //   (a) Ctrl+Shift+H always leaves edit mode — no WebView focus, no
+            //       DOM Esc, works even when the overlay renderer is dead;
+            //   (b) edit mode with no mouse activity for OVERLAY_EDIT_WATCHDOG_MS
+            //       is force-exited (an abandoned edit session was a fullscreen
+            //       topmost window eating every click until app exit);
+            //   (c) when the UI reports no content, the full-screen alpha layer
+            //       is shown only while Tab is held, so it is not composited for
+            //       the whole match (the audit's Tab-peek gate).
+            let guard_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let mut chord_was_down = false;
+                let mut tab_shown = false;
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    let chord = window_manager::overlay_edit_exit_chord_down();
+                    if chord && !chord_was_down {
+                        force_overlay_edit_mode_off(&guard_handle, "Ctrl+Shift+H");
+                    }
+                    chord_was_down = chord;
+                    if OVERLAY_EDIT_MODE.load(Ordering::Relaxed)
+                        && window_manager::overlay_edit_idle_ms() > OVERLAY_EDIT_WATCHDOG_MS
+                    {
+                        force_overlay_edit_mode_off(&guard_handle, "no edit activity for 90s");
+                        continue;
+                    }
+                    // The fast path only runs when the UI says the layer has no
+                    // content of its own; otherwise the 2 s daemon owns it.
+                    let gated = !OVERLAY_EDIT_MODE.load(Ordering::Relaxed)
+                        && !OVERLAY_WINDOWED.load(Ordering::Relaxed)
+                        && !OVERLAY_PRESENT.load(Ordering::Relaxed)
+                        && window_manager::is_valorant_foreground();
+                    if !gated {
+                        tab_shown = false;
+                        continue;
+                    }
+                    let tab = window_manager::is_tab_down();
+                    if tab && !tab_shown {
+                        if let Err(e) = show_overlay(guard_handle.clone()) {
+                            log::warn!("overlay tab-peek: show failed: {e}");
+                        }
+                        tab_shown = true;
+                    } else if !tab && tab_shown {
+                        // ~200 ms grace: a quick double-tap must not flash.
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        if !window_manager::is_tab_down() {
+                            if let Err(e) = hide_overlay(guard_handle.clone()) {
+                                log::warn!("overlay tab-peek: hide failed: {e}");
+                            }
+                            tab_shown = false;
                         }
                     }
                 }
@@ -1188,6 +1315,12 @@ pub fn run() {
         .on_window_event(|window, event| {
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
+                    // Audit overlay#1c: a closing overlay must never leave edit
+                    // mode armed — the flag would keep the HWND in raw-input
+                    // mode with no webview to press Esc in.
+                    if window.label() == "overlay" {
+                        force_overlay_edit_mode_off(window.app_handle(), "overlay close");
+                    }
                     let _ = window.hide();
                     api.prevent_close();
                     trim_working_set();
@@ -1195,6 +1328,13 @@ pub fn run() {
                         std::thread::sleep(std::time::Duration::from_millis(300));
                         trim_working_set();
                     });
+                }
+                tauri::WindowEvent::Destroyed => {
+                    // Renderer/window gone (crash, forced destroy): same rule.
+                    if window.label() == "overlay" {
+                        force_overlay_edit_mode_off(window.app_handle(), "overlay destroyed");
+                    }
+                    trim_working_set();
                 }
                 tauri::WindowEvent::Focused(false) => {
                     trim_working_set();
@@ -1227,6 +1367,7 @@ pub fn run() {
             set_overlay_edit_mode,
             get_overlay_edit_mode,
             is_overlay_visible,
+            set_overlay_present,
             is_tab_down,
             set_overlay_windowed,
             get_valorant_configs,

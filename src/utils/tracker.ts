@@ -3,7 +3,7 @@ import { emit } from '@tauri-apps/api/event';
 import type { LiveMatchPlayer, LiveMatchState, LocalRiotAccount, TrackerDuel, TrackerMatchDetail, TrackerMmrPoint, TrackerPlayer, TrackerProfile } from '../types';
 import { isTauri } from './ipc';
 import { aggregateActStats, type ActAggregate, type ActMatchSample } from './actStats';
-import { setTrnMatchPhase, setTrnLobbyKey, trnLog, trnProxyPaused, openTrnDrainJob, closeTrnDrainJob, isTrnPrivateError, trnNoteNegative } from './trn';
+import { setTrnMatchPhase, setTrnLobbyKey, getTrnMatchPhase, trnLog, trnProxyPaused, openTrnDrainJob, closeTrnDrainJob, isTrnPrivateError, trnNoteNegative } from './trn';
 import { getDevMockMatch, isDevNoClient } from './devTools';
 import { extractGamePodId, parseGamePodId } from './matchServer';
 import { assignPartyColors } from './playerDisplay';
@@ -2482,6 +2482,17 @@ function fetchTrnStatsNow(
       // A successful recompute clears any previous verdict.
       actState: null,
     };
+    // IN-GAME GATE (perf #2). The act window costs up to 53 local Riot GETs
+    // per player. A dispatched fill is drain-exempt, so without this it ran
+    // with VALORANT in the foreground — the one time the game must own the
+    // machine. During coregame we take the rank only (ONE /mmr read, already
+    // paid above) and leave the act window to the next out-of-game fill; the
+    // rank row still renders, and no retry gate is armed so the act data
+    // lands as soon as the match ends.
+    if (getTrnMatchPhase() === 'coregame') {
+      if (import.meta.env.DEV) trnLog('act deferred', `in-match ${puuid.slice(0, 8)}`);
+      return update;
+    }
     const agg = await fetchLocalActStats(puuid, ctx.region, ctx.queue, rank).catch((e: unknown) => {
       update.actState = actStateFor(String(e));
       // Rank read fine, act window not. Back off so this does not re-run one

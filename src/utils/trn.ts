@@ -449,6 +449,11 @@ export interface TrnHealthState {
   detail: string;
 }
 
+/** Paths already found ABSENT on disk while TRN is unhealthy. Bounded, and
+ *  cleared whenever a request succeeds (the cache may be warm again). */
+const trnCacheMissed = new Set<string>();
+const TRN_CACHE_MISSED_MAX = 200;
+
 const TRN_HEALTH_OK: TrnHealthState = { health: 'ok', at: 0, detail: '' };
 let trnHealth: TrnHealthState = TRN_HEALTH_OK;
 const trnHealthListeners = new Set<() => void>();
@@ -725,9 +730,26 @@ export async function trnGet(
   // network request. Every caller consults the negative registry before it
   // gets here, so a proven private/missing still never reads. No `report()`:
   // no transport ran, and the tag exists to name one.
+  // perf #1: the on-disk TRN cache is a dead source (tracker.gg is cold), but
+  // every refresh still paid an IPC round trip + disk header probe per call to
+  // learn "miss" again. A held body must STILL be served once while the wall
+  // stands (deliberate — see the note below), so we probe each path at most
+  // once while TRN is unhealthy and remember that it was empty.
   if (opts?.ttlMs) {
-    const cached = await trnCacheLookup(path, opts.ttlMs);
-    if (cached !== undefined) return cached;
+    // Kept inside the `ttlMs` guard so the documented contract — no ttlMs
+    // means the disk path never runs — stays literally true.
+    const probe = !(trnHealth.health !== 'ok' && trnCacheMissed.has(path));
+    if (probe) {
+      const cached = await trnCacheLookup(path, opts.ttlMs);
+      if (cached !== undefined) return cached;
+      if (trnHealth.health !== 'ok') {
+        trnCacheMissed.add(path);
+        if (trnCacheMissed.size > TRN_CACHE_MISSED_MAX) {
+          const first = trnCacheMissed.values().next().value;
+          if (first !== undefined) trnCacheMissed.delete(first);
+        }
+      }
+    }
   }
 
   // Captcha wall BEFORE anything with a cost. The hidden window can never
@@ -832,6 +854,7 @@ export async function trnGet(
     // verdict: everything else is a guess about why we are not fetching.
     trnProxyBackoffStep = 0;
     trnProxyQuietUntil = 0;
+    trnCacheMissed.clear();
     setTrnHealth('ok');
     report('EDGE');
   } catch (e) {

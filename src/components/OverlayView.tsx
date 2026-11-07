@@ -22,7 +22,6 @@ import {
   queueLabel,
   TRN_PRIVATE_TOOLTIP,
   TRN_PENDING_TOOLTIP,
-  TRN_UNAVAILABLE_TOOLTIP,
 } from '../utils/playerDisplay';
 import { computeMapAgentStats, getRankTierLabel, type AgentStatSummary } from '../utils/mapMeta';
 import { fetchBlitzAgentStats, peekBlitzAgentStats, type BlitzAgentStat } from '../utils/blitzMeta';
@@ -57,6 +56,12 @@ export interface OverlayConfig {
     topAgents: number;
     prepick?: number;
   };
+  /**
+   * Widget offsets are CSS px, which depend on the display they were authored
+   * on (bounds + DPI scale). One layout per bounds key so a laptop panel and a
+   * 1440p monitor each keep their own HUD. Key: see `overlayBoundsKey()`.
+   */
+  layouts?: Record<string, OverlayConfig['positions']>;
 }
 
 export function getDefaultOverlayPositions(): OverlayConfig['positions'] {
@@ -114,10 +119,69 @@ export function getDefaultOverlayConfig(): OverlayConfig {
       topAgents: 1.0,
       prepick: 1.0,
     },
+    layouts: {},
   };
 }
 
 export const DEFAULT_OVERLAY_CONFIG: OverlayConfig = getDefaultOverlayConfig();
+
+const OVERLAY_CONFIG_STORAGE_KEY = 'recon_overlay_cfg_v7';
+
+/** Display identity a widget layout was authored on: CSS bounds + DPI scale. */
+function overlayBoundsKey(): string {
+  if (typeof window === 'undefined') return '0x0@1';
+  const dpr = Math.round(window.devicePixelRatio * 100) / 100;
+  return `${Math.round(window.innerWidth)}x${Math.round(window.innerHeight)}@${dpr}`;
+}
+
+/** Keep a widget box fully inside the current display bounds. */
+function clampWidgetPos(
+  pos: WidgetPos,
+  bounds: { w: number; h: number },
+  box: { w: number; h: number }
+): WidgetPos {
+  // A widget larger than the screen pins to the top-left instead of going
+  // negative; 24 px is the floor for "the resize handle stays reachable".
+  const maxX = Math.max(0, bounds.w - Math.max(24, Math.min(Math.round(box.w), bounds.w)));
+  const maxY = Math.max(0, bounds.h - Math.max(24, Math.min(Math.round(box.h), bounds.h)));
+  return {
+    x: Math.max(0, Math.min(Math.round(pos.x), maxX)),
+    y: Math.max(0, Math.min(Math.round(pos.y), maxY)),
+  };
+}
+
+/** Cap the per-display layout map so a long-lived install cannot grow forever. */
+function pruneLayouts(
+  layouts?: Record<string, OverlayConfig['positions']>
+): Record<string, OverlayConfig['positions']> {
+  if (!layouts) return {};
+  const keys = Object.keys(layouts);
+  if (keys.length <= 6) return layouts;
+  const kept: Record<string, OverlayConfig['positions']> = {};
+  for (const k of keys.slice(-6)) kept[k] = layouts[k];
+  return kept;
+}
+
+function samePositions(a: OverlayConfig['positions'], b: OverlayConfig['positions']): boolean {
+  return (
+    a.lobby.x === b.lobby.x &&
+    a.lobby.y === b.lobby.y &&
+    a.pregame.x === b.pregame.x &&
+    a.pregame.y === b.pregame.y &&
+    a.topAgents.x === b.topAgents.x &&
+    a.topAgents.y === b.topAgents.y &&
+    (a.prepick?.x ?? 0) === (b.prepick?.x ?? 0) &&
+    (a.prepick?.y ?? 0) === (b.prepick?.y ?? 0)
+  );
+}
+
+function persistOverlayConfig(next: OverlayConfig): void {
+  try {
+    localStorage.setItem(OVERLAY_CONFIG_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    /* Storage full or blocked: the in-memory config still applies this run. */
+  }
+}
 
 /* Flag/K-D/party/act helpers live in utils/playerDisplay so the in-app Live
    Match page renders players identically to the overlay widgets. */
@@ -399,6 +463,20 @@ export const OverlayView: React.FC = () => {
   // OS-level GetAsyncKeyState probe — never by JS key listeners.
   const [tabHeld, setTabHeld] = useState<boolean>(false);
 
+  // Inline failure surface. Overlay IPC can fail (window gone, style call
+  // refused, probe dead) and every caller used to swallow it: the HUD just
+  // silently missed data or refused to unlock. One dismissible row instead.
+  type OverlayNotice = { kind: 'command' | 'probe'; text: string };
+  const [notice, setNotice] = useState<OverlayNotice | null>(null);
+  const raiseNotice = useCallback((next: OverlayNotice) => {
+    // First failure wins until the player dismisses it — a broken probe every
+    // tick must not restart the banner or re-render the HUD 2x a second.
+    setNotice((prev) => prev ?? next);
+  }, []);
+  const clearNotice = useCallback((kind: OverlayNotice['kind']) => {
+    setNotice((prev) => (prev && prev.kind === kind ? null : prev));
+  }, []);
+
   // Widget config + positions (persisted)
   const [config, setConfig] = useState<OverlayConfig>(() => {
     const MIGRATION_KEY = 'recon_overlay_cfg_v8_defaults';
@@ -412,6 +490,11 @@ export const OverlayView: React.FC = () => {
         scales: { ...DEFAULT_OVERLAY_CONFIG.scales, ...(parsed.scales || {}) },
         // `...parsed` spreads a stored crosshair blindly; complete + clamp it.
         crosshair: sanitizeCrosshairShape(parsed.crosshair),
+        // Per-display layouts are user data: never trust the stored shape.
+        layouts:
+          parsed.layouts && typeof parsed.layouts === 'object' && !Array.isArray(parsed.layouts)
+            ? (parsed.layouts as OverlayConfig['layouts'])
+            : {},
       } as OverlayConfig;
     };
     try {
@@ -453,10 +536,17 @@ export const OverlayView: React.FC = () => {
   });
 
   const saveConfig = (next: OverlayConfig) => {
-    setConfig(next);
-    try {
-      localStorage.setItem('recon_overlay_cfg_v7', JSON.stringify(next));
-    } catch {}
+    // Mirror the live offsets into this display's slot on every write, so a
+    // later resize/monitor swap can restore exactly what was placed here.
+    const merged: OverlayConfig = {
+      ...next,
+      layouts: {
+        ...pruneLayouts(next.layouts),
+        [overlayBoundsKey()]: next.positions,
+      },
+    };
+    setConfig(merged);
+    persistOverlayConfig(merged);
   };
 
   const { detailsById, mapById, profile, trnAgents, trnMaps } = useTrackerData();
@@ -581,12 +671,96 @@ export const OverlayView: React.FC = () => {
     prepick: prepickRef,
   };
 
+  // Newest config for callbacks that run outside React's render (resize).
+  const configRef = useRef(config);
+  useEffect(() => {
+    configRef.current = config;
+  });
+
+  // Widget offsets are CSS px, so they only mean anything on the display they
+  // were authored on (bounds + DPI scale). Keep one layout per display key,
+  // restore it when the window lands on that display, and clamp the live one
+  // when it does not fit. Resize-only on purpose: the overlay window is born
+  // 800x600 and only becomes the game rect on the first show, so reconciling
+  // before that resize would squash hand-placed widgets and persist the loss.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const reconcile = () => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      if (w < 320 || h < 240) return;
+      const cur = configRef.current;
+      const key = overlayBoundsKey();
+      const saved = cur.layouts?.[key];
+      const source = saved ?? cur.positions;
+      const bounds = { w, h };
+      const box = (
+        ref: React.RefObject<HTMLDivElement | null>,
+        fallbackW: number,
+        fallbackH: number,
+        scale: number
+      ) => ({
+        w: (ref.current?.offsetWidth || fallbackW) * scale,
+        h: (ref.current?.offsetHeight || fallbackH) * scale,
+      });
+      const next: OverlayConfig['positions'] = {
+        lobby: clampWidgetPos(source.lobby, bounds, box(lobbyRef, 304, 220, cur.scales?.lobby ?? 1)),
+        pregame: clampWidgetPos(
+          source.pregame,
+          bounds,
+          box(pregameRef, 560, 360, cur.scales?.pregame ?? 1)
+        ),
+        topAgents: clampWidgetPos(
+          source.topAgents,
+          bounds,
+          box(topAgentsRef, 400, 240, cur.scales?.topAgents ?? 1)
+        ),
+        prepick: clampWidgetPos(
+          source.prepick ?? { x: 10, y: 10 },
+          bounds,
+          box(prepickRef, 260, 40, cur.scales?.prepick ?? 1)
+        ),
+      };
+      if (saved && samePositions(next, cur.positions)) return;
+      const merged: OverlayConfig = {
+        ...cur,
+        positions: next,
+        layouts: { ...pruneLayouts(cur.layouts), [key]: next },
+      };
+      configRef.current = merged;
+      setConfig(merged);
+      persistOverlayConfig(merged);
+    };
+
+    const onResize = () => {
+      if (timer) clearTimeout(timer);
+      // A resolution switch reallocs the window twice (game + our align pass).
+      timer = setTimeout(reconcile, 250);
+    };
+
+    window.addEventListener('resize', onResize);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener('resize', onResize);
+    };
+  }, []);
+
   // Native DWM message handling strips non-client borders natively.
   const forceRepaint = useCallback(() => {}, []);
 
   // Sync edit mode and config changes from main app
   useEffect(() => {
-    getOverlayEditMode().then(setIsEditMode).catch(() => {});
+    getOverlayEditMode()
+      .then(setIsEditMode)
+      .catch((e) => {
+        // If the read fails we cannot know whether the window is locked, and a
+        // wrong guess is the difference between playable and click-trapped.
+        raiseNotice({
+          kind: 'command',
+          text: `Could not read HUD edit state (${String(e)}) — the overlay may capture clicks`,
+        });
+      });
     // Fresh mounts (HMR reload, navigation, first show) start from a blank
     // surface with nothing dirtying transparent regions — repaint now and
     // once more after first paint settles, or stale white survives.
@@ -619,7 +793,7 @@ export const OverlayView: React.FC = () => {
       unlistenCfg.then((fn) => fn()).catch(() => {});
       unlistenDisp.then((fn) => fn()).catch(() => {});
     };
-  }, [forceRepaint]);
+  }, [forceRepaint, raiseNotice]);
 
   // Poll live match data ONLY when visible; idle backs off to ~1/3 rate
   // (agent select lasts ~60s+, so a 13s worst-case detect delay is fine).
@@ -711,8 +885,11 @@ export const OverlayView: React.FC = () => {
   }, []);
 
   // Tab-peek probe: polls the OS-level Tab state ONLY during a live match
-  // (coregame) and only when NOT editing. One cheap IPC per 150ms, zero curl,
-  // zero timers when hidden / idle / pregame / edit mode.
+  // (coregame) and only when NOT editing. Zero timers when hidden / idle /
+  // pregame / edit mode. 500 ms, not 150: 6.7 IPC/s for a whole match was a
+  // real share of the overlay's own budget (audit perf #7), and a peek tolerates
+  // a half-second. A Rust-side key hook that pushes an event would drop the poll
+  // entirely — that half is a Rust change, not this file.
   useEffect(() => {
     const inCoregame = matchState?.phase === 'coregame' && !isEditMode;
     if (!inCoregame) {
@@ -720,30 +897,57 @@ export const OverlayView: React.FC = () => {
       return;
     }
     let cancelled = false;
+    let failures = 0;
     const probe = async () => {
       try {
         const down = await isTabDown();
+        if (failures > 0) {
+          failures = 0;
+          clearNotice('probe');
+        }
         if (!cancelled) setTabHeld((prev) => (prev === down ? prev : down));
-      } catch {}
+      } catch {
+        // Dead IPC = the peek never fires. Say it once instead of leaving the
+        // player pressing Tab at an overlay that cannot hear the key.
+        failures += 1;
+        if (!cancelled && failures >= 3) {
+          raiseNotice({ kind: 'probe', text: 'Tab peek unavailable — overlay link down' });
+        }
+      }
     };
     void probe();
-    const id = setInterval(probe, 150);
+    const id = setInterval(probe, 500);
     return () => {
       cancelled = true;
       clearInterval(id);
     };
-  }, [matchState?.phase, isEditMode]);
+  }, [matchState?.phase, isEditMode, raiseNotice, clearNotice]);
+
+  // Exiting edit mode is the one command that can strand the player behind a
+  // window that eats clicks, so its failure is surfaced, never swallowed.
+  const exitEditMode = useCallback(async () => {
+    try {
+      await setOverlayEditMode(false);
+      setIsEditMode(false);
+      clearNotice('command');
+    } catch (e) {
+      raiseNotice({
+        kind: 'command',
+        text: `Could not unlock the HUD (${String(e)}) — Esc again, or quit Recon from the tray`,
+      });
+    }
+  }, [raiseNotice, clearNotice]);
 
   // Esc exits edit mode (overlay holds focus while editing, so the main
   // app's Lock button may be unreachable behind the fullscreen layer).
   useEffect(() => {
     if (!isEditMode) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') void setOverlayEditMode(false);
+      if (e.key === 'Escape') void exitEditMode();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isEditMode]);
+  }, [isEditMode, exitEditMode]);
 
   // Smooth GPU-composited drag handler with pointer capture
   const startDrag = (
@@ -774,17 +978,26 @@ export const OverlayView: React.FC = () => {
       const dx = moveEv.clientX - startClientX;
       const dy = moveEv.clientY - startClientY;
 
-      // Clamp strictly within screen bounds
+      // Clamp so the visual box stays on screen: the widget is scaled from its
+      // top-left corner, so the real footprint is layout size x scale.
+      const sc = config.scales?.[key] ?? 1.0;
       const screenW = typeof window !== 'undefined' ? window.innerWidth : 2088;
       const screenH = typeof window !== 'undefined' ? window.innerHeight : 1440;
-      const clampedX = Math.max(0, Math.min(screenW - 120, basePos.x + dx));
-      const clampedY = Math.max(0, Math.min(screenH - 80, basePos.y + dy));
+      const clamped = clampWidgetPos(
+        { x: basePos.x + dx, y: basePos.y + dy },
+        { w: screenW, h: screenH },
+        {
+          w: (targetEl?.offsetWidth ?? 120) * sc,
+          h: (targetEl?.offsetHeight ?? 80) * sc,
+        }
+      );
+      const clampedX = clamped.x;
+      const clampedY = clamped.y;
 
       curX = clampedX;
       curY = clampedY;
 
       if (targetEl) {
-        const sc = config.scales?.[key] ?? 1.0;
         targetEl.style.transform = `translate3d(${clampedX}px, ${clampedY}px, 0) scale(${sc})`;
       }
     };
@@ -954,10 +1167,10 @@ export const OverlayView: React.FC = () => {
           />
           {/* Screen Boundary Frame so users clearly see their display perimeter */}
           <div className="fixed inset-3 pointer-events-none border-2 border-dashed border-m3-primary/40 rounded-3xl z-40 flex items-start justify-between p-3 select-none">
-            <span className="px-3 py-1 rounded-xl bg-m3-surface-container/[0.75] border border-m3-primary/40 text-[10px] font-mono font-bold text-m3-primary shadow-md">
+            <span className="px-3 py-1 rounded-xl bg-m3-surface-container/[0.85] border border-m3-primary/40 text-[10px] font-mono font-bold text-m3-primary shadow-md">
               SCREEN BOUNDS • {typeof window !== 'undefined' ? `${window.innerWidth}×${window.innerHeight}` : 'DISPLAY'}
             </span>
-            <span className="px-3 py-1 rounded-xl bg-m3-surface-container/[0.75] border border-m3-primary/40 text-[10px] font-mono font-bold text-m3-on-surface-variant shadow-md">
+            <span className="px-3 py-1 rounded-xl bg-m3-surface-container/[0.85] border border-m3-primary/40 text-[10px] font-mono font-bold text-m3-on-surface-variant shadow-md">
               DRAG WIDGETS BY TOP BAR • PRESS ESC TO LOCK
             </span>
           </div>
@@ -968,7 +1181,7 @@ export const OverlayView: React.FC = () => {
       {/* EDIT MODE TOP CONTROLS (Center Top)                          */}
       {/* ============================================================ */}
       {isEditMode && (
-        <div className="fixed top-4 inset-x-0 mx-auto w-fit z-50 pointer-events-auto flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-m3-surface-container/[0.75] border border-m3-primary/40 shadow-2xl backdrop-blur-xl">
+        <div className="fixed top-4 inset-x-0 mx-auto w-fit z-50 pointer-events-auto flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-m3-surface-container/[0.85] border border-m3-primary/40 shadow-2xl">
           <div className="flex items-center gap-2 pr-2 border-r border-m3-outline-subtle/55">
             <span className="w-2.5 h-2.5 rounded-full bg-m3-mint shadow-[0_0_8px_rgba(58,227,116,0.8)]" />
             <span className="font-display font-black text-xs text-m3-on-surface tracking-wider uppercase">
@@ -1008,9 +1221,7 @@ export const OverlayView: React.FC = () => {
 
           <button
             type="button"
-            onClick={async () => {
-              await setOverlayEditMode(false);
-            }}
+            onClick={() => void exitEditMode()}
             className="px-4 py-1.5 rounded-xl bg-m3-mint text-m3-on-primary text-xs font-extrabold shadow-md border border-white/20 hover:brightness-110 flex items-center gap-1.5 cursor-pointer transition-all ml-1"
           >
             <Check className="w-4 h-4 stroke-[2.5]" />
@@ -1019,11 +1230,31 @@ export const OverlayView: React.FC = () => {
         </div>
       )}
 
+      {/* Inline failure row: overlay IPC is silent by default (every command
+          returns () and the caller used to drop the error). Bottom-centre so it
+          never covers the edit toolbar or the HUD widgets. */}
+      {notice && (
+        <div className="fixed bottom-4 inset-x-0 mx-auto w-fit max-w-[92vw] z-[60] pointer-events-auto flex items-center gap-2 px-3 py-1.5 rounded-xl bg-rose-950/90 border border-rose-400/50 shadow-2xl">
+          <AlertTriangle className="w-3.5 h-3.5 text-rose-300 shrink-0" />
+          <span className="text-[10.5px] font-mono text-rose-100 leading-snug">{notice.text}</span>
+          {isEditMode && (
+            <button
+              type="button"
+              onClick={() => setNotice(null)}
+              className="ml-1 w-4 h-4 rounded-lg bg-rose-400/20 hover:bg-rose-400/40 text-rose-100 flex items-center justify-center cursor-pointer"
+              aria-label="Dismiss overlay warning"
+            >
+              <X className="w-3 h-3 stroke-[2.5]" />
+            </button>
+          )}
+        </div>
+      )}
+
       {/* ============================================================ */}
       {/* EDIT MODE WIDGETS DRAWER (Top Right Panel)                   */}
       {/* ============================================================ */}
       {isEditMode && (
-        <div className="fixed top-4 right-4 z-50 pointer-events-auto w-72 flex flex-col gap-2 p-3 rounded-3xl bg-m3-surface-container/[0.75] border border-m3-primary/40 shadow-2xl backdrop-blur-xl">
+        <div className="fixed top-4 right-4 z-50 pointer-events-auto w-72 flex flex-col gap-2 p-3 rounded-3xl bg-m3-surface-container/[0.85] border border-m3-primary/40 shadow-2xl">
           <div className="flex items-center justify-between px-1 pb-1.5 border-b border-m3-outline-subtle/55">
             <span className="font-display font-black text-xs text-m3-on-surface uppercase tracking-wider flex items-center gap-1.5">
               <Layers className="w-3.5 h-3.5 text-m3-primary" />
@@ -1341,7 +1572,7 @@ export const OverlayView: React.FC = () => {
 
               <div
                 onPointerDown={(e) => startDrag('lobby', e)}
-                className="mb-1.5 px-3 py-1.5 rounded-2xl bg-m3-primary-container/50 border border-m3-primary/45 flex items-center justify-between cursor-grab active:cursor-grabbing text-[11px] font-mono font-bold text-m3-on-surface select-none shadow-md backdrop-blur-md"
+                className="mb-1.5 px-3 py-1.5 rounded-2xl bg-m3-primary-container/50 border border-m3-primary/45 flex items-center justify-between cursor-grab active:cursor-grabbing text-[11px] font-mono font-bold text-m3-on-surface select-none shadow-md"
               >
                 <div className="flex items-center gap-1.5">
                   <Move className="w-3.5 h-3.5 text-m3-primary" />
@@ -1372,11 +1603,15 @@ export const OverlayView: React.FC = () => {
               </div>
             </>
           )}
+          {/* No backdrop-filter on any HUD plate: this is a DirectComposition
+              surface over a live game and AGENTS.md bans CSS backdrop blur.
+              Legibility comes from the 0.85 plate, not from re-blurring the
+              game every frame. Delete the blur, never re-add it. */}
           <div
             className={`rounded-2xl border p-2.5 shadow-2xl flex flex-col gap-2 transition-all ${
               isEditMode
-                ? 'bg-m3-surface-container/[0.75] border-m3-outline-variant/50 shadow-[0_12px_40px_rgba(0,0,0,0.85)] ring-1 ring-m3-outline-variant/30 backdrop-blur-xl'
-                : 'bg-m3-surface-container/[0.75] border-m3-outline-variant/50 backdrop-blur-xl shadow-2xl'
+                ? 'bg-m3-surface-container/[0.85] border-m3-outline-variant/50 shadow-[0_12px_40px_rgba(0,0,0,0.85)] ring-1 ring-m3-outline-variant/30'
+                : 'bg-m3-surface-container/[0.85] border-m3-outline-variant/50 shadow-2xl'
             }`}
           >
             {/* Header: Map • Mode • Phase + live game status */}
@@ -1499,7 +1734,7 @@ export const OverlayView: React.FC = () => {
 
               <div
                 onPointerDown={(e) => startDrag('pregame', e)}
-                className="mb-2 px-3.5 py-1.5 rounded-2xl bg-m3-primary-container/50 border border-m3-primary/45 flex items-center justify-between cursor-grab active:cursor-grabbing text-xs font-mono font-bold text-m3-on-surface select-none shadow-md backdrop-blur-md"
+                className="mb-2 px-3.5 py-1.5 rounded-2xl bg-m3-primary-container/50 border border-m3-primary/45 flex items-center justify-between cursor-grab active:cursor-grabbing text-xs font-mono font-bold text-m3-on-surface select-none shadow-md"
               >
                 <div className="flex items-center gap-1.5">
                   <Move className="w-3.5 h-3.5 text-m3-primary" />
@@ -1533,8 +1768,8 @@ export const OverlayView: React.FC = () => {
           <div
             className={`rounded-2xl border p-3 shadow-2xl flex flex-col gap-2 transition-all ${
               isEditMode
-                ? 'bg-m3-surface-container/[0.75] border-m3-outline-variant/50 shadow-[0_16px_50px_rgba(0,0,0,0.9)] ring-1 ring-m3-outline-variant/30 backdrop-blur-xl'
-                : 'bg-m3-surface-container/[0.75] border-m3-outline-variant/50 backdrop-blur-xl shadow-2xl'
+                ? 'bg-m3-surface-container/[0.85] border-m3-outline-variant/50 shadow-[0_16px_50px_rgba(0,0,0,0.9)] ring-1 ring-m3-outline-variant/30'
+                : 'bg-m3-surface-container/[0.85] border-m3-outline-variant/50 shadow-2xl'
             }`}
           >
             {/* Header: Map • Starting Side Badge */}
@@ -1627,7 +1862,7 @@ export const OverlayView: React.FC = () => {
 
               <div
                 onPointerDown={(e) => startDrag('topAgents', e)}
-                className="mb-2 px-3.5 py-1.5 rounded-2xl bg-m3-primary-container/50 border border-m3-primary/45 flex items-center justify-between cursor-grab active:cursor-grabbing text-xs font-mono font-bold text-m3-on-surface select-none shadow-md backdrop-blur-md"
+                className="mb-2 px-3.5 py-1.5 rounded-2xl bg-m3-primary-container/50 border border-m3-primary/45 flex items-center justify-between cursor-grab active:cursor-grabbing text-xs font-mono font-bold text-m3-on-surface select-none shadow-md"
               >
                 <div className="flex items-center gap-1.5">
                   <Move className="w-3.5 h-3.5 text-m3-primary" />
@@ -1662,8 +1897,8 @@ export const OverlayView: React.FC = () => {
           <div
             className={`rounded-3xl border p-3 shadow-2xl flex flex-col gap-2 transition-all ${
               isEditMode
-                ? 'bg-m3-surface-container/[0.75] border-m3-outline-variant/50 shadow-[0_16px_50px_rgba(0,0,0,0.9)] ring-1 ring-m3-outline-variant/30 backdrop-blur-xl'
-                : 'bg-m3-surface-container/[0.75] border-m3-outline-variant/50 backdrop-blur-xl shadow-2xl'
+                ? 'bg-m3-surface-container/[0.85] border-m3-outline-variant/50 shadow-[0_16px_50px_rgba(0,0,0,0.9)] ring-1 ring-m3-outline-variant/30'
+                : 'bg-m3-surface-container/[0.85] border-m3-outline-variant/50 shadow-2xl'
             }`}
           >
             {/* Header with Map name & Mode toggle */}
@@ -1885,16 +2120,12 @@ export const OverlayView: React.FC = () => {
 
                       {/* K/D — TRN's map segment has no K/D, so only local games can fill it */}
                       <div className="text-right font-mono text-[10px] font-bold tabular-nums whitespace-nowrap" data-tip="K/D Ratio (last-20 local games)">
-                        {stat.kd > 0 ? (
-                          <span className={kdColor}>{kd}</span>
-                        ) : (
-                          <span className="text-m3-outline/70">—</span>
-                        )}
+                        {stat.kd > 0 ? <span className={kdColor}>{kd}</span> : null}
                       </div>
 
                       {/* HS% */}
                       <div className="text-right font-mono text-[10px] text-amber-200/90 font-medium tabular-nums whitespace-nowrap" data-tip="Headshot %">
-                        {stat.hsPct > 0 ? `${stat.hsPct.toFixed(0)}%` : <span className="text-m3-outline/70">—</span>}
+                        {stat.hsPct > 0 ? `${stat.hsPct.toFixed(0)}%` : null}
                       </div>
                     </div>
                   );
@@ -1983,7 +2214,7 @@ export const OverlayView: React.FC = () => {
           {isEditMode && (
             <div
               onPointerDown={(e) => startDrag('prepick', e)}
-              className="mb-2 px-3.5 py-1.5 rounded-2xl bg-m3-primary-container/50 border border-m3-primary/40 flex items-center justify-between cursor-grab active:cursor-grabbing text-[11px] font-mono font-bold text-m3-on-surface select-none shadow-m3-1 backdrop-blur-md"
+              className="mb-2 px-3.5 py-1.5 rounded-2xl bg-m3-primary-container/50 border border-m3-primary/40 flex items-center justify-between cursor-grab active:cursor-grabbing text-[11px] font-mono font-bold text-m3-on-surface select-none shadow-m3-1"
             >
               <div className="flex items-center gap-1.5">
                 <Move className="w-3.5 h-3.5 text-m3-primary" />
@@ -2007,7 +2238,7 @@ export const OverlayView: React.FC = () => {
             </div>
           )}
 
-          <div className="rounded-2xl border border-m3-outline-variant/50 bg-m3-surface-container/[0.75] backdrop-blur-2xl shadow-m3-2 px-3 py-2.5 flex items-center gap-2.5">
+          <div className="rounded-2xl border border-m3-outline-variant/50 bg-m3-surface-container/[0.85] shadow-m3-2 px-3 py-2.5 flex items-center gap-2.5">
             {prepickIcon ? (
               <img
                 src={prepickIcon}
@@ -2067,6 +2298,9 @@ const PregameTeamColumn: React.FC<{
           const icon = tierIcons[p.tier];
           const peakIcon = tierIcons[p.peakTier];
           const kd = formatKd(p.kd);
+          // formatKd() emits an em dash for "no data" — a placeholder, not a
+          // value. Unknown cells stay empty (grid column keeps the alignment).
+          const kdKnown = p.kd != null && p.kd !== '' && Number(p.kd) > 0;
           const locked = (p.selectionState || '').toLowerCase().includes('lock');
           // Private TRN profile: TRN-fed cells show a lock, not dashes.
           // (Name `privLocked`: `locked` above already means agent lock-in.)
@@ -2219,7 +2453,8 @@ const PregameTeamColumn: React.FC<{
                 </div>
               </div>
 
-              {/* Current Rank emblem + live RR */}
+              {/* Current Rank emblem + live RR. Unknown rank = empty box that
+                  keeps the row height; no dash pretending to be a value. */}
               <div
                 className="flex flex-col items-center justify-center leading-none"
                 data-tip={rankTooltip(p, seasons?.[p.peakSeasonId?.toLowerCase() ?? ''])}
@@ -2227,12 +2462,12 @@ const PregameTeamColumn: React.FC<{
                 {icon ? (
                   <img src={icon} alt="" draggable={false} className="w-[22px] h-[22px] object-contain shrink-0" />
                 ) : (
-                  <span className="text-[10px] font-mono text-m3-outline">—</span>
+                  <span aria-hidden="true" className="block w-[22px] h-[22px]" />
                 )}
                 {p.tier > 2 && p.rr != null ? (
                   <span className="text-[8.5px] font-mono font-bold text-m3-primary mt-0.5">{p.rr}</span>
                 ) : (
-                  <span className="text-[8.5px] font-mono text-transparent mt-0.5 select-none">—</span>
+                  <span aria-hidden="true" className="block h-[9px] mt-0.5" />
                 )}
               </div>
 
@@ -2248,7 +2483,7 @@ const PregameTeamColumn: React.FC<{
                 {peakIcon ? (
                   <img src={peakIcon} alt="" draggable={false} className="w-[18px] h-[18px] object-contain opacity-75 shrink-0" />
                 ) : (
-                  <span className="text-[10px] font-mono text-m3-outline">—</span>
+                  <span aria-hidden="true" className="block w-[18px] h-[18px]" />
                 )}
                 {p.peakSeasonId && seasons?.[p.peakSeasonId.toLowerCase()] && (
                   <span className="text-[7.5px] font-mono font-bold text-m3-on-surface-variant mt-0.5 tracking-tight">
@@ -2259,7 +2494,7 @@ const PregameTeamColumn: React.FC<{
 
               {/* K/D */}
               <div className="text-right font-mono text-[11px] font-bold tabular-nums whitespace-nowrap" data-tip="K/D Ratio">
-                {privLocked ? privLockCell : <span className={kd.color}>{kd.text}</span>}
+                {privLocked ? privLockCell : kdKnown ? <span className={kd.color}>{kd.text}</span> : null}
               </div>
 
               {/* Win % */}
@@ -2270,9 +2505,7 @@ const PregameTeamColumn: React.FC<{
                   </span>
                 ) : privLocked ? (
                   privLockCell
-                ) : (
-                  <span className="text-m3-outline/70">—</span>
-                )}
+                ) : null}
               </div>
 
               {/* HS % */}
@@ -2281,9 +2514,7 @@ const PregameTeamColumn: React.FC<{
                   <span className="text-amber-200/90 font-medium">{p.hsPct}%</span>
                 ) : privLocked ? (
                   privLockCell
-                ) : (
-                  <span className="text-m3-outline/70">—</span>
-                )}
+                ) : null}
               </div>
             </div>
           );
@@ -2293,16 +2524,56 @@ const PregameTeamColumn: React.FC<{
   );
 };
 
+/** Party sizes + best rank for one side, from data we actually have. */
+function teamAtGlance(players: LiveMatchPlayer[]): { stacks: number[]; topRank: string | null } {
+  const counts = new Map<number, number>();
+  for (const p of players) {
+    if (p.partyIndex && p.partyIndex > 0) {
+      counts.set(p.partyIndex, (counts.get(p.partyIndex) ?? 0) + 1);
+    }
+  }
+  const stacks = [...counts.values()]
+    .filter((n) => n >= 2)
+    .sort((a, b) => b - a);
+  let top: LiveMatchPlayer | null = null;
+  for (const p of players) {
+    // tier 0-2 = Unranked/Iron placeholder from Riot, not a real rank claim.
+    if (p.tier > 2 && p.rank && (!top || p.tier > top.tier)) top = p;
+  }
+  return { stacks, topRank: top?.rank ?? null };
+}
+
 const VerticalSquadColumn: React.FC<{
   title: string;
   tagColor: string;
   players: LiveMatchPlayer[];
   tierIcons: Record<number, string>;
-}> = ({ title, tagColor, players, tierIcons }) => (
+}> = ({ title, tagColor, players, tierIcons }) => {
+  // One-glance facts for this side. Row cells are icon-sized, and their
+  // data-tip tooltips can never fire in-game (the HUD is click-through), so the
+  // two things a player acts on — who is queued together, and how high this
+  // side goes — sit in the header where they always read. Omitted when unknown.
+  const { stacks, topRank } = teamAtGlance(players);
+  return (
   <div className="flex flex-col gap-1">
     <div className="flex items-center justify-between px-1.5 py-0.5">
       <span className={`text-[10px] font-bold uppercase tracking-wider ${tagColor}`}>{title}</span>
-      <span className="text-[9px] font-mono text-m3-on-surface-variant">{players.length}P</span>
+      <span className="flex items-center gap-1.5 text-[9px] font-mono">
+        {stacks.length > 0 && (
+          <span
+            className="text-m3-on-surface-variant"
+            data-tip="Party sizes queued together on this side"
+          >
+            {stacks.join('+')} stack
+          </span>
+        )}
+        {topRank && (
+          <span className="text-m3-primary/90 font-semibold" data-tip="Highest rank on this side">
+            {topRank}
+          </span>
+        )}
+        <span className="text-m3-on-surface-variant">{players.length}P</span>
+      </span>
     </div>
     {/* Strongest combat score first — the board reads like the in-game
         leaderboard. Players with no ACS yet keep their relative order at the
@@ -2311,6 +2582,9 @@ const VerticalSquadColumn: React.FC<{
       const icon = tierIcons[p.tier];
       const peakIcon = tierIcons[p.peakTier];
       const kd = formatKd(p.kd);
+      // formatKd() returns an em dash for "no data". A dash is a placeholder,
+      // not a value, and the audit says omit those — so gate on the number.
+      const kdKnown = p.kd != null && p.kd !== '' && Number(p.kd) > 0;
       // Private TRN profile: stat cells show a lock, not dashes.
       const privLocked = p.isTrnPrivate === true;
       const privLockCell = (
@@ -2319,18 +2593,15 @@ const VerticalSquadColumn: React.FC<{
         </span>
       );
       // "Still filling" vs "nothing there": a faint dot while the TRN fill is
-      // queued or in flight, the plain dash once we have a verdict. One dot, no
-      // animation — this grid repaints on every 2.5s tick.
+      // queued or in flight, NOTHING once the verdict is "no data". A dash was a
+      // placeholder posing as a value — omit it. One dot, no animation: this
+      // grid repaints on every 2.5s tick.
       const trnBlank = (state: LiveMatchPlayer['trnState']) =>
         state === 'pending' ? (
           <span data-tip={TRN_PENDING_TOOLTIP} className="inline-flex items-center justify-center">
             <span className="block h-[3px] w-[3px] rounded-full bg-m3-outline/50" />
           </span>
-        ) : (
-          <span className="text-m3-outline/70" data-tip={state === 'unavailable' ? TRN_UNAVAILABLE_TOOLTIP : undefined}>
-            —
-          </span>
-        );
+        ) : null;
       const party = getPartyStyle(p.partyIndex);
       const flagUrl = getFlagUrl(p.country);
       const countryName = getCountryName(p.country);
@@ -2425,17 +2696,18 @@ const VerticalSquadColumn: React.FC<{
             )}
           </div>
 
-          {/* Current Rank emblem + live RR */}
+          {/* Current Rank emblem + live RR. Unknown rank renders an empty box
+              (keeps the row height), never a dash pretending to be a value. */}
           <div className="flex flex-col items-center justify-center leading-none" data-tip={rankTooltip(p)}>
             {icon ? (
               <img src={icon} alt="" draggable={false} className="w-4 h-4 object-contain shrink-0" />
             ) : (
-              <span className="text-[10px] font-mono text-m3-outline">—</span>
+              <span aria-hidden="true" className="block w-4 h-4" />
             )}
             {p.tier > 2 && p.rr != null ? (
               <span className="text-[7px] font-mono font-bold text-m3-primary mt-0.5">{p.rr}</span>
             ) : (
-              <span className="text-[7px] font-mono text-transparent mt-0.5 select-none">—</span>
+              <span aria-hidden="true" className="block h-[8px] mt-0.5" />
             )}
           </div>
 
@@ -2444,7 +2716,7 @@ const VerticalSquadColumn: React.FC<{
             {peakIcon ? (
               <img src={peakIcon} alt="" draggable={false} className="w-3.5 h-3.5 object-contain opacity-75 shrink-0" />
             ) : (
-              <span className="text-[10px] font-mono text-m3-outline">—</span>
+              <span aria-hidden="true" className="block w-3.5 h-3.5" />
             )}
           </div>
 
@@ -2466,7 +2738,7 @@ const VerticalSquadColumn: React.FC<{
 
           {/* KD */}
           <div className="text-right font-mono text-[10px] tabular-nums whitespace-nowrap" data-tip="Act-wide K/D">
-            {privLocked ? privLockCell : p.kd == null ? trnBlank(p.trnState) : <span className={kd.color}>{kd.text}</span>}
+            {privLocked ? privLockCell : kdKnown ? <span className={kd.color}>{kd.text}</span> : trnBlank(p.trnState)}
           </div>
 
           {/* Act-wide win rate */}
@@ -2490,4 +2762,5 @@ const VerticalSquadColumn: React.FC<{
       );
     })}
   </div>
-);
+  );
+};
