@@ -51,6 +51,30 @@ jobs:
         # updater signing, so no TAURI_SIGNING_PRIVATE_KEY secret is needed.
         run: bunx tauri build --no-bundle
 
+      - name: Sign recon.exe
+        # Optional: skipped when the signing secrets are absent, so forks and
+        # quote-less runs still produce a build. Once the machine that runs the
+        # binary trusts the certificate, the exe starts without a SmartScreen
+        # "unrecognized app" prompt.
+        shell: pwsh
+        env:
+          SIGN_PFX_B64: ${{ secrets.WINDOWS_SIGN_PFX_B64 }}
+          SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}
+        run: |
+          if (-not $env:SIGN_PFX_B64) {
+            Write-Host 'No signing certificate configured; leaving recon.exe unsigned.'
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP 'recon-sign.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGN_PFX_B64))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found in the Windows SDK' }
+          & $signtool.FullName sign /fd SHA256 /f $pfx /p $env:SIGN_PFX_PASSWORD `
+            /tr http://timestamp.digicert.com /td SHA256 `
+            src-tauri/target/release/recon.exe
+          & $signtool.FullName verify /pa src-tauri/target/release/recon.exe
+
       - name: Upload recon.exe
         uses: actions/upload-artifact@v4
         with:
