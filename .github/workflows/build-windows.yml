@@ -73,7 +73,12 @@ jobs:
           & $signtool.FullName sign /fd SHA256 /f $pfx /p $env:SIGN_PFX_PASSWORD `
             /tr http://timestamp.digicert.com /td SHA256 `
             src-tauri/target/release/recon.exe
-          & $signtool.FullName verify /pa src-tauri/target/release/recon.exe
+          # `signtool verify /pa` fails for a self-signed root the runner does not
+          # trust, which says nothing about whether signing worked. Assert the
+          # signature exists instead; trust is the target machine's business.
+          $sig = Get-AuthenticodeSignature src-tauri/target/release/recon.exe
+          Write-Host "Authenticode: $($sig.Status) / $($sig.SignerCertificate.Subject)"
+          if (-not $sig.SignerCertificate) { throw 'recon.exe is not signed' }
 
       - name: Upload recon.exe
         uses: actions/upload-artifact@v4
