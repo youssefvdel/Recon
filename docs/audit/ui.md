@@ -1,9 +1,10 @@
 # Recon UI audit — states, hierarchy, consistency, accessibility, motion
 
-Read-only audit, 2026-11-07, branch `fix/trn-captcha` (HEAD `1122719`). The app is
-Windows-only, so nothing here was reproduced live: every finding is evidence from
-source and from the Tailwind tokens in `tailwind.config.ts`. Contrast ratios were
-computed from those token values (WCAG 2.x relative-luminance formula).
+Read-only audit, 2026-11-07, branch `fix/trn-captcha`, audited at HEAD `1122719`
+(the docs commit `0263cfe` that captured this file adds only `docs/audit/`). The
+app is Windows-only, so nothing here was reproduced live: every finding is evidence
+from source and from the Tailwind tokens in `tailwind.config.ts`. Contrast ratios
+were computed from those token values (WCAG 2.x relative-luminance formula).
 
 Criteria: `impeccable` (Operate mode — scanability, consistency, native
 expectations outrank expression) plus the Vercel Web Interface Guidelines.
@@ -11,6 +12,10 @@ expectations outrank expression) plus the Vercel Web Interface Guidelines.
 Sibling audits already cover the overlay (`overlay.md`), performance (`perf.md`)
 and product gaps (`ux-gaps.md`). This file is the app-UI layer. Where a sibling
 already owns a site, I say so instead of re-counting it.
+
+Per the audit README convention, findings that need a live Windows box are marked
+**VERIFY**. Only finding 8 qualifies: its perceived delay is derived from the
+configured Framer durations, so measure it on Windows before quoting it.
 
 Legend — Effort: **S** < 2 h, **M** ≈ 0.5–1 day, **L** > 1 day. Value: player impact.
 Ranked by value ÷ effort.
@@ -55,16 +60,16 @@ scrolling still run for users who asked the OS to reduce motion.
 **Evidence.**
 - `src/index.css:224-229` — the app's only `prefers-reduced-motion` block, and it
   only shortens `.m3-modal-*`.
-- No `useReducedMotion`, no `MotionConfig` anywhere in `src/` (one grep for both
-  returns zero).
+- No `useReducedMotion`, no `MotionConfig` anywhere in `src/` (no matches for
+  either).
 - `src/App.tsx:467-474` (tab transition), `src/components/TrackerView.tsx:89-119`
   and `src/components/UtilityView.tsx:79-121` (sub-tab fades),
   `src/components/TopBar.tsx:572-582` (`repeat: Infinity` bob),
   `src/hooks/useCountUp.ts:5-20` (rAF number tween),
   `src/components/TrackerSkeletons.tsx:4` (`animate-pulse`),
   `src/index.css:11-19` (`scroll-behavior: smooth` everywhere).
-- A gaming HUD is exactly the population with vestibular sensitivity, and the
-  overlay runs over a moving 3D scene.
+- Motion-sensitive players are a real share of a gaming audience, and the overlay
+  runs over a moving 3D scene.
 
 **Fix.** Wrap the app tree in `<MotionConfig reducedMotion="user">` (one import in
 `src/App.tsx`); add a CSS block disabling `animate-pulse` and smooth scroll under
@@ -75,9 +80,9 @@ snap instead of tweening.
 
 ## 3. Type has no floor, and the smallest text is also the lowest-contrast text — M / High
 
-**Problem.** On an Operate surface read at arm's length, table headers and key
-numbers are set at 7–9 px, and the muted tokens used for placeholders fall to
-1.9–3.5:1 contrast — the two failures compound.
+**Problem.** On an Operate surface read at arm's length, table headers, link chips
+and secondary stats are set at 7–9 px, and the muted tokens used for placeholders
+fall to 1.9–3.5:1 contrast — the two failures compound.
 
 **Evidence.**
 - `src/components/LiveMatchView.tsx:553` — 11-column header row at `text-[8.5px]`;
@@ -90,9 +95,10 @@ numbers are set at 7–9 px, and the muted tokens used for placeholders fall to
 - Computed ratios: `#938f99` (`m3-outline/70`) on `#23192f` = **3.29:1**;
   `m3-outline/40` = **1.93:1**; `zinc-500` = **3.47:1**; base `m3-outline` =
   5.30:1 and `m3-on-surface-variant` = 9.84:1.
-- Failing sites: `src/components/Overview.tsx:456-459` (`text-m3-outline/40` on
-  placeholder numbers), `src/components/MatchHistory.tsx:244`,
-  `src/components/OverlayView.tsx:1891`.
+- Failing sites: `src/components/Overview.tsx:456-459`, `:597-616`
+  (`m3-outline/40` placeholder numbers); `src/components/OverlayView.tsx:1891`,
+  `:2274` (`m3-outline/70`); `src/components/MatchDetailModal.tsx:863`
+  (`zinc-500`).
 
 **Fix.** Add a `fontSize` scale to `tailwind.config.ts` — `label` 10 px /
 `data` 12 px / `number` 14 px — and delete arbitrary values below 10 px. For
@@ -120,7 +126,7 @@ the page behind an open modal and get no announcement that it opened.
 **Fix.** One shared `<Modal>` primitive: `role="dialog"`, `aria-modal="true"`,
 `aria-labelledby`, focus trap (or `inert` on the app root), focus the close button
 on open, restore focus on close, Escape always closes, and `aria-label` on the
-icon close button. All four modals already share identical styling, so this is a
+icon close button. These modals already share identical styling, so this is a
 mechanical extraction.
 
 ---
@@ -182,7 +188,7 @@ column measures — but the tooltip never opens for keyboard or screen-reader us
 `mouseout` only — no `focusin`/`focusout`, and targets get no
 `aria-describedby`. Consumers include `LiveMatchView.tsx:556-564` (column
 meanings), `:704-710` (incognito), `:856` (peak act), `:618` (dash reason), and
-the icon-only close/copy buttons in `MatchHistory.tsx:342-353`. The
+the icon-only copy buttons in `MatchHistory.tsx:342-353`. The
 `mouseout` handler also hides on child-to-child movement, so tooltips on nested
 spans flicker and re-wait the 280 ms delay (`:14`, `:35-37`, `:61`).
 
@@ -193,7 +199,7 @@ user needs to trust a number out of hover-only territory (see finding 1).
 
 ---
 
-## 8. Every tab switch blanks the pane for ≈0.4–0.6 s — S / Med
+## 8. Every tab switch blanks the pane for ≈0.4–0.6 s (**VERIFY**) — S / Med
 
 **Problem.** Nested `AnimatePresence mode="wait"` layers force the old view to
 finish fading out before the new one mounts; on a tool people tab through
@@ -202,8 +208,8 @@ constantly, navigation feels heavy.
 **Evidence.** `src/App.tsx:467-474` — top-level switch, explicit `duration: 0.2`
 for exit **and** enter; `TrackerView.tsx:89-119` and `UtilityView.tsx:79-121` —
 sub-tabs, no `transition` prop, so Motion's default tween plays on each half.
-Switching a tracker sub-tab runs both the inner pair (≈0.6 s) and, for top-level
-changes, the outer pair.
+A tracker sub-tab switch pays the inner pair (≈0.6 s); a top-level switch pays the
+outer pair (0.4 s).
 
 **Fix.** Keep one 120–150 ms opacity cross-fade, drop the exit (`mode="sync"` or
 no `exit`), and remove the animation entirely for in-page sub-tabs. Pair with
@@ -213,7 +219,7 @@ finding 2 so reduced-motion users get an instant swap.
 
 ## 9. Status copy states implementation facts the app never verifies — S / Med
 
-**Problem.** Two status pills describe internals rather than outcomes, and one
+**Problem.** Two status readouts describe internals rather than outcomes, and one
 asserts a GPU state that is hardcoded — which the project's own rules forbid.
 
 **Evidence.**
@@ -268,8 +274,8 @@ all differ, so the section feels assembled from different apps.
 - Shell: `TrackerAgents.tsx:291` `rounded-3xl bg-m3-surface-container-low` vs
   `TrackerMaps.tsx:282` `rounded-2xl bg-m3-surface-container`; header tint
   `bg-m3-surface-container-high/70` vs `/50`.
-- No shared primitives: 62 `h-8` vs 40 `h-9` vs 25 `h-10` controls; 200
-  `rounded-xl`, 105 `rounded-2xl`, 26 `rounded-3xl` in the same components.
+- No shared primitives: 62 `h-8` vs 40 `h-9` vs 25 `h-10` height utilities;
+  200 `rounded-xl`, 105 `rounded-2xl`, 26 `rounded-3xl` across `src/components/`.
 
 **Fix.** `<PageShell title subtitle actions>` + `<TableCard>` used by all five
 sub-tabs; one padding scale and one radius step for content cards. This also
@@ -310,7 +316,7 @@ queueing.
 ## Top 3 to do this week
 
 1. **Make missing data honest** — kill the fake zeros, give the dash a reason and
-   a legend (finding 1). ≈1 day including the shared component.
+   a legend (finding 1). ≈2–3 hours including the shared component.
 2. **Honor reduced motion** — `<MotionConfig reducedMotion="user">` + one CSS
    block (finding 2). ≈1 hour, whole-app effect.
 3. **Fix the text floor** — token scale + retire the 7–9 px cells and raise muted
