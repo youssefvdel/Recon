@@ -57,6 +57,12 @@ jobs:
           fi
           git log -1 --pretty=%B > release-notes.md
 
+      - name: Fetch WebView2 fixed runtime
+        # Official Microsoft CAB, pinned and sha256-checked. Must exist before
+        # the build: bundle.resources ships it to $INSTDIR\webview2-runtime,
+        # which is where Tauri points WEBVIEW2_BROWSER_EXECUTABLE_FOLDER.
+        run: bun scripts/fetch-webview2.mjs
+
       - name: Build signed bundle
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

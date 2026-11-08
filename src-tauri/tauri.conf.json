@@ -49,8 +49,8 @@
     ],
     "windows": {
       "webviewInstallMode": {
-        "type": "downloadBootstrapper",
-        "silent": true
+        "type": "fixedRuntime",
+        "path": "webview2-runtime"
       }
     },
     "publisher": "Youssef Adel",
@@ -72,7 +72,10 @@
     "android": {
       "debugApplicationIdSuffix": ".debug"
     },
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "resources": [
+      "webview2-runtime/"
+    ]
   },
   "plugins": {
     "updater": {

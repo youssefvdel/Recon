@@ -20,6 +20,10 @@ export PATH="$HOME/.cargo/bin:/usr/local/bin:$PATH"
 echo "== frontend =="
 bun run build:ui
 
+# 2. Pinned WebView2 fixed runtime (official Microsoft CAB, ~679 MB).
+echo "== webview2 runtime =="
+bun scripts/fetch-webview2.mjs
+
 # 3. Rust. custom-protocol is REQUIRED: without it the binary does not embed the
 #    frontend and tries to reach the dev server at runtime.
 echo "== cargo xwin build =="
@@ -34,6 +38,7 @@ echo "== stage =="
 rm -rf "$OUT"
 mkdir -p "$STAGE"
 cp "$EXE" "$STAGE/recon.exe"
+cp -r "$ROOT/src-tauri/webview2-runtime" "$STAGE/webview2-runtime"
 
 # 5. Optional Authenticode signature (same certificate CI uses).
 PFX="$HOME/backups/recon/signing/recon-local.pfx"

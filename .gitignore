@@ -36,3 +36,7 @@ ref200.err
 vault/
 # Third-party research artifacts (proprietary bundles, may contain vendor credentials)
 docs/overwolf/captures/
+
+# WebView2 fixed runtime (679 MB, fetched in CI)
+src-tauri/webview2-runtime/
+.webview2-cache/
