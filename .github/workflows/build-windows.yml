@@ -101,14 +101,21 @@ jobs:
           retention-days: 7
 
       - name: Package portable zip
-        # Top zip folder is the app folder, so unzip-and-run works: Recon.exe
+        # Top zip folder is the app folder, so unzip-and-run works: recon.exe
         # needs its webview2-runtime/ sibling (no system-runtime fallback).
+        # bundleVCRuntime needs tauri-cli 2.12+ (repo pins 2.11.4), so copy the
+        # VC++ CRT the fixed runtime already ships next to the exe instead.
         shell: pwsh
         run: |
           $stage = 'src-tauri/target/portable/Recon'
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item 'src-tauri/target/release/recon.exe' $stage -Force
           Copy-Item 'src-tauri/webview2-runtime' $stage -Recurse
+          foreach ($dll in 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'concrt140.dll') {
+            $src = Join-Path 'src-tauri/webview2-runtime' $dll
+            if (-not (Test-Path $src)) { throw "missing $src" }
+            Copy-Item $src $stage -Force
+          }
           Compress-Archive -Path 'src-tauri/target/portable/Recon' `
             -DestinationPath 'src-tauri/target/portable/recon-portable-windows-x64.zip' -Force
 
