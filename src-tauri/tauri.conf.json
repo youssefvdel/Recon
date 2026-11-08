@@ -49,7 +49,6 @@
       "nsis"
     ],
     "windows": {
-      "bundleVCRuntime": true,
       "webviewInstallMode": {
         "type": "fixedRuntime",
         "path": "./webview2-runtime"
