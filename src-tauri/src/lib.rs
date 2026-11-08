@@ -895,6 +895,45 @@ fn list_supported_modes() -> Result<Vec<display::DisplayMode>, String> {
     Ok(display::get_all_supported_modes())
 }
 
+/// Last-resort surface for a fatal startup error.
+///
+/// Release builds run with `windows_subsystem = "windows"` (`main.rs`), so the
+/// process has no console: a panic or an `.expect()` on `Builder::run` writes
+/// its message nowhere, the process dies, and the user sees zero windows and no
+/// dialog. That is exactly how the broken bundled WebView2 runtime presented in
+/// 0.4.x. A MessageBox is the only channel that survives a dead console, so
+/// every fatal startup path goes through here.
+fn fatal_startup_error(detail: &str) {
+    log::error!("[startup] fatal: {detail}");
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+
+        // MessageBoxW takes NUL-terminated UTF-16; build both strings by hand
+        // (same shape as window_manager's SetWindowTextW call) so nothing here
+        // depends on an HSTRING import.
+        let body = format!(
+            "Recon could not start.\n\nRe-run the installer or check the WebView2 runtime.\n\nDetails: {detail}"
+        );
+        let mut body_w: Vec<u16> = body.encode_utf16().collect();
+        body_w.push(0);
+        let mut title_w: Vec<u16> = "Recon - startup failed".encode_utf16().collect();
+        title_w.push(0);
+
+        let _ = MessageBoxW(
+            HWND(std::ptr::null_mut()),
+            windows::core::PCWSTR(body_w.as_ptr()),
+            windows::core::PCWSTR(title_w.as_ptr()),
+            MB_OK | MB_ICONERROR,
+        );
+    }
+    #[cfg(not(windows))]
+    eprintln!("Recon could not start: {detail}");
+
+    std::process::exit(1);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Debloated Windows images often ship without WebView2. Fail with a
@@ -951,7 +990,7 @@ pub fn run() {
             }
         }));
 
-    builder
+    let run_result = builder
         .manage(app_state)
         .setup(move |app| {
             // Boot-to-tray: the Run entry passes --minimized at login, so the
@@ -1446,6 +1485,12 @@ pub fn run() {
             window_start_dragging,
             window_is_maximized,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .run(tauri::generate_context!());
+
+    // No `.expect()` here: this process has no console, so a panic on a failed
+    // run (window/webview creation is the usual cause) exits silently with zero
+    // windows. Surface it in a dialog instead.
+    if let Err(error) = run_result {
+        fatal_startup_error(&error.to_string());
+    }
 }
