@@ -236,13 +236,29 @@ Source: `Valorant Tracker` webapp package v1.32.14, downloaded from
    `/api/v1/valorant/db/seasons`, `/guides`, `/insights/`, `/premier/roster/`,
    and a socket.io channel at `realtime-events.tracker.network`.
 
-### The gate
+### The gate — measured, 2026-11-08
 
-Requests to that backend carry `TRN-API-Key` (a key embedded in the shipped
-bundle) and, on some routes, `User-Agent: OverwolfClient`. Without the key the
-same routes answer **403** from the user's residential IP for
-`/api/v2/standard/profile` and the bulk lookup alike (verified 2026-11-08);
-`api.tracker.gg` with a browser UA answers the Warden captcha instead.
+The bundle sends `TRN-API-Key` (embedded in the app) plus
+`User-Agent: OverwolfClient`, and adds `?source=overwolf-2` to profile calls.
+
+Tested against the live API, the result was not what the code suggests:
+
+| Request | Result |
+|---|---|
+| `User-Agent: OverwolfClient` | **200** |
+| Chrome UA / `Recon/0.5` / `curl` | 403 |
+| with the embedded key vs without | **byte-identical** (883,272 B both) |
+| no `source` param | 883,272 B — 1 season segment, no map/weapon data |
+| `?source=web` | 1,574,765 B |
+| `?source=overwolf-2` | **2,186,636 B** — 3 season segments + 21 weapon + 7 map + map-agent breakdowns |
+
+So the UA is the whole gate and `source=overwolf-2` is the data lever. The
+embedded key changes nothing on these routes; it is an app-attribution/quota
+marker. The route where it might matter,
+`/api/v1/valorant/overwolf/ow-bulk-lookup`, answers **405** to POST, GET, with
+the key, without it, and with every parameter shape tried — it is not reachable.
+
+A `451` is not a block either: it is TRN's "this profile is private" state.
 
 **Decision: Recon does not use that key.** It is another company's credential,
 tied to their Overwolf app; using it is credential misuse, breaks Overwolf's
