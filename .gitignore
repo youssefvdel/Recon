@@ -32,3 +32,5 @@ tsconfig.tsbuildinfo
 opencode.json
 ref200.err
 vault/
+# Third-party research artifacts (proprietary bundles, may contain vendor credentials)
+docs/overwolf/captures/
