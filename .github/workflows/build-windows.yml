@@ -37,6 +37,16 @@ jobs:
         shell: bash
         run: bun install --frozen-lockfile || bun install
 
+      - name: Cache WebView2 CAB
+        # The fetch script keeps a sha256-checked CAB in .webview2-cache/ and
+        # reuses it. Keying on the script hash invalidates the cache when the
+        # pinned version changes; a corrupt or stale entry is rejected by the
+        # script's sha256 check and re-downloaded.
+        uses: actions/cache@v4
+        with:
+          path: .webview2-cache/*.cab
+          key: webview2-cab-${{ hashFiles('scripts/fetch-webview2.mjs') }}
+
       - name: Fetch WebView2 fixed runtime
         # Official Microsoft CAB, pinned and sha256-checked. Must exist before
         # the build: bundle.resources ships it to $INSTDIR\webview2-runtime,

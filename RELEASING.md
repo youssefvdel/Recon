@@ -228,8 +228,27 @@ AppContainer read/execute grants on the folder; see `docs/webview2-embedded.md`.
 The installer remembers its directory as the default value of
 `HKCU\Software\Youssef Adel\Recon`. Uninstalling now clears that value (and the
 parent keys when they are empty), and an install ignores a remembered directory
-that no longer exists, so a stale probe install can no longer redirect a later
-one.
+that does not contain `recon.exe` (the directory is created before the hook
+runs, so an emptiness check is not reliable), so a stale probe install can no
+longer redirect a later one.
+
+### Release timing (measured 2026-11-09, alpha9)
+
+| Step | Time |
+| --- | --- |
+| Fetch WebView2 runtime (310 MB download + extract) | 9 s |
+| Build signed bundle (Rust release + NSIS over 679 MB) | 833 s |
+| Sign, `latest.json`, publish | 19 s |
+| Whole release job | ~14.5 min |
+
+The CAB is cached between runs: `actions/cache` keeps `.webview2-cache/*.cab`,
+keyed by the hash of `scripts/fetch-webview2.mjs`, and the script's pinned
+sha256 rejects a stale or corrupt entry (it re-downloads instead). A warm cache
+turns the fetch step into extraction only (5 s measured locally vs 9 s cold on
+CI), so the 310 MB download disappears but the release is still dominated by
+`Build signed bundle`. The updater needs no timeout change for the 253 MB
+installer: its plugin builder defaults to no request timeout; the only 4 s cap
+in the app is the early-access releases-API probe, not the payload.
 
 ---
 

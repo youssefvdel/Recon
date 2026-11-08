@@ -24,10 +24,12 @@
 
 !macro NSIS_HOOK_PREINSTALL
   ; .onInit restored $INSTDIR from the registry without checking it. The
-  ; template has already run SetOutPath on it, so an empty directory means the
+  ; template has already run SetOutPath on it, so "no recon.exe" means the
   ; remembered path was stale: fall back to the default for this install mode
-  ; instead of installing into it.
-  ${IfNot} ${FileExists} "$INSTDIR\*.*"
+  ; instead of installing into it. (Checking for an empty directory is not
+  ; reliable: FileExists on "dir\*.*" matches an empty directory on some
+  ; implementations.)
+  ${IfNot} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
     !if "${INSTALLMODE}" == "perMachine"
       ${If} ${RunningX64}
         StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCTNAME}"
