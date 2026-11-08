@@ -149,7 +149,9 @@ const TAB_METADATA: Record<
 export const TopBar: React.FC<TopBarProps> = ({
   currentTab,
 }) => {
-  const meta = TAB_METADATA[currentTab];
+  // Fall back to Overview for any unexpected tab value: an unguarded lookup
+  // would throw on first paint and unmount the whole window (no error boundary).
+  const meta = TAB_METADATA[currentTab] ?? TAB_METADATA.overview;
   const Icon = meta.icon;
   // This title is the view's heading inside the desktop shell, but reconlab.app
   // mounts this same component inside a page that already owns the document h1 —

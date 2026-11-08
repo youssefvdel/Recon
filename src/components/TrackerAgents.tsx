@@ -263,9 +263,9 @@ export const TrackerAgents: React.FC = () => {
       {/* Page header — same shell as Match History */}
       <div className="flex items-center justify-between mb-3.5">
         <header className="min-w-0">
-          <h1 className="font-display font-black text-xl text-m3-on-surface tracking-tight">
+          <h2 className="font-display font-black text-xl text-m3-on-surface tracking-tight">
             Agent Performance
-          </h1>
+          </h2>
           <p className="text-xs text-m3-outline mt-0.5">
             Competitive act statistics across all played agents
           </p>

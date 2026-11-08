@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { isDevTabHeld } from './devTools';
-import type { DisplayInfo, ShortcutBinding, GpuInfo, GpuSettingsReport, WindowInfo, ConfigFileInfo, QuickShortcut, MonitorDevice } from '../types';
+import type { DisplayInfo, ShortcutBinding, GpuInfo, GpuSettingsReport, WindowInfo, ConfigFileInfo, MonitorDevice } from '../types';
 
 export const isTauri = () => {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -106,23 +106,6 @@ const mockConfigs: ConfigFileInfo[] = [
     should_letterbox: false,
     res_x: 2088,
     res_y: 1440,
-  },
-];
-
-const mockShortcuts: QuickShortcut[] = [
-  {
-    id: 'valorant',
-    name: 'VALORANT',
-    window_match: 'VALORANT',
-    icon: 'valorant',
-    is_removable: false,
-  },
-  {
-    id: 'cs2',
-    name: 'Counter-Strike 2',
-    window_match: 'Counter-Strike 2',
-    icon: 'crosshair',
-    is_removable: true,
   },
 ];
 
@@ -253,11 +236,6 @@ export async function showOverlay(): Promise<void> {
 export async function hideOverlay(): Promise<void> {
   if (!isTauri()) return;
   await invoke('hide_overlay');
-}
-
-export async function setOverlayClickthrough(enabled: boolean): Promise<void> {
-  if (!isTauri()) return;
-  await invoke('set_overlay_clickthrough', { enabled });
 }
 
 export async function setOverlayEditMode(inEditMode: boolean): Promise<void> {
@@ -415,35 +393,6 @@ export async function fetchValorantConfigs(): Promise<ConfigFileInfo[]> {
   return await invoke<ConfigFileInfo[]>('get_valorant_configs');
 }
 
-export async function updateValorantConfig(
-  path: string,
-  setWindowed: boolean,
-  res?: [number, number],
-  lockReadonly: boolean = false
-): Promise<void> {
-  if (!isTauri()) {
-    const cfg = mockConfigs.find(c => c.path === path);
-    if (cfg) {
-      if (setWindowed) {
-        cfg.fullscreen_mode = 2;
-        cfg.should_letterbox = false;
-      }
-      if (res) {
-        cfg.res_x = res[0];
-        cfg.res_y = res[1];
-      }
-      cfg.is_read_only = lockReadonly;
-    }
-    return;
-  }
-  await invoke('update_valorant_config', {
-    path,
-    setWindowed,
-    res: res ?? null,
-    lockReadonly,
-  });
-}
-
 export async function updateValorantConfigCustom(
   path: string,
   options: import('../types').ValorantCustomOptions
@@ -578,11 +527,6 @@ export async function setValorantConfigValue(
   await invoke('set_valorant_config_value', { path, section, key, value, lockReadonly });
 }
 
-export async function fetchQuickShortcuts(): Promise<QuickShortcut[]> {
-  if (!isTauri()) return mockShortcuts;
-  return await invoke<QuickShortcut[]>('get_quick_shortcuts');
-}
-
 let mockPreferredStretched: [number, number] = [2088, 1440];
 
 export async function fetchPreferredStretchedRes(): Promise<[number, number]> {
@@ -596,28 +540,6 @@ export async function savePreferredStretchedRes(width: number, height: number): 
     return mockPreferredStretched;
   }
   return await invoke<[number, number]>('set_preferred_stretched_res', { width, height });
-}
-
-export async function applyCustomResToAllConfigs(
-  width: number,
-  height: number,
-  lockReadonly: boolean
-): Promise<string> {
-  if (!isTauri()) {
-    mockConfigs.forEach(c => {
-      c.fullscreen_mode = 2;
-      c.should_letterbox = false;
-      c.res_x = width;
-      c.res_y = height;
-      c.is_read_only = lockReadonly;
-    });
-    return `Successfully applied ${width}×${height} and bypassed letterbox across ${mockConfigs.length} game config(s)!`;
-  }
-  return await invoke<string>('apply_custom_res_to_all_configs', {
-    width,
-    height,
-    lockReadonly,
-  });
 }
 
 export async function checkRequestedTab(): Promise<string | null> {
@@ -756,22 +678,6 @@ export async function setOverlayMonitor(monitor: string): Promise<string> {
  * uses CCD Attached/Detached — use {@link setMonitorDeviceEnabled} instead.
  * Do not call from new UI code.
  */
-export async function setMonitorAttached(
-  deviceName: string,
-  attached: boolean
-): Promise<MonitorDevice[]> {
-  if (!isTauri()) {
-    mockMonitors = mockMonitors.map((m) =>
-      m.device_name === deviceName ? { ...m, is_attached: attached } : m
-    );
-    return mockMonitors;
-  }
-  return await invoke<MonitorDevice[]>('set_monitor_attached', {
-    deviceName,
-    attached,
-  });
-}
-
 /**
  * True Device Manager disable/enable (SetupDi, admin). This is the ONLY
  * supported path in the Display Manager UI.
@@ -798,35 +704,7 @@ export async function setMonitorDeviceEnabled(
   });
 }
 
-export async function setMonitorPrimary(
-  deviceName: string
-): Promise<MonitorDevice[]> {
-  if (!isTauri()) {
-    mockMonitors = mockMonitors.map((m) => ({
-      ...m,
-      is_primary: m.device_name === deviceName,
-    }));
-    return mockMonitors;
-  }
-  return await invoke<MonitorDevice[]>('set_monitor_primary', { deviceName });
-}
-export async function restartGraphicsDriver(): Promise<string> {
-  if (!isTauri()) {
-    return 'Mock: Graphics driver restarted successfully!';
-  }
-  return await invoke<string>('restart_graphics_driver');
-}
-
-export async function resetAllEdidOverrides(): Promise<string> {
-  if (!isTauri()) {
-    return 'Mock: All EDID overrides reset successfully!';
-  }
-  return await invoke<string>('reset_all_edid_overrides');
-}
-
 /** Back-compat alias for resetAllEdidOverrides */
-export const resetAllCruOverrides = resetAllEdidOverrides;
-
 export interface CustomModeTest {
   exists: boolean;
   code: number;
@@ -927,14 +805,6 @@ export function friendlyToggleProfileError(raw: unknown): string {
     );
   }
   return msg;
-}
-
-export async function testCustomMode(width: number, height: number, hz: number): Promise<CustomModeTest> {
-  if (!isTauri()) {
-    const exists = mockDisplayInfo.current_width === width && mockDisplayInfo.current_height === height && mockDisplayInfo.current_hz === hz;
-    return { exists, code: exists ? 0 : -2 };
-  }
-  return await invoke<CustomModeTest>('test_custom_mode', { width, height, hz });
 }
 
 export async function addCustomResolution(monitorId: string, width: number, height: number, hz: number): Promise<string> {

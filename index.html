@@ -6,8 +6,34 @@
     <title>Recon • Stretched Resolution & Utility</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..800;1,9..40,400..800&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
-    <style>html,body{margin:0;padding:0;background:transparent !important}</style>
+    <!-- Fonts are progressive enhancement: load them off the critical path so
+         the first frame never waits on fonts.googleapis.com. Offline or slow
+         DNS paints with the system fallback immediately, then swaps in. -->
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..800;1,9..40,400..800&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800;900&display=swap"
+      onload="this.rel='stylesheet'"
+    />
+    <noscript>
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..800;1,9..40,400..800&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800;900&display=swap"
+      />
+    </noscript>
+    <script>
+      // The overlay window (index.html#overlay) must be transparent from the
+      // very first frame, not just after React mounts. Every other window gets
+      // the dark shell below so the main window never flashes white.
+      if (location.hash.includes('overlay') || location.search.includes('overlay')) {
+        document.documentElement.classList.add('overlay-window');
+      }
+    </script>
+    <style>
+      html, body { margin: 0; padding: 0; background: #140e1b; color-scheme: dark; }
+      html.overlay-window,
+      html.overlay-window body { background: transparent; }
+    </style>
   </head>
   <body>
     <div id="root"></div>

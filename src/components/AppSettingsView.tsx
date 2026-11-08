@@ -496,9 +496,9 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
       <div className="max-w-4xl mx-auto w-full space-y-6 pb-12">
         {/* Header */}
         <div className="flex flex-col space-y-1">
-          <h1 className="text-xl sm:text-2xl font-black font-display text-m3-on-surface tracking-tight">
+          <h2 className="text-xl sm:text-2xl font-black font-display text-m3-on-surface tracking-tight">
             Application Settings
-          </h1>
+          </h2>
           <p className="text-xs text-m3-outline">
             Software updater, Windows startup preferences, and system tray configuration.
           </p>

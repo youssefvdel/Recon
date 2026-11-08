@@ -671,7 +671,7 @@ export const MatchHistory: React.FC = () => {
     <div className="h-full min-h-0 max-w-6xl mx-auto w-full overflow-y-auto custom-scrollbar px-4 sm:px-6 py-3.5 pb-8">
       <div className="flex flex-col gap-3">
         <header className="shrink-0 px-1">
-          <h1 className="font-display font-black text-xl text-m3-on-surface tracking-tight">Match History</h1>
+          <h2 className="font-display font-black text-xl text-m3-on-surface tracking-tight">Match History</h2>
           <p className="text-xs text-m3-outline mt-0.5">Competitive matches, newest first</p>
         </header>
 

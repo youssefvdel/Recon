@@ -259,7 +259,7 @@ export const TrackerMaps: React.FC = () => {
       {/* Page header — same shell as the other tracker views */}
       <div className="flex items-center justify-between mb-3">
         <header className="min-w-0">
-          <h1 className="font-display font-black text-xl text-m3-on-surface tracking-tight">Maps</h1>
+          <h2 className="font-display font-black text-xl text-m3-on-surface tracking-tight">Maps</h2>
           <p className="text-xs text-m3-outline mt-0.5">Performance by map for the selected act</p>
         </header>
         <div className="flex items-center gap-2 shrink-0">

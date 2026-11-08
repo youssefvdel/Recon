@@ -52,17 +52,6 @@ const clampByte = (n: number): number =>
   Math.max(0, Math.min(255, Math.round(Number.isFinite(n) ? n : 0)));
 
 /** `(R=0,G=255,B=0,A=255)` → {r,g,b,a}. Garbage in, white out. */
-export function parseRiotColor(s: unknown): Rgba {
-  const nums = String(s ?? '').match(/\d+/g)?.map(Number) ?? [];
-  if (nums.length < 3) return { ...WHITE };
-  return {
-    r: clampByte(nums[0]),
-    g: clampByte(nums[1]),
-    b: clampByte(nums[2]),
-    a: clampByte(nums[3] ?? 255),
-  };
-}
-
 /** `{r,g,b,a}` or legacy `{R,G,B,A}` → Rgba. Garbage in, white out. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function parseColorObject(o: any): Rgba {

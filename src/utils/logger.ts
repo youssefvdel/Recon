@@ -56,10 +56,6 @@ export function getRecentLogs(n = 200): string[] {
 }
 
 /** Drop buffered log lines. */
-export function clearRecentLogs(): void {
-  logBuffer.length = 0;
-}
-
 export const logger = {
   log: (...args: LogArgs): void => {
     pushLine('log', args);

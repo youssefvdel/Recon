@@ -44,8 +44,21 @@ function preloadView(tab: TabType): void {
 function preloadAllViews(): void {
   for (const load of Object.values(VIEW_LOADERS)) void load?.().catch(() => {});
 }
-import { OverlayView } from './components/OverlayView';
+
+/* Legacy tabs from pre-0.5 builds can still sit in localStorage ('sens',
+ * 'custom_res'). Tab restore accepts them, but they have no view any more, so
+ * a launch painted an empty content pane. Map them to the views they were
+ * merged into; their stored value is rewritten on the next persist. */
+const LEGACY_TAB_ALIAS: Partial<Record<TabType, TabType>> = {
+  sens: 'switcher',
+  custom_res: 'game_config',
+  borderless: 'switcher',
+};
+const normalizeTab = (tab: TabType): TabType => LEGACY_TAB_ALIAS[tab] ?? tab;
+const OverlayView = lazy(() => import('./components/OverlayView').then((m) => ({ default: m.OverlayView })));
 import { TooltipHost } from './components/ReconTooltip';
+import { ViewSkeleton } from './components/ViewSkeleton';
+import { ViewErrorBoundary } from './components/ViewErrorBoundary';
 import type { DisplayInfo, ShortcutBinding, GpuInfo, TabType } from './types';
 import { logger } from './utils/logger';
 import { resolveInitialTab } from './utils/tabRestore';
@@ -132,7 +145,7 @@ export const App: React.FC = () => {
       // Sidebar version/UPDATE pill navigates there), so resolveInitialTab
       // excludes it and a launch falls back to overview. The current tab is
       // still persisted below, so the saved value stays truthful.
-      return resolveInitialTab(localStorage.getItem('recon_active_tab'));
+      return normalizeTab(resolveInitialTab(localStorage.getItem('recon_active_tab')));
     } catch {
       return 'overview';
     }
@@ -422,7 +435,7 @@ export const App: React.FC = () => {
   }, [currentTab]);
 
   const isFitViewportTab = true;
-  const effectiveTab: TabType = currentTab === 'borderless' ? 'switcher' : currentTab;
+  const effectiveTab: TabType = normalizeTab(currentTab);
 
   const handleToggle = async () => {
     setIsLoading(true);
@@ -479,21 +492,27 @@ export const App: React.FC = () => {
 
   if (isOverlay) {
     return (
-      <>
-        <OverlayView />
+      <MotionConfig reducedMotion="user">
+        {/* Overlay window only: null fallback keeps it transparent while the
+            chunk loads instead of flashing a skeleton over the game. */}
+        <Suspense fallback={null}>
+          <OverlayView />
+        </Suspense>
         <TooltipHost />
-      </>
+      </MotionConfig>
     );
   }
 
   if (isDevWindow) {
     return (
-      <div className="h-screen w-screen bg-m3-surface text-m3-on-surface flex flex-col overflow-hidden selection:bg-m3-primary-container selection:text-m3-on-primary-container antialiased font-sans">
-        <Suspense fallback={null}>
-          <DevDashboard />
-        </Suspense>
-        <TooltipHost />
-      </div>
+      <MotionConfig reducedMotion="user">
+        <div className="h-screen w-screen bg-m3-surface text-m3-on-surface flex flex-col overflow-hidden selection:bg-m3-primary-container selection:text-m3-on-primary-container antialiased font-sans">
+          <Suspense fallback={<ViewSkeleton />}>
+            <DevDashboard />
+          </Suspense>
+          <TooltipHost />
+        </div>
+      </MotionConfig>
     );
   }
 
@@ -542,7 +561,8 @@ export const App: React.FC = () => {
           }
         >
           <div className="h-full min-h-0 w-full">
-            <Suspense fallback={null}>
+            <ViewErrorBoundary key={effectiveTab}>
+            <Suspense fallback={<ViewSkeleton />}>
             <AnimatePresence mode="wait">
               <motion.div
                 key={effectiveTab}
@@ -621,6 +641,7 @@ export const App: React.FC = () => {
               </motion.div>
             </AnimatePresence>
             </Suspense>
+            </ViewErrorBoundary>
           </div>
         </main>
       </div>

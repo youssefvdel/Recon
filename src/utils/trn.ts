@@ -159,21 +159,12 @@ export function setTrnHttpEnabled(on: boolean): void {
 }
 
 /** Test seam. */
-export function resetTrnHttpEnabledCache(): void {
-  trnHttpEnabled = null;
-}
-
 /** Shape returned when the user switched the direct transport off. */
 export const TRN_HTTP_DISABLED = 'TRN_HTTP_DISABLED';
 /** tracker.gg says this Riot profile is private (HTTP 451). Terminal — never retried. */
 export const TRN_PRIVATE = 'TRN_PRIVATE';
 
 /** True for the opt-out shape. Pure. */
-export function isTrnHttpDisabled(msg: unknown): boolean {
-  const s = typeof msg === 'string' ? msg : msg instanceof Error ? msg.message : String(msg ?? '');
-  return s.includes(TRN_HTTP_DISABLED);
-}
-
 /** True when tracker.gg returned 451 / our 451 marker. Pure. */
 export function isTrnPrivateMarked(msg: unknown): boolean {
   const s = typeof msg === 'string' ? msg : msg instanceof Error ? msg.message : String(msg ?? '');
@@ -292,19 +283,18 @@ async function transportGet(path: string, drain: boolean): Promise<string> {
     } catch (e) {
       const msg = String(e);
       if (import.meta.env.DEV) trnLog('direct transport miss', msg.slice(0, 100));
-      // Opt-out, a missing backend command, or a connection-level failure —
-      // all mean "use the window". An HTTP answer is NOT a transport failure
-      // and must reach the ladder untouched.
-      if (
-        !isTrnHttpDisabled(msg) &&
-        !msg.includes('EDGE_UNAVAILABLE') &&
-        !msg.includes('not found') &&
-        !msg.includes('unknown command') &&
-        !msg.includes('error sending request') &&
-        !msg.includes('connection')
-      ) {
-        throw new Error(msg);
-      }
+      // Allowlist, not a denylist. Only two shapes count as a REAL ANSWER from
+      // tracker.gg and must reach the ladder untouched:
+      //   TRN_PRIVATE / TRN_NO_DATA / TRN_RATE_LIMITED / TRN_CAPTCHA_REQUIRED
+      //   HTTP <status>
+      // Everything else is a transport failure by definition — a missing or
+      // renamed command, a capability denial, DNS/TLS/timeout, or an error text
+      // we have never seen — so the window gets a turn. TRN_HTTP_DISABLED is
+      // deliberately NOT an answer: the opt-out means "use the other path".
+      const isTrnAnswer = /TRN_(PRIVATE|NO_DATA|RATE_LIMITED|CAPTCHA_REQUIRED)/.test(msg);
+      const isHttpStatus = /HTTP \d{3}/.test(msg);
+      if (isTrnAnswer || isHttpStatus) throw new Error(msg);
+      if (import.meta.env.DEV) trnLog('falling back to edge', msg.slice(0, 100));
     }
   }
   return edgeGet(path, drain);

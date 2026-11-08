@@ -333,7 +333,7 @@ export const Overview: React.FC = () => {
   return (
     <motion.div initial="hidden" animate="show" className="h-full min-h-0 flex flex-col justify-start gap-2 max-w-6xl mx-auto w-full px-6 pt-3 pb-3 overflow-y-auto custom-scrollbar">
       <header className="shrink-0 px-1">
-        <h1 className="font-display font-black text-xl text-m3-on-surface tracking-tight">Overview</h1>
+        <h2 className="font-display font-black text-xl text-m3-on-surface tracking-tight">Overview</h2>
         <p className="text-xs text-m3-outline mt-0.5">Your competitive profile at a glance</p>
       </header>
       {(riotClient !== 'ok' || clientClosed) && (

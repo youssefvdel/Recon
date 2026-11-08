@@ -111,18 +111,6 @@ export async function isRiotClientRunning(): Promise<boolean> {
 
 /** Get the currently logged-in account, or the cached account if Riot Client is closed.
     Never throws — returns null if there has never been any logged-in user. */
-export async function getEffectiveAccount(): Promise<LocalRiotAccount | null> {
-  const running = await isRiotClientRunning();
-  if (!running) {
-    return readCachedAccount();
-  }
-  try {
-    return await detectLocalAccount();
-  } catch {
-    return readCachedAccount();
-  }
-}
-
 /** Logged-in Riot account from the local client. Throws when the client is closed. */
 export async function detectLocalAccount(): Promise<LocalRiotAccount> {
   const live = await detectLocalAccountLive();
@@ -179,16 +167,6 @@ export function writeCachedAccount(acc: LocalRiotAccount): void {
 }
 
 /** True when the live account is a different player than the cached one. */
-export function accountSwitched(cached: LocalRiotAccount | null, live: LocalRiotAccount): boolean {
-  if (!cached) return false;
-  const a = (cached.puuid || '').toLowerCase();
-  const b = (live.puuid || '').toLowerCase();
-  if (a && b) return a !== b;
-  // No PUUID available: fall back to name#tag comparison.
-  return `${cached.game_name}#${cached.tagline}`.toLowerCase() !==
-    `${live.game_name}#${live.tagline}`.toLowerCase();
-}
-
 /** Drop the snapshot for a specific account (used when the user switches). */
 export function clearAccountSnapshot(puuid: string): void {
   try {
@@ -705,10 +683,6 @@ export function extractPeakInfo(
 
 /** Calculate the true all-time peak tier from Riot's SeasonalInfoBySeasonID payload */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function extractPeakTier(seasonsObj: Record<string, any>): number {
-  return extractPeakInfo(seasonsObj).tier;
-}
-
 /** Rank + RR + peak + per-season peaks straight from Riot.
  *
  *  Riot error payloads (downtime, 4xx/5xx) are NOT empty data. Without the

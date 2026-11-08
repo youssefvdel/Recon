@@ -50,8 +50,6 @@ export const TRN_PRIVATE_TOOLTIP = 'Private tracker profile — sign in on track
 /** Tooltip for the "still filling" dot on an unresolved TRN stat. */
 export const TRN_PENDING_TOOLTIP = 'Fetching tracker.gg stats…';
 /** Tooltip for a TRN stat we asked for and could not get. */
-export const TRN_UNAVAILABLE_TOOLTIP = 'tracker.gg lookup failed — retrying later';
-
 /** Full MMR picture for a lobby player, surfaced on hover. */
 export function rankTooltip(p: LiveMatchPlayer, actLabel?: string): string {
   const bits: string[] = [];
@@ -88,16 +86,6 @@ export function formatKd(kd?: number | string): { text: string; color: string } 
       ? 'text-m3-mint font-semibold'
       : 'text-rose-400 font-medium';
   return { text, color };
-}
-
-/** Last-24h record for a player, or null when we have no games to report. */
-export function recentLabel(p: LiveMatchPlayer): { text: string; color: string } | null {
-  const won = p.recentWon ?? 0;
-  const lost = p.recentLost ?? 0;
-  if (won === 0 && lost === 0) return null;
-  const pct = won + lost > 0 ? won / (won + lost) : 0;
-  const color = pct >= 0.5 ? 'text-m3-mint' : 'text-rose-400';
-  return { text: `${won}W-${lost}L`, color };
 }
 
 /** Party colour coding. 0/undefined = solo (no style). */

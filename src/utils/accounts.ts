@@ -47,8 +47,6 @@ export const accountsList = (): Promise<AccountMeta[]> =>
 export const accountCurrent = (): Promise<string | null> =>
   isTauri() ? invoke<string | null>('account_current') : Promise.resolve(null);
 
-export const accountSaveCurrent = (): Promise<AccountMeta> => invoke<AccountMeta>('account_save_current');
-
 /** Watchdog tick — all policy in Rust; resolves null when unavailable. */
 export const accountsAutoTick = (): Promise<TickResult | null> =>
   isTauri() ? invoke<TickResult>('accounts_auto_tick').catch(() => null) : Promise.resolve(null);

@@ -848,6 +848,20 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('source: forced at the single choke point', trnSrc.includes('withOverwolfSource(rawPath)'), true);
 }
 
+// --- direct-transport fallback is an ALLOWLIST (task-54) -------------------
+// Anything that is not a TRN_* answer or an `HTTP <status>` is a transport
+// failure and must fall back to the edge path. A denylist of known strings
+// silently stopped falling back the day Tauri reworded its rejection.
+{
+  const src = trnSrc;
+  check('fallback allowlist exists', src.includes('isTrnAnswer') && src.includes('isHttpStatus'), true);
+  check('TRN answers are allowlisted', /TRN_\(PRIVATE\|NO_DATA\|RATE_LIMITED\|CAPTCHA_REQUIRED\)/.test(src), true);
+  check('HTTP status is allowlisted', /\/HTTP \\d\{3\}\//.test(src), true);
+  check('unknown rejections fall through to edge', src.includes("trnLog('falling back to edge'"), true);
+  // The old denylist must be gone: no literal 'not found' match.
+  check('no brittle not-found string match', src.includes("msg.includes('not found')"), false);
+}
+
 if (failures > 0) {
   console.error(`${failures} failure(s)`);
   process.exit(1);
