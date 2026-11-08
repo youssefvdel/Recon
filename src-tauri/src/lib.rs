@@ -25,6 +25,15 @@ static AUTO_BORDERLESS_ENABLED: AtomicBool = AtomicBool::new(false);
 pub static OVERLAY_EDIT_MODE: AtomicBool = AtomicBool::new(false);
 static OVERLAY_WINDOWED: AtomicBool = AtomicBool::new(false);
 
+/// TRUE once the HUD window was built successfully in `setup`.
+///
+/// The overlay is no longer a config-created window (`"create": false`): Tauri
+/// builds config windows with `.build()?` before our setup runs, so a failed
+/// HUD used to abort the entire app. Now its creation is ours, failures are
+/// non-fatal, and this flag is the single switch every overlay daemon reads
+/// before touching a window.
+pub static OVERLAY_AVAILABLE: AtomicBool = AtomicBool::new(false);
+
 /// Whether the HUD has content worth compositing right now (audit overlay#4).
 /// TRUE at boot: the daemon's pre-audit behaviour is preserved until the UI
 /// reports its own render gates through `set_overlay_present`.
@@ -903,8 +912,7 @@ fn list_supported_modes() -> Result<Vec<display::DisplayMode>, String> {
 /// dialog. That is exactly how the broken bundled WebView2 runtime presented in
 /// 0.4.x. A MessageBox is the only channel that survives a dead console, so
 /// every fatal startup path goes through here.
-fn fatal_startup_error(detail: &str) {
-    log::error!("[startup] fatal: {detail}");
+fn show_message_box(title: &str, body: &str) {
     #[cfg(windows)]
     unsafe {
         use windows::Win32::Foundation::HWND;
@@ -913,12 +921,9 @@ fn fatal_startup_error(detail: &str) {
         // MessageBoxW takes NUL-terminated UTF-16; build both strings by hand
         // (same shape as window_manager's SetWindowTextW call) so nothing here
         // depends on an HSTRING import.
-        let body = format!(
-            "Recon could not start.\n\nRe-run the installer or check the WebView2 runtime.\n\nDetails: {detail}"
-        );
         let mut body_w: Vec<u16> = body.encode_utf16().collect();
         body_w.push(0);
-        let mut title_w: Vec<u16> = "Recon - startup failed".encode_utf16().collect();
+        let mut title_w: Vec<u16> = title.encode_utf16().collect();
         title_w.push(0);
 
         let _ = MessageBoxW(
@@ -929,9 +934,54 @@ fn fatal_startup_error(detail: &str) {
         );
     }
     #[cfg(not(windows))]
-    eprintln!("Recon could not start: {detail}");
+    eprintln!("{title}: {body}");
+}
 
+fn fatal_startup_error(detail: &str) {
+    log::error!("[startup] fatal: {detail}");
+    show_message_box(
+        "Recon - startup failed",
+        &format!(
+            "Recon could not start.\n\nRe-run the installer or check the WebView2 runtime.\n\nDetails: {detail}"
+        ),
+    );
     std::process::exit(1);
+}
+
+/// What the player reads when the HUD window could not be built. Pure so it can
+/// be unit-tested without a window.
+fn overlay_unavailable_message(detail: &str) -> String {
+    format!(
+        "The in-game HUD window could not be created, so Recon is running without overlays.\n\nEverything else keeps working. Restart Recon, and if the HUD stays missing re-run the installer or check the WebView2 runtime.\n\nDetails: {detail}"
+    )
+}
+
+fn notify_overlay_unavailable(detail: &str) {
+    log::warn!("[overlay] unavailable: {detail}");
+    show_message_box(
+        "Recon - HUD unavailable",
+        &overlay_unavailable_message(detail),
+    );
+}
+
+/// Build the HUD from its `tauri.conf.json` entry, which is `"create": false`.
+///
+/// Deliberately not a config-created window: Tauri's own startup loop does
+/// `.build()?` on every config window before our `setup` runs, so a webview
+/// failure on the overlay aborted the whole process — zero windows, no dialog.
+/// The HUD is optional; the app is not.
+fn build_overlay_window(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, String> {
+    let cfg = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == "overlay")
+        .cloned()
+        .ok_or_else(|| "overlay window config missing".to_string())?;
+    let builder =
+        tauri::WebviewWindowBuilder::from_config(app, &cfg).map_err(|e| e.to_string())?;
+    builder.build().map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1007,6 +1057,17 @@ pub fn run() {
             #[cfg(debug_assertions)]
             if let Err(e) = build_dev_window(app.handle()) {
                 log::warn!("[dev] dev dashboard window: {e}");
+            }
+
+            // The HUD is built here, not by Tauri's config loop, so a webview
+            // failure disables overlays instead of killing the app. Every
+            // overlay daemon below reads OVERLAY_AVAILABLE and no-ops when this
+            // failed; the tray reports the reason on demand.
+            match build_overlay_window(app.handle()) {
+                Ok(_) => OVERLAY_AVAILABLE.store(true, Ordering::Relaxed),
+                Err(e) => {
+                    log::error!("[overlay] HUD window creation failed; running without overlays: {e}");
+                }
             }
             space_spam::start(app.handle());
             let handle = app.handle().clone();
@@ -1112,6 +1173,10 @@ pub fn run() {
             std::thread::spawn(move || {
                 loop {
                     std::thread::sleep(std::time::Duration::from_millis(2000));
+                    // No HUD window: nothing to show, align, heal or hide.
+                    if !OVERLAY_AVAILABLE.load(Ordering::Relaxed) {
+                        continue;
+                    }
                     if OVERLAY_EDIT_MODE.load(Ordering::Relaxed)
                         || OVERLAY_WINDOWED.load(Ordering::Relaxed)
                     {
@@ -1224,6 +1289,12 @@ pub fn run() {
                 let mut tab_shown = false;
                 loop {
                     std::thread::sleep(std::time::Duration::from_millis(100));
+                    // Edit mode and the Tab peek both need the window; with no
+                    // HUD there is nothing to guard, no chord to serve, and the
+                    // watchdog cannot be armed (edit mode needs the window).
+                    if !OVERLAY_AVAILABLE.load(Ordering::Relaxed) {
+                        continue;
+                    }
                     let chord = window_manager::overlay_edit_exit_chord_down();
                     if chord && !chord_was_down {
                         force_overlay_edit_mode_off(&guard_handle, "Ctrl+Shift+H");
@@ -1310,8 +1381,9 @@ pub fn run() {
 
             // Create System Tray Menu
             let show_i = MenuItem::with_id(app, "show", "Show Recon", true, None::<&str>)?;
+            let hud_i = MenuItem::with_id(app, "hud", "Show HUD", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit Recon", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&show_i, &hud_i, &quit_i])?;
 
             if let Some(icon) = app.default_window_icon() {
                 let _tray = TrayIconBuilder::new()
@@ -1328,6 +1400,13 @@ pub fn run() {
                                 let _ = window.show();
                                 let _ = window.unminimize();
                                 let _ = window.set_focus();
+                            }
+                        }
+                        // An unavailable HUD used to fail silently here. The
+                        // player gets the reason instead, once per click.
+                        "hud" => {
+                            if let Err(e) = show_overlay(app.clone()) {
+                                notify_overlay_unavailable(&e);
                             }
                         }
                         _ => {}
@@ -1492,5 +1571,20 @@ pub fn run() {
     // windows. Surface it in a dialog instead.
     if let Err(error) = run_result {
         fatal_startup_error(&error.to_string());
+    }
+}
+
+#[cfg(test)]
+mod overlay_startup_tests {
+    use super::overlay_unavailable_message;
+
+    /// The player-facing text is the whole point of the non-fatal path: it must
+    /// say the app still works and carry the underlying error for support.
+    #[test]
+    fn unavailable_message_names_the_hud_and_carries_the_detail() {
+        let msg = overlay_unavailable_message("failed to create webview: 0x80070002");
+        assert!(msg.contains("running without overlays"));
+        assert!(msg.contains("failed to create webview: 0x80070002"));
+        assert!(msg.contains("HUD"));
     }
 }
