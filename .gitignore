@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 src-tauri/target/
+# Fetched WebView2 Fixed Runtime (169 MB) — never commit; CI fetches it.
+src-tauri/webview2-runtime/
 *.local
 .env
 bot/.env

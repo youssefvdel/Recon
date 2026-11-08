@@ -21,7 +21,8 @@
         "minHeight": 800,
         "resizable": true,
         "fullscreen": false,
-        "decorations": false
+        "decorations": false,
+        "dataDirectory": "com.recon.utility/profile"
       },
       {
         "label": "overlay",
@@ -44,11 +45,14 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "windows": {
+      "bundleVCRuntime": true,
       "webviewInstallMode": {
-        "type": "downloadBootstrapper",
-        "silent": true
+        "type": "fixedRuntime",
+        "path": "./webview2-runtime"
       }
     },
     "publisher": "Youssef Adel",

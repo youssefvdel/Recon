@@ -57,6 +57,17 @@ jobs:
           fi
           git log -1 --pretty=%B > release-notes.md
 
+      - name: Fetch fixed WebView2 runtime
+        # Pinned version lives in scripts/fetch-webview2.mjs; fails loudly when
+        # the payload is not Microsoft-signed. The 169 MB folder is gitignored.
+        run: bun scripts/fetch-webview2.mjs
+
+      - name: Assert fixed WebView2 runtime
+        # Tauri points WebView2 at <exe dir>/webview2-runtime with no fallback,
+        # so a missing folder must fail here, not on a user's machine.
+        shell: bash
+        run: test -f src-tauri/webview2-runtime/msedgewebview2.exe
+
       - name: Build signed bundle
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

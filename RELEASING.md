@@ -186,6 +186,43 @@ refuse the update.
 
 ---
 
+## Fixed WebView2 runtime
+
+Recon ships its own WebView2 runtime instead of using the machine's. The config
+uses `bundle.windows.webviewInstallMode: fixedRuntime` at `./webview2-runtime`,
+and at startup Tauri sets `WEBVIEW2_BROWSER_EXECUTABLE_FOLDER` to
+`<recon.exe folder>/webview2-runtime`. There is **no fallback** to a system
+runtime: an exe without that folder next to it will not start.
+
+- Pinned version: **157.0.4341.42**, from the NuGet package
+  `webview2.runtime.x64` (`https://api.nuget.org/v3-flatcontainer/...`).
+- Fetch: `bun scripts/fetch-webview2.mjs`. CI runs it before every build. It
+  downloads ~100 MB and writes 169 MB into `src-tauri/webview2-runtime/`, which
+  is gitignored — never commit it.
+- The script verifies `msedgewebview2.exe` is signed by
+  `CN=Microsoft Corporation` and exits non-zero on anything else; each workflow
+  also asserts the folder exists before `tauri build`, so a bad fetch fails the
+  build instead of shipping a broken app.
+
+The layout is always:
+
+```
+Recon/
+  recon.exe
+  webview2-runtime/     <- msedgewebview2.exe directly inside, no nesting
+```
+
+The portable artifact is `recon-portable-windows-x64.zip`, whose top folder is
+the app folder: unzip and run `Recon\recon.exe`. **Never hand out a bare
+`recon.exe`** — a "just replace the exe" download is broken by design now.
+
+To bump the runtime: change `DEFAULT_VERSION` in `scripts/fetch-webview2.mjs`,
+run `bun scripts/fetch-webview2.mjs <new-version>`, build once to confirm, and
+commit only the script change (the runtime folder stays ignored). A wrong or
+unsigned payload fails the fetch step, so it cannot reach a release.
+
+---
+
 ## Code signing
 
 `recon.exe` downloads are Authenticode-signed in CI with a **self-signed**
