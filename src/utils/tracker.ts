@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
-import type { LiveMatchPlayer, LiveMatchState, LocalRiotAccount, TrackerDuel, TrackerMatchDetail, TrackerMmrPoint, TrackerPlayer, TrackerProfile } from '../types';
+import type { LiveMatchPlayer, LiveMatchState, LocalRiotAccount, MatchRoundDetail, MatchRoundPlayer, TrackerDuel, TrackerMatchDetail, TrackerMmrPoint, TrackerPlayer, TrackerProfile } from '../types';
 import { isTauri } from './ipc';
 import { aggregateActStats, type ActAggregate, type ActMatchSample } from './actStats';
 import { setTrnMatchPhase, setTrnLobbyKey, getTrnMatchPhase, trnLog, trnProxyPaused, openTrnDrainJob, closeTrnDrainJob, isTrnPrivateError, trnNoteNegative } from './trn';
@@ -1140,6 +1140,105 @@ export async function harvestMatchNames(puuids: string[], region?: string): Prom
  * (match-details/v1 — the singular /match/v1 path 503s for client creds).
  * Immutable → cached forever. Throws when unusable.
  */
+/** Parse Riot's `roundResults[]` into the frozen round-timeline model.
+ *  PURE and exported: the check script drives it with synthetic payloads, and
+ *  `fetchMatchDetailDirect` is its only production caller. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function parseRoundDetails(roundsSrc: unknown[]): MatchRoundDetail[] {
+  /* Round timeline (docs/features/round-timeline.md §1).
+   * Built from roundResults[] ONLY. Deaths and assists are cross-player facts,
+   * so they are tallied across the whole round before each player line is
+   * emitted; damage taken is the mirror of another player's damage dealt. Every
+   * field that is not literally in the payload is omitted, never defaulted into
+   * a fake value. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (roundsSrc as any[]).map((r, rIdx) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pstats: any[] = Array.isArray(r?.playerStats) ? r.playerStats : [];
+    const deaths = new Map<string, number>();
+    const assists = new Map<string, number>();
+    const taken = new Map<string, number>();
+    for (const ps of pstats) {
+      for (const k of Array.isArray(ps?.kills) ? ps.kills : []) {
+        const v = String(k?.victim ?? '').toLowerCase();
+        if (v) deaths.set(v, (deaths.get(v) ?? 0) + 1);
+        for (const a of Array.isArray(k?.assistants) ? k.assistants : []) {
+          const au = String(a ?? '').toLowerCase();
+          if (au) assists.set(au, (assists.get(au) ?? 0) + 1);
+        }
+      }
+      // damageTaken is the mirror: whoever this damage hit took it.
+      for (const d of Array.isArray(ps?.damage) ? ps.damage : []) {
+        const rec = String(d?.receiver ?? '').toLowerCase();
+        if (rec) taken.set(rec, (taken.get(rec) ?? 0) + Number(d?.damage ?? 0));
+      }
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const roundPlayers: MatchRoundPlayer[] = pstats.map((ps: any) => {
+      const puuid = String(ps?.subject ?? '').toLowerCase();
+      let hs = 0;
+      let bs = 0;
+      let ls = 0;
+      let dealt = 0;
+      for (const d of Array.isArray(ps?.damage) ? ps.damage : []) {
+        hs += Number(d?.headshots ?? 0);
+        bs += Number(d?.bodyshots ?? 0);
+        ls += Number(d?.legshots ?? 0);
+        dealt += Number(d?.damage ?? 0);
+      }
+      const eco = ps?.economy ?? {};
+      const line: MatchRoundPlayer = {
+        puuid,
+        kills: Array.isArray(ps?.kills) ? ps.kills.length : 0,
+        deaths: deaths.get(puuid) ?? 0,
+        assists: assists.get(puuid) ?? 0,
+        headshots: hs,
+        bodyshots: bs,
+        legshots: ls,
+        damageDealt: dealt,
+        damageTaken: taken.get(puuid) ?? 0,
+        economy: {
+          loadoutValue: Number(eco?.loadoutValue ?? 0),
+          remaining: Number(eco?.remaining ?? 0),
+          spent: Number(eco?.spent ?? 0),
+          ...(eco?.weapon ? { weapon: String(eco.weapon) } : {}),
+          ...(eco?.armor ? { armor: String(eco.armor) } : {}),
+        },
+        killsDetail: (Array.isArray(ps?.kills) ? ps.kills : []).map((k: any) => ({
+          victimPuuid: String(k?.victim ?? '').toLowerCase(),
+          ...(k?.finishingDamage?.damageItem
+            ? { weapon: String(k.finishingDamage.damageItem) }
+            : {}),
+          roundTimeMs: Number(k?.roundTime ?? 0),
+          gameTimeMs: Number(k?.gameTime ?? 0),
+          assistantPuuids: (Array.isArray(k?.assistants) ? k.assistants : []).map((a: unknown) =>
+            String(a ?? '').toLowerCase()
+          ),
+        })),
+      };
+      return line;
+    });
+
+    const detail: MatchRoundDetail = {
+      roundNum: Number(r?.roundNum ?? rIdx + 1),
+      winningTeam: normTeam(r?.winningTeam),
+      players: roundPlayers,
+    };
+    if (r?.roundResult) detail.roundResult = String(r.roundResult);
+    if (r?.roundCeremony) detail.ceremony = String(r.roundCeremony);
+    if (r?.bombPlanter) detail.bombPlanter = String(r.bombPlanter).toLowerCase();
+    if (r?.bombDefuser) detail.bombDefuser = String(r.bombDefuser).toLowerCase();
+    // plantSite: only from the payload's own field. The plantLocation x/y
+    // buckets need a per-map calibration table we do not have here, so an
+    // absent plantSite stays absent rather than being guessed.
+    if (r?.plantSite) detail.plantSite = String(r.plantSite);
+    if (r?.plantRoundTime != null) detail.plantRoundTimeMs = Number(r.plantRoundTime);
+    if (r?.defuseRoundTime != null) detail.defuseRoundTimeMs = Number(r.defuseRoundTime);
+    return detail;
+  });
+}
+
 export async function fetchMatchDetailDirect(region: string, matchId: string): Promise<TrackerMatchDetail> {
   const cacheKey = `recon_match_v6_${matchId}`;
   try {
@@ -1282,10 +1381,13 @@ export async function fetchMatchDetailDirect(region: string, matchId: string): P
       }
     }
   });
+  const roundDetails = parseRoundDetails(roundsSrc);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mi: any = (j as any)?.matchInfo ?? {};
   const out: TrackerMatchDetail = {
     rounds,
+    roundDetails,
     players,
     kills,
     mapId: String(mi.mapId ?? ''),

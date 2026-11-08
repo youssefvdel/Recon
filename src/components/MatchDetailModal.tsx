@@ -4,6 +4,7 @@ import type { TrackerMatchDetail, TrackerMmrPoint } from '../types';
 import { tierName, resolvePlayerNames, gameData } from '../utils/tracker';
 import { getPartyStyle } from '../utils/playerDisplay';
 import { PlayerOverviewModal, type SelectedPlayerInfo } from './PlayerOverviewModal';
+import { RoundTimeline } from './RoundTimeline';
 import { ScoreBadge, scoreTier } from './ScoreBadge';
 import { StatValue } from './StatValue';
 import { formatPct } from '../utils/format';
@@ -1458,6 +1459,22 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
               </div>
             </div>
           )}
+
+          {/* Round-by-round — additive section below the scoreboard. Absent
+              roundDetails (old cached matches) renders its own empty state. */}
+          <RoundTimeline
+            key={detail.matchId ?? 'match'}
+            roundDetails={detail.roundDetails}
+            subjectPuuid={puuid}
+            roster={playerStats.map((p) => ({
+              puuid: p.puuid,
+              name: p.displayName,
+              tag: p.displayTag,
+              team: p.team,
+              agent: p.agent,
+            }))}
+            weaponNames={weaponMap}
+          />
         </div>
       </div>
 

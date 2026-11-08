@@ -165,9 +165,56 @@ export interface TrackerPlayer {
   partyIndex?: number;
 }
 
+/* ---- Round timeline (docs/features/round-timeline.md §1) ----
+ * Names are FROZEN: the round-timeline UI builds against these. */
+
+/** One player's line inside one round. */
+export type MatchRoundPlayer = {
+  puuid: string;
+  kills: number;
+  deaths: number;        // derived: times this player appears as a victim this round
+  assists: number;       // derived: appearances in another killer's assistants[]
+  headshots: number;     // damage[].headshots summed for this round
+  bodyshots: number;
+  legshots: number;
+  damageDealt: number;   // damage[] where the player is the attacker
+  damageTaken: number;   // damage[] where the player is the receiver
+  economy: {
+    loadoutValue: number;
+    remaining: number;
+    spent: number;
+    weapon?: string;     // economy.weapon, raw id (the modal resolves names)
+    armor?: string;
+  };
+  killsDetail: {
+    victimPuuid: string;
+    weapon?: string;       // finishingDamage.damageItem
+    roundTimeMs: number;   // roundTime
+    gameTimeMs: number;    // gameTime
+    assistantPuuids: string[];
+  }[];
+};
+
+/** One round, complete. */
+export type MatchRoundDetail = {
+  roundNum: number;
+  winningTeam: string;
+  roundResult?: string;    // Elimination | Bomb defused | Bomb detonated | …
+  ceremony?: string;
+  bombPlanter?: string;    // puuid
+  bombDefuser?: string;    // puuid
+  plantSite?: string;      // 'A' | 'B' | 'C'
+  plantRoundTimeMs?: number;
+  defuseRoundTimeMs?: number;
+  players: MatchRoundPlayer[];
+};
+
 export interface TrackerMatchDetail {
   matchId?: string;
   rounds: { winningTeam: string; roundResult?: string; ceremony?: string }[];
+  /** ADDITIVE (round-timeline spec §1). Absent on details cached before this
+   *  change, so every reader must treat undefined as "no round data". */
+  roundDetails?: MatchRoundDetail[];
   players: TrackerPlayer[];
   kills: TrackerDuel[];
   mapId: string;
