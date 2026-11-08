@@ -51,6 +51,9 @@
       "webviewInstallMode": {
         "type": "fixedRuntime",
         "path": "webview2-runtime"
+      },
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsh"
       }
     },
     "publisher": "Youssef Adel",

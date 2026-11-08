@@ -188,38 +188,48 @@ refuse the update.
 
 ## Fixed WebView2 runtime
 
-Recon ships its own WebView2 runtime instead of using the machine's. The config
-uses `bundle.windows.webviewInstallMode: fixedRuntime` at `./webview2-runtime`,
-and at startup Tauri sets `WEBVIEW2_BROWSER_EXECUTABLE_FOLDER` to
-`<recon.exe folder>/webview2-runtime`. There is **no fallback** to a system
-runtime: an exe without that folder next to it will not start.
+Recon ships Microsoft's WebView2 fixed-version runtime; it does not depend on the
+machine's. `bundle.windows.webviewInstallMode` is `fixedRuntime` at
+`webview2-runtime`, and at startup Tauri sets
+`WEBVIEW2_BROWSER_EXECUTABLE_FOLDER` to `<recon.exe folder>\webview2-runtime`.
+There is **no fallback**: a missing or incomplete folder opens zero windows — not
+an error dialog.
 
-- Pinned version: **157.0.4341.42**, from the NuGet package
-  `webview2.runtime.x64` (`https://api.nuget.org/v3-flatcontainer/...`).
-- Fetch: `bun scripts/fetch-webview2.mjs`. CI runs it before every build. It
-  downloads ~100 MB and writes 169 MB into `src-tauri/webview2-runtime/`, which
-  is gitignored — never commit it.
-- The script verifies `msedgewebview2.exe` is signed by
-  `CN=Microsoft Corporation` and exits non-zero on anything else; each workflow
-  also asserts the folder exists before `tauri build`, so a bad fetch fails the
-  build instead of shipping a broken app.
+- Pinned: **157.0.4341.42**, Microsoft's official fixed-version `.cab` (WebView2
+  download page), 257 files / 678 MB unpacked; `msedge.dll` alone is 357 MB.
+- Fetch: `bun scripts/fetch-webview2.mjs`. CI runs it before every build and
+  fails unless `msedge.dll` and the rest of the required set are present and
+  Microsoft-signed. `src-tauri/webview2-runtime/` is gitignored — never commit it.
+- Packaging: tauri-bundler 2.10.4 has **no NSIS arm for fixedRuntime** and never
+  copies the folder. It is shipped through
+  `bundle.resources: ["webview2-runtime/"]`, which installs it to
+  `$INSTDIR\webview2-runtime`. Keep both halves: the config alone ships no
+  runtime; the resources entry alone does not make Tauri look there.
 
-The layout is always:
+The layout is always `Recon/recon.exe` plus `Recon/webview2-runtime/` (no
+nesting), for the installer and for `recon-portable-windows-x64.zip` alike.
+**Never hand out a bare `recon.exe`** — a "replace the exe" download is broken by
+design now.
 
-```
-Recon/
-  recon.exe
-  webview2-runtime/     <- msedgewebview2.exe directly inside, no nesting
-```
+To bump the runtime: change `VERSION` in `scripts/fetch-webview2.mjs`, run
+`bun scripts/fetch-webview2.mjs`, build once, and commit only the script change.
+A wrong or unsigned payload fails the fetch step, so it cannot reach a release.
 
-The portable artifact is `recon-portable-windows-x64.zip`, whose top folder is
-the app folder: unzip and run `Recon\recon.exe`. **Never hand out a bare
-`recon.exe`** — a "just replace the exe" download is broken by design now.
+### Updating between WebView2 modes
 
-To bump the runtime: change `DEFAULT_VERSION` in `scripts/fetch-webview2.mjs`,
-run `bun scripts/fetch-webview2.mjs <new-version>`, build once to confirm, and
-commit only the script change (the runtime folder stays ignored). A wrong or
-unsigned payload fails the fetch step, so it cannot reach a release.
+An installed copy must match the release's WebView2 mode. The alpha6 → alpha7
+jump changed the layout (the `webview2-runtime/` folder appeared), so a
+system-mode install cannot serve a fixed-runtime build and vice versa. The
+symptom is a process that starts but never shows a window. Fix by uninstalling
+the old copy and installing the new release — never by replacing `recon.exe` by
+hand or mixing artifacts from two modes. Windows 10 additionally needs
+AppContainer read/execute grants on the folder; see `docs/webview2-embedded.md`.
+
+The installer remembers its directory as the default value of
+`HKCU\Software\Youssef Adel\Recon`. Uninstalling now clears that value (and the
+parent keys when they are empty), and an install ignores a remembered directory
+that no longer exists, so a stale probe install can no longer redirect a later
+one.
 
 ---
 
