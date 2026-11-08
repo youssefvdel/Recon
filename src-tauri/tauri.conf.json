@@ -80,7 +80,7 @@
       "endpoints": [
         "https://github.com/youssefvdel/Recon/releases/latest/download/latest.json"
       ],
-      "pubkey": "ZFc1MGNuVnpkR1ZrSUdOdmJXMWxiblE2SUcxcGJtbHphV2R1SUhCMVlteHBZeUJyWlhrNklEYzNSa1ExTVRZd1JUSkZRakUxUlRZS1VsZFViVVpsZG1sWlJrZzVaQzlCYWt0TmFubE1aMU5PYldocFprUTFjVnB5TTNSemMwd3habmxEUlZKRVZXdG1lRmh3ZVRsaEsyc0s=",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc3RkQ1MTYwRTJFQjE1RTYKUldUbUZldmlZRkg5ZC9BaktNanlMZ1NObWhpZkQ1cVpyM3Rzc0wxZnlDRVJEVWtmeFhweTlhK2sK",
       "windows": {
         "installMode": "passive"
       }
