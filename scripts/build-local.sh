@@ -5,7 +5,7 @@
 # clang/clang-cl, lld, llvm-rc/llvm-lib on PATH (LLVM 18+ from apt is enough).
 # First run compiles every crate (~10-20 min); after that it is ~1 minute.
 #
-# Output: dist-portable/Recon/ (exe + webview2-runtime + CRT DLLs)
+# Output: dist-portable/Recon/ (exe only; uses the machine WebView2)
 #         dist-portable/recon-portable-windows-x64.zip
 set -euo pipefail
 
@@ -20,10 +20,6 @@ export PATH="$HOME/.cargo/bin:/usr/local/bin:$PATH"
 echo "== frontend =="
 bun run build:ui
 
-# 2. Pinned WebView2 runtime (169 MB, git-ignored, fetched once).
-echo "== webview2 runtime =="
-bun scripts/fetch-webview2.mjs
-
 # 3. Rust. custom-protocol is REQUIRED: without it the binary does not embed the
 #    frontend and tries to reach the dev server at runtime.
 echo "== cargo xwin build =="
@@ -33,15 +29,11 @@ EXE="$ROOT/src-tauri/target/$TARGET/release/recon.exe"
 [ -f "$EXE" ] || { echo "missing $EXE" >&2; exit 1; }
 
 # 4. Stage the portable layout. Tauri resolves the runtime relative to the exe,
-#    so webview2-runtime/ must sit beside recon.exe.
+#    so the app uses the machine WebView2.
 echo "== stage =="
 rm -rf "$OUT"
 mkdir -p "$STAGE"
 cp "$EXE" "$STAGE/recon.exe"
-cp -r "$ROOT/src-tauri/webview2-runtime" "$STAGE/webview2-runtime"
-for dll in vcruntime140.dll vcruntime140_1.dll msvcp140.dll concrt140.dll; do
-  cp "$ROOT/src-tauri/webview2-runtime/$dll" "$STAGE/$dll"
-done
 
 # 5. Optional Authenticode signature (same certificate CI uses).
 PFX="$HOME/backups/recon/signing/recon-local.pfx"

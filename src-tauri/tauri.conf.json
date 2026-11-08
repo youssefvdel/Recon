@@ -21,8 +21,7 @@
         "minHeight": 800,
         "resizable": true,
         "fullscreen": false,
-        "decorations": false,
-        "dataDirectory": "com.recon.utility/profile"
+        "decorations": false
       },
       {
         "label": "overlay",
@@ -50,8 +49,8 @@
     ],
     "windows": {
       "webviewInstallMode": {
-        "type": "fixedRuntime",
-        "path": "./webview2-runtime"
+        "type": "downloadBootstrapper",
+        "silent": true
       }
     },
     "publisher": "Youssef Adel",
