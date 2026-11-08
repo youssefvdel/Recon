@@ -1030,9 +1030,15 @@ pub fn run() {
     // tray focuses the existing window instead of spawning a second copy.
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_mcp_bridge::init())
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_process::init());
+
+    // The MCP bridge binds 0.0.0.0:9223 with no authentication: anything on the
+    // LAN can execute JS in the app and invoke commands. It exists for local
+    // development and must never be part of a shipped binary.
+    #[cfg(debug_assertions)]
+    let builder = builder.plugin(tauri_plugin_mcp_bridge::init());
+
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.unminimize();
