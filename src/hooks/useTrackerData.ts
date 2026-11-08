@@ -56,6 +56,9 @@ type Snapshot = {
   trnMaps: TrnMapStat[];
   trnPrev: Record<string, { kd: number; matches: number }>;
   trnMatchTrs?: Record<string, number>;
+  /** When the TRN act blob was last fetched for real. Absent on snapshots
+   *  written before this field existed — those render as "age unknown". */
+  trnFetchedAt?: number;
   detailsById: Record<string, TrackerMatchDetail>;
   detailsReady: number;
 };
@@ -110,6 +113,8 @@ export interface TrackerData {
   trnMaps: TrnMapStat[];
   trnPrev: Record<string, { kd: number; matches: number }>;
   trnMatchTrs: Record<string, number>;
+  /** Epoch ms of the last successful TRN act fetch; undefined = cached/unknown. */
+  trnFetchedAt?: number;
   detailsById: Record<string, TrackerMatchDetail>;
   detailsReady: number;
   detailsTotal: number;
@@ -185,6 +190,7 @@ function initStore(): TrackerData {
     trnMaps: snap?.trnMaps ?? [],
     trnPrev: snap?.trnPrev ?? {},
     trnMatchTrs: snap?.trnMatchTrs ?? {},
+    trnFetchedAt: snap?.trnFetchedAt,
     detailsById: snap?.detailsById ?? {},
     detailsReady: snap?.detailsReady ?? 0,
     detailsTotal: snap?.games?.length ?? 0,
@@ -269,6 +275,7 @@ async function broadcastTrn(payload: {
   trnMaps: TrnMapStat[];
   trnPrev: Record<string, { kd: number; matches: number }>;
   trnMatchTrs: Record<string, number>;
+  trnFetchedAt?: number;
 }): Promise<void> {
   try {
     if (!isTauri()) return;
@@ -288,9 +295,15 @@ function mergeTrnBroadcast(p: {
   trnMaps: TrnMapStat[];
   trnPrev: Record<string, { kd: number; matches: number }>;
   trnMatchTrs: Record<string, number>;
+  trnFetchedAt?: number;
 }): void {
   const next: Partial<TrackerData> = {};
-  if (p.trn) next.trn = p.trn;
+  if (p.trn) {
+    next.trn = p.trn;
+    // Adopt the owner's real stamp. Never manufacture freshness: a failed
+    // refresh rebroadcasts the same stale blob with its old (or missing) time.
+    next.trnFetchedAt = p.trnFetchedAt;
+  }
   if (p.trnAgents?.length) next.trnAgents = p.trnAgents;
   if (p.trnMaps?.length) next.trnMaps = p.trnMaps;
   if (p.trnPrev && Object.keys(p.trnPrev).length) next.trnPrev = p.trnPrev;
@@ -379,6 +392,7 @@ async function runRefresh(): Promise<void> {
               trnMaps: fresh.trnMaps ?? [],
               trnPrev: fresh.trnPrev ?? {},
               trnMatchTrs: fresh.trnMatchTrs ?? {},
+              trnFetchedAt: fresh.trnFetchedAt,
               detailsById: fresh.detailsById ?? {},
               detailsReady: fresh.detailsReady ?? 0,
               detailsTotal: fresh.games?.length ?? 0,
@@ -434,6 +448,7 @@ async function runRefresh(): Promise<void> {
           trnMaps: newSnap.trnMaps ?? [],
           trnPrev: newSnap.trnPrev ?? {},
           trnMatchTrs: newSnap.trnMatchTrs ?? {},
+          trnFetchedAt: newSnap.trnFetchedAt,
           detailsById: newSnap.detailsById ?? {},
           detailsReady: newSnap.detailsReady ?? 0,
           detailsTotal: newSnap.games?.length ?? 0,
@@ -452,6 +467,7 @@ async function runRefresh(): Promise<void> {
           trnMaps: [],
           trnPrev: {},
           trnMatchTrs: {},
+          trnFetchedAt: undefined,
           detailsById: {},
           detailsReady: 0,
           detailsTotal: 0,
@@ -513,6 +529,7 @@ async function runRefresh(): Promise<void> {
         trnMaps: ensureStore().trnMaps,
         trnPrev: ensureStore().trnPrev,
         trnMatchTrs: ensureStore().trnMatchTrs,
+        trnFetchedAt: ensureStore().trnFetchedAt,
         // perf #6: detailsById was 928 kB of the ~938 kB snapshot, and a write
         // that large is REJECTED by the localStorage quota (see the note at the
         // top of this file) — so the JSON was built on every refresh and thrown
@@ -532,7 +549,7 @@ async function runRefresh(): Promise<void> {
     if (accName && ownsRefresh()) {
       enrichment.push(
         fetchTrnActStats(accName, accTag, prof.currentSeasonId)
-          .then(({ stats }) => updateStore({ trn: stats }))
+          .then(({ stats }) => updateStore({ trn: stats, trnFetchedAt: Date.now() }))
           .catch(() => {})
       );
       enrichment.push(
@@ -592,6 +609,7 @@ async function runRefresh(): Promise<void> {
           trnMaps: ensureStore().trnMaps,
           trnPrev: ensureStore().trnPrev,
           trnMatchTrs: ensureStore().trnMatchTrs,
+          trnFetchedAt: ensureStore().trnFetchedAt,
         });
       }
     });

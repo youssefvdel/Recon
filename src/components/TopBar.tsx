@@ -35,9 +35,7 @@ import {
 import { IS_DEV } from '../utils/devTools';
 import { performGlobalRefresh } from '../hooks/useTrackerData';
 import { isTrackerEnabled } from '../utils/trn';
-import { peekLiveMatchState } from '../utils/tracker';
-import type { LiveMatchState } from '../types';
-import { listen } from '@tauri-apps/api/event';
+import { useLiveMatchActive } from '../hooks/useLiveMatchActive';
 
 interface TopBarProps {
   currentTab: TabType;
@@ -169,35 +167,9 @@ export const TopBar: React.FC<TopBarProps> = ({
     }
   });
   const [showClove, setShowClove] = useState(false);
-  const [liveActive, setLiveActive] = useState(false);
-
   // Live-match shortcut: surface a jump pill next to the stats pill while a
-  // pregame/coregame lobby exists. Driven by the shared live-match sync bus.
-  useEffect(() => {
-    let alive = true;
-    const isLive = (s: LiveMatchState | null | undefined): boolean =>
-      !!s &&
-      !s.isPreviousMatch &&
-      (s.phase === 'pregame' || s.phase === 'coregame') &&
-      (s.blueTeam.length > 0 || s.redTeam.length > 0);
-    try {
-      if (alive) setLiveActive(isLive(peekLiveMatchState()));
-    } catch {}
-    let unlisten: (() => void) | undefined;
-    if (isTauri()) {
-      listen<LiveMatchState>('recon:live-match-sync', (event) => {
-        if (alive && event.payload) setLiveActive(isLive(event.payload));
-      })
-        .then((fn) => {
-          unlisten = fn;
-        })
-        .catch(() => {});
-    }
-    return () => {
-      alive = false;
-      if (unlisten) unlisten();
-    };
-  }, []);
+  // pregame/coregame lobby exists. Shared with the Tracker tab's live dot.
+  const liveActive = useLiveMatchActive();
 
   const handleGotoLive = (e: React.MouseEvent) => {
     e.stopPropagation();

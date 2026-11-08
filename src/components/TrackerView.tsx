@@ -5,6 +5,7 @@ import { TrackerMaps } from './TrackerMaps';
 import { TrackerAgents } from './TrackerAgents';
 import { LiveMatchView } from './LiveMatchView';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useLiveMatchActive } from '../hooks/useLiveMatchActive';
 
 export type TrackerSubTab = 'overview' | 'live' | 'matches' | 'agents' | 'maps';
 
@@ -25,6 +26,7 @@ export const TrackerView: React.FC<{ initialSubTab?: TrackerSubTab; liveRequest?
   initialSubTab = 'overview',
   liveRequest = 0,
 }) => {
+  const liveActive = useLiveMatchActive();
   const [subTab, setSubTab] = useState<TrackerSubTab>(() => {
     try {
       const saved = localStorage.getItem('recon_active_subtab') as TrackerSubTab;
@@ -85,8 +87,11 @@ export const TrackerView: React.FC<{ initialSubTab?: TrackerSubTab; liveRequest?
             >
               <span className="flex items-center gap-1.5">
                 <span>{t.label}</span>
-                {t.id === 'live' && (
-                  <span className="inline-flex rounded-full h-2 w-2 bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.9)]" />
+                {t.id === 'live' && liveActive && (
+                  <span
+                    className="inline-flex rounded-full h-2 w-2 bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.9)]"
+                    aria-hidden="true"
+                  />
                 )}
               </span>
               <span

@@ -68,6 +68,8 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
   const [currentVersion, setCurrentVersion] = useState(APP_VERSION);
   const [updateInfo, setUpdateInfo] = useState<AvailableUpdate | null>(null);
   const [checking, setChecking] = useState(false);
+  /** Last successful check that found nothing newer — powers the inline ack. */
+  const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
   const [installing, setInstalling] = useState(false);
   const [installStatus, setInstallStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -235,6 +237,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
       const channel = channelOverride ?? updateChannel;
       const found = await checkForUpdate(channel);
       setUpdateInfo(found);
+      if (!found) setLastCheckedAt(Date.now());
       onUpdateStatusChange?.(!!found, found?.version ?? '');
     } catch (err) {
       setError(String(err));
@@ -315,8 +318,17 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
       getOverlayEditMode().then(setInEditMode).catch(() => {});
       isOverlayVisible().then(setOverlayOpen).catch(() => {});
     };
+    // Mount sync (deferred a tick so it is not a setState-in-effect) plus a
+    // light poll: the backend emits only edit-mode changes, not visibility,
+    // and the overlay can be shown/hidden from its own window.
+    const mountSync = window.setTimeout(resync, 0);
+    const pollId = window.setInterval(() => {
+      if (!document.hidden) resync();
+    }, 2000);
     window.addEventListener('focus', resync);
     return () => {
+      window.clearTimeout(mountSync);
+      window.clearInterval(pollId);
       unlistenEdit?.();
       window.removeEventListener('focus', resync);
     };
@@ -711,6 +723,17 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
                     {updateChannel === 'early-access' ? 'Early Access (Alpha)' : 'Official Stable'}
                   </span>{' '}
                   channel.
+                  {lastCheckedAt !== null && (
+                    <>
+                      {' '}
+                      Checked at{' '}
+                      {new Date(lastCheckedAt).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                      .
+                    </>
+                  )}
                 </p>
               </div>
             </div>

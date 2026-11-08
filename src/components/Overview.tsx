@@ -149,13 +149,21 @@ const RiotClientNotice: React.FC<{
   );
 };
 
+/* tracker.gg has been unavailable since 2026-11-02, but the store can still
+ * hold its last act blob. Seven days is where "recent stats" stops being true
+ * for a competitive tracker, so anything older renders as archived. The
+ * reference time is captured once at module load — a session never runs long
+ * enough for that to change the verdict, and it keeps render pure. */
+const TRN_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+const APP_STARTED_AT = Date.now();
+
 const PLAYLISTS = [
   { value: 'competitive', label: 'Competitive' },
   { value: 'unrated', label: 'Unrated' },
 ];
 
 export const Overview: React.FC = () => {
-  const { profile, seasonNames, seasonOrder, tierIcons, agentInfo, agg, trn, trnAgents, trnPrev, games, detailsById, isLoading, clientClosed, riotClient, riotClientDetail, banner, setBanner, refresh } =
+  const { profile, seasonNames, seasonOrder, tierIcons, agentInfo, agg, trn, trnAgents, trnPrev, trnFetchedAt, games, detailsById, isLoading, clientClosed, riotClient, riotClientDetail, banner, setBanner, refresh } =
     useTrackerData();
 
   const [playlist, setPlaylist] = useState('competitive');
@@ -243,6 +251,17 @@ export const Overview: React.FC = () => {
   const deaths = S?.deaths ?? (isDefault ? agg?.deaths : undefined);
   const assists = S?.assists ?? (isDefault ? agg?.assists : undefined);
   const kpiReady = !selLoading && statsReady;
+  /* Only the CURRENT act's trn blob is timestamped; past-act fetches are
+     per-selection and self-evidently fresh. */
+  const trnAsOf = trnFetchedAt ? new Date(trnFetchedAt) : null;
+  const trnStale =
+    !!trn && (!trnFetchedAt || APP_STARTED_AT - trnFetchedAt > TRN_STALE_MS);
+  const trnAsOfLabel = trnAsOf
+    ? `${trnAsOf.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${trnAsOf.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })}`
+    : null;
   /* One placeholder rule for the whole page: a number, an ellipsis while a
      fetch is in flight, or the house dash with a reason (docs/audit #1). */
   const statText = (v: number | undefined, reason: string): React.ReactNode =>
@@ -336,6 +355,16 @@ export const Overview: React.FC = () => {
         <h2 className="font-display font-black text-xl text-m3-on-surface tracking-tight">Overview</h2>
         <p className="text-xs text-m3-outline mt-0.5">Your competitive profile at a glance</p>
       </header>
+      {trn && trnStale && (
+        <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/40 flex items-start gap-2 shrink-0">
+          <AlertTriangle className="w-3.5 h-3.5 text-amber-300 shrink-0 mt-0.5" />
+          <span className="text-xs text-amber-200 font-medium leading-snug">
+            Tracker.gg stats are archived — last fetched{' '}
+            {trnAsOfLabel ?? 'on an unknown date'}. tracker.gg has been unavailable since 2 Nov;
+            these numbers are not live.
+          </span>
+        </div>
+      )}
       {(riotClient !== 'ok' || clientClosed) && (
         <div className="p-2.5 rounded-xl bg-m3-surface-container-high border border-m3-outline-subtle text-m3-on-surface-variant text-xs font-medium flex items-center justify-between shrink-0">
           <div className="flex items-center space-x-2">
@@ -684,7 +713,17 @@ export const Overview: React.FC = () => {
               {trn ? (
                 <>
                 <div>
-                  <h3 className="font-display font-bold text-sm text-m3-on-surface mb-2">Tracker Score</h3>
+                  <div className="flex items-baseline justify-between gap-2 mb-2">
+                    <h3 className="font-display font-bold text-sm text-m3-on-surface">Tracker Score</h3>
+                    <span
+                      className={`text-micro font-mono ${trnStale ? 'text-amber-300' : 'text-m3-outline'}`}
+                      data-tip={trnStale ? 'Cached tracker.gg data — not live' : undefined}
+                    >
+                      {trnAsOfLabel
+                        ? `${trnStale ? 'cached · ' : ''}as of ${trnAsOfLabel}`
+                        : 'cached · age unknown'}
+                    </span>
+                  </div>
 
                   <div className="flex items-center gap-2.5 my-1">
                     <ScoreBadge tier={scoreTier(trn.trnScore).tier} size={44} />
