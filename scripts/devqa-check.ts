@@ -382,7 +382,15 @@ check('cooldown fail-fast logged', trnSrc.includes("trnLog('cooldown fail-fast'"
 check('transport + outcome logged', trnSrc.includes('transport=EDGE status=ok elapsed='), true);
 check('fallback reason logged', trnSrc.includes("trnLog('fallback'"), true);
 check('fill start logged (count, budget)', trackerSrc.includes("if (import.meta.env.DEV) trnLog('fill start'"), true);
-check('fill dispatched logged (budget)', trackerSrc.includes("trnLog('fill dispatched'"), true);
+// The dispatch line now reports the two waves AND the budget; pin both facts
+// rather than the old single-line literal.
+check(
+  'fill dispatched logged (waves + budget)',
+  trackerSrc.includes("'fill dispatched'") &&
+    trackerSrc.includes('wave1=${wave1.length} wave2=${wave2.length}') &&
+    trackerSrc.includes('budget=${trnSpreadSpent}/${budget}'),
+  true
+);
 check('rust trace macro exists', proxySrc.includes('macro_rules! trn_trace'), true);
 check('rust trace compiled out in release', proxySrc.includes('#[cfg(not(debug_assertions))]'), true);
 check('rust fetch start logged', proxySrc.includes('"fetch start path={} phase={} drain={} lobby={}"'), true);
@@ -476,7 +484,15 @@ check('stale settle never kills the job', trnDrainFor('Alice', '1'), true);
 closeTrnDrainJob(jobGen);
 check('owner settle re-engages pause', trnDrainFor('Alice', '1'), false);
 check('explicit token still wins after settle', trnDrainFor('Alice', '1', true), true);
-check('detail fns take the drain token', trnSrc.split('opts?: { drain?: boolean }').length - 1 >= 4, true);
+// Same contract, two shapes now: the fill-capable helpers carry both flags.
+check(
+  'detail fns take the drain token',
+  (trnSrc.split('opts?: { drain?: boolean }').length - 1) +
+    (trnSrc.split('opts?: { drain?: boolean; fill?: boolean }').length - 1) >=
+    4,
+  true
+);
+check('the fill-capable helper forwards fill', trnSrc.includes('opts?.fill === true'), true);
 check('fill opens one job per dispatching lobby', trackerSrc.includes('openTrnDrainJob(players.map'), true);
 check('quiesced lobby settles its own job', trackerSrc.includes('closeTrnDrainJob(trnDrainGen)'), true);
 check('stale polls settle nothing', trackerSrc.includes('matchId === trnDrainMatchId'), true);

@@ -2167,6 +2167,26 @@ export function orderSpreadQueue(players: SpreadPlayer[]): SpreadPlayer[] {
   return players.slice().sort((a, b) => Number(b.mine) - Number(a.mine));
 }
 
+/** Split a budgeted fill into its two visible waves: OUR squad first, then
+ *  theirs. `mine` is the flag the live roster already carries (the same one
+ *  `orderSpreadQueue` sorts on) — no new source is invented. A player whose
+ *  flag says own-team but lands past the wave-1 slot goes to the FRONT of
+ *  wave 2, so nobody is dropped and own-team still all precedes enemies.
+ *  Pure — asserted by scripts/trn-spread-check.ts. */
+export const TRN_FILL_WAVE_SIZE = 5;
+export function splitFillWaves(players: SpreadPlayer[]): [SpreadPlayer[], SpreadPlayer[]] {
+  const own = players.filter((p) => p.mine);
+  const theirs = players.filter((p) => !p.mine);
+  const wave1 = own.slice(0, TRN_FILL_WAVE_SIZE);
+  const wave2 = [...own.slice(TRN_FILL_WAVE_SIZE), ...theirs];
+  return [wave1, wave2];
+}
+
+/** Bounded gap between the two fill waves. The fill is fire-and-forget, so
+ *  there is no settle event to await; this is long enough for wave 1 to be in
+ *  flight (and visible in the UI) without holding back the enemy batch. */
+export const TRN_FILL_WAVE_GAP_MS = 700;
+
 /** True when the lobby fill may fetch for this player now. Reads the
  *  same caches the poll loop reads, so enqueue and firing always agree. */
 export function playerNeedsTrnStats(puuid: string): boolean {
@@ -2292,9 +2312,8 @@ async function enqueueTrnSpread(
     trnDrainMatchId = matchId;
     if (import.meta.env.DEV) trnLog('job opened', `gen=${trnDrainGen} players=${players.length}`);
   }
-  for (const p of budgeted) {
+  const fire = (p: SpreadPlayer, fireKey: string): void => {
     const { puuid, name, tag } = p;
-    const fireKey = key;
     setTimeout(() => {
       // Match moved on, tab hidden, polls stale, already filled/fetching,
       // cooling, or budget spent → skip without firing. No paused check by
@@ -2315,12 +2334,29 @@ async function enqueueTrnSpread(
           if (!playerNeedsTrnStats(puuid) || trnInFlightLive.has(puuid.toLowerCase())) return;
           if (trnSpreadSpent >= budget) return;
           trnSpreadSpent++;
-          fetchTrnStatsNow(puuid, name, tag, { ...ctx, drain: true });
+          fetchTrnStatsNow(puuid, name, tag, { ...ctx, drain: true, fill: true });
         })
         .catch(() => {});
     }, trnFillJitterMs());
+  };
+
+  // WAVE 1 = our squad, now. WAVE 2 = theirs, once wave 1 is away. Sequential
+  // by construction: the UI shows your own team filling first, and the two
+  // batches never overlap.
+  const [wave1, wave2] = splitFillWaves(budgeted);
+  for (const p of wave1) fire(p, key);
+  if (wave2.length > 0) {
+    setTimeout(() => {
+      for (const p of wave2) fire(p, key);
+      if (import.meta.env.DEV) trnLog('fill wave 2', `scheduled=${wave2.length}`);
+    }, TRN_FILL_WAVE_GAP_MS);
   }
-  if (import.meta.env.DEV) trnLog('fill dispatched', `scheduled=${budgeted.length} budget=${trnSpreadSpent}/${budget}`);
+  if (import.meta.env.DEV) {
+    trnLog(
+      'fill dispatched',
+      `wave1=${wave1.length} wave2=${wave2.length} budget=${trnSpreadSpent}/${budget}`
+    );
+  }
 }
 
 /** Immediate single-player stats fetch. LOCAL Riot first (rank + act stats
@@ -2578,6 +2614,9 @@ export interface LocalRiotCtx {
    *  wave-1 in-game guard stays for every automatic caller. Only an explicit
    *  user action (opening the player modal) sets this. */
   allowAct?: boolean;
+  /** LOBBY FILL: take trnGet's fast path (no 6-8s serial slot). Only the
+   *  budgeted lobby fill sets this; nothing else may. */
+  fill?: boolean;
 }
 
 function fetchTrnStatsNow(
@@ -2643,7 +2682,10 @@ function fetchTrnStatsNow(
       void import('./trn')
         .then(({ fetchTrnActStats, trnCooldownRemainingMs, getTrnHealth }) => {
           if (getTrnHealth().health !== 'ok' || trnCooldownRemainingMs() > 0) return;
-          return fetchTrnActStats(realName, realTag, '', 'competitive', ctx.drain ? { drain: true } : undefined)
+          return fetchTrnActStats(realName, realTag, '', 'competitive', {
+            ...(ctx.drain ? { drain: true } : {}),
+            ...(ctx.fill ? { fill: true } : {}),
+          })
             .then((res) => {
               const realCountry =
                 res?.countryCode &&

@@ -30,6 +30,9 @@ const {
   presenceLoopToPhase,
   TRN_PRIVATE_RETRY_MS,
   TRN_MISSING_RETRY_MS,
+  splitFillWaves,
+  TRN_FILL_WAVE_SIZE,
+  TRN_FILL_WAVE_GAP_MS,
 } = await import('../src/utils/tracker.ts');
 
 // --- Fill jitter bounds (NOT 6s) ---
@@ -242,6 +245,81 @@ check('per-hour cap named', proxyRs.includes('const TRN_HOURLY_MAX_REQUESTS: u32
 check('memo precedes the ceiling (a replay costs nothing)', proxyRs.indexOf('memo_get(&path, now_ms())') < proxyRs.indexOf('spend_ceiling(lobby_key)'), true);
 check('memo TTL is short and named', proxyRs.includes('const TRN_MEMO_TTL_MS: u64 = 10 * 1000'), true);
 check('memo only caches 2xx', proxyRs.includes('if let Ok(body) = &out'), true);
+
+// --- Fill fast path: the 6-8s serial gate must NOT apply to a lobby fill ---
+// Contract (prose, because trnGet needs a Tauri host to execute): a `fill`
+// call skips ONLY the slot wait. Everything else still gates it. The pacing
+// assertions below pin that split at the source level, which is the same
+// idiom this file already uses for the Rust ceiling.
+{
+  const { readFileSync } = await import('node:fs');
+  const trnSrc = readFileSync(new URL('../src/utils/trn.ts', import.meta.url), 'utf8');
+  const trackerSrc = readFileSync(new URL('../src/utils/tracker.ts', import.meta.url), 'utf8');
+
+  check('trnGet accepts a fill option', trnSrc.includes('fill?: boolean'), true);
+  check(
+    'a fill returns before the slot wait',
+    trnSrc.indexOf('if (opts?.fill)') !== -1 &&
+      trnSrc.indexOf('if (opts?.fill)') < trnSrc.indexOf('} else if (opts?.immediate)'),
+    true
+  );
+  // The fill branch must not sleep: it sets the slot and moves on.
+  const fillBranch = trnSrc.slice(trnSrc.indexOf('if (opts?.fill)'), trnSrc.indexOf('} else if (opts?.immediate)'));
+  check('fill branch never awaits the gap', !fillBranch.includes('await sleep'), true);
+  check('fill branch leaves the queue alone', !fillBranch.includes('trnNextSlot ='), true);
+  // Non-fill callers keep the pacing: the ordinary branch still waits.
+  check('non-fill branch still waits the gap', trnSrc.includes('if (wait > 0) await sleep(wait)'), true);
+  // A fill is still subject to cooldown / dead-quiet fail-fast: those checks
+  // sit ABOVE the slot claim, so the fill branch cannot outrun them.
+  check(
+    'cooldown fail-fast still precedes the gate',
+    trnSrc.indexOf('const cooling = trnCooldownRemainingMs()') < trnSrc.indexOf('if (opts?.fill)'),
+    true
+  );
+  check(
+    'dead-quiet fail-fast still precedes the gate',
+    trnSrc.indexOf('isTrnDeadQuiet()') < trnSrc.indexOf('if (opts?.fill)'),
+    true
+  );
+  // Only the lobby fill opts in.
+  // Exactly two: the fill dispatch, and the TRN fallback forwarding ctx.fill.
+  check('fill: true appears only at the fill call and its forward', (trackerSrc.match(/fill: true/g) ?? []).length === 2, true);
+  check('the fill dispatch sets it', trackerSrc.includes('{ ...ctx, drain: true, fill: true }'), true);
+}
+
+// --- Two visible waves: own squad first, theirs second ---
+{
+  const p = (name: string, mine: boolean) => ({ puuid: name, name, tag: 'x', mine });
+  const mixed = [p('e1', false), p('o1', true), p('e2', false), p('o2', true), p('o3', true)];
+
+  const [w1, w2] = splitFillWaves(mixed);
+  check('wave size is 5', TRN_FILL_WAVE_SIZE === 5, { TRN_FILL_WAVE_SIZE });
+  check('wave 1 is own-team only', w1.every((x) => x.mine), w1.map((x) => x.name));
+  check('wave 2 is the enemy batch', w2.every((x) => !x.mine), w2.map((x) => x.name));
+  check('wave gap is bounded and short', TRN_FILL_WAVE_GAP_MS > 0 && TRN_FILL_WAVE_GAP_MS <= 1500, { TRN_FILL_WAVE_GAP_MS });
+
+  // 10-player lobby: 5 own + 5 enemy -> exactly the two described waves.
+  const lobby = [
+    ...Array.from({ length: 5 }, (_, i) => p(`own${i}`, true)),
+    ...Array.from({ length: 5 }, (_, i) => p(`en${i}`, false)),
+  ];
+  const [l1, l2] = splitFillWaves(lobby);
+  check('10-player lobby: wave 1 is the 5 own', l1.length === 5 && l1.every((x) => x.mine), l1.map((x) => x.name));
+  check('10-player lobby: wave 2 is the 5 enemy', l2.length === 5 && l2.every((x) => !x.mine), l2.map((x) => x.name));
+  check('10-player lobby: nobody dropped', l1.length + l2.length === lobby.length, true);
+
+  // Deathmatch: 6 own players -> the 6th must NOT jump ahead of wave 1.
+  const dm = Array.from({ length: 6 }, (_, i) => p(`own${i}`, true));
+  const [d1, d2] = splitFillWaves(dm);
+  check('overflow own-team stays ahead of nothing and is not dropped', d1.length === 5 && d2.length === 1, {
+    d1: d1.length,
+    d2: d2.length,
+  });
+
+  // A split we cannot resolve is treated as own-team (never dropped).
+  const unknown = [{ puuid: 'u', name: 'u', tag: 'x', mine: true }];
+  check('unknown team lands in wave 1', splitFillWaves(unknown)[0].length === 1, true);
+}
 
 if (failures > 0) {
   console.error(`${failures} failure(s)`);

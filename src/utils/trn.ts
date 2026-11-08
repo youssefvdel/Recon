@@ -842,6 +842,20 @@ export async function trnGet(
     immediate?: boolean;
     onTransport?: (t: TrnTransport) => void;
     drain?: boolean;
+    /** LOBBY FILL fast path: skip the serial slot wait and fire now.
+     *
+     *  The 6-8s gap was a Cloudflare-captcha-era defence. That wall is gone:
+     *  api.tracker.network answered 60 requests (30 of them parallel) with no
+     *  rate-limit headers and mostly CDN hits. The gap is still right for
+     *  lazy reads, retries and manual refreshes — one request at a time keeps
+     *  a stray retry loop from becoming a burst — but a lobby fill IS the
+     *  batch, and paying 6-8s per player made a 10-player lobby take ~70s.
+     *
+     *  What this does NOT skip: the kill-switch, the captcha gate, the
+     *  per-path backoff, dead-quiet, the proxy backoff, the cooldown
+     *  fail-fast, the file cache, single-flight dedupe, or the 429/403
+     *  ladder. Only the slot wait. */
+    fill?: boolean;
     /** Opt in to the file cache with THIS caller's freshness policy (ms).
      *  Omit it and the call is neither read from nor written to disk. */
     ttlMs?: number;
@@ -967,7 +981,13 @@ export async function trnGet(
   if (import.meta.env.DEV) trnLog('trnGet start', `path=${path} immediate=${opts?.immediate === true}`);
   const gap = trnJitterGapMs();
   let slot: number;
-  if (opts?.immediate) {
+  if (opts?.fill) {
+    // A fill is a batch, not a repeated single read: fire now and leave the
+    // queue untouched, so a 10-player fill does not push every later request
+    // 10 gaps into the future.
+    slot = Date.now();
+    if (import.meta.env.DEV) trnLog('fill fast-path', `path=${path.slice(0, 60)}`);
+  } else if (opts?.immediate) {
     slot = Date.now();
     trnNextSlot = Math.max(trnNextSlot, slot) + gap;
   } else {
@@ -1266,7 +1286,7 @@ const SEASON_SEG_CACHE_MAX = 200;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const profileInFlight = new Map<string, Promise<any>>();
 
-async function getRootProfile(name: string, tag: string, drain = false): Promise<any> {
+async function getRootProfile(name: string, tag: string, drain = false, fill = false): Promise<any> {
   if (trnNegativeBlocked(name, tag)) throw new Error(TRN_NEGATIVE_BACKOFF);
   const key = `${name.toLowerCase()}#${tag.toLowerCase()}`;
   const hit = profileCache.get(key);
@@ -1278,6 +1298,7 @@ async function getRootProfile(name: string, tag: string, drain = false): Promise
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const j: any = await trnGet(riotId(name, tag), {
       ...(trnDrainFor(name, tag, drain) ? { drain: true } : {}),
+      ...(fill ? { fill: true } : {}),
       // Disk-backed across restarts; the TTL rides along as the policy.
       ttlMs: PROFILE_TTL_MS,
     });
@@ -1336,7 +1357,7 @@ const SEASON_SEG_TTL_MS = 24 * 60 * 60 * 1000;
  *  current season keeps 24h (Tracker Score must track your latest games). */
 const TRN_SEASON_PINNED_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 
-async function fetchSeasonSeg(name: string, tag: string, playlist: string, seasonId: string, drain = false, pinned = false): Promise<any> {
+async function fetchSeasonSeg(name: string, tag: string, playlist: string, seasonId: string, drain = false, pinned = false, fill = false): Promise<any> {
   if (trnNegativeBlocked(name, tag)) throw new Error(TRN_NEGATIVE_BACKOFF);
   const n = name.trim();
   const t = tag.trim();
@@ -1356,6 +1377,7 @@ async function fetchSeasonSeg(name: string, tag: string, playlist: string, seaso
       `${riotId(n, t)}/segments/season?playlist=${encodeURIComponent(pl)}${seasonId ? `&seasonId=${encodeURIComponent(seasonId)}` : ''}`,
       {
         ...(trnDrainFor(n, t, drain) ? { drain: true } : {}),
+        ...(fill ? { fill: true } : {}),
         // Survive reloads: a restart must not re-request every act we already
         // hold. The TTL rides along because it is this caller's policy.
         ttlMs: ttl,
@@ -1391,7 +1413,7 @@ export async function fetchTrnActStats(
   tag: string,
   seasonId = '',
   playlist = 'competitive',
-  opts?: { drain?: boolean }
+  opts?: { drain?: boolean; fill?: boolean }
 ): Promise<{ stats: TrnActStats; defaultSeason: string; countryCode: string }> {
   if (trnNegativeBlocked(name, tag)) throw new Error(TRN_NEGATIVE_BACKOFF);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1399,7 +1421,7 @@ export async function fetchTrnActStats(
   // Always fetch/pull root profile so avatarUrl and countryCode are never missing.
   // A private root (451) rethrows immediately: segments for a locked account
   // would 451 right after, so skip them and let the caller back off 7d.
-  const root = await getRootProfile(name, tag, opts?.drain === true).catch((e) => {
+  const root = await getRootProfile(name, tag, opts?.drain === true, opts?.fill === true).catch((e) => {
     if (isTrnPrivateError(e)) throw e;
     return null;
   });
@@ -1416,7 +1438,7 @@ export async function fetchTrnActStats(
     // profile resolved above — no extra request to decide.
     const pinned =
       !!seasonId && !!defaultSeason && seasonId.toLowerCase() !== defaultSeason.toLowerCase();
-    const r = await fetchSeasonSeg(name, tag, playlist, seasonId, opts?.drain === true, pinned);
+    const r = await fetchSeasonSeg(name, tag, playlist, seasonId, opts?.drain === true, pinned, opts?.fill === true);
     seg = r.seg;
   }
   if (!seg) throw new Error('TRN no season segment.');
