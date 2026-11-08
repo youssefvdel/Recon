@@ -11,6 +11,7 @@ mod shortcuts;
 mod space_spam;
 mod tracker;
 mod trn_cache;
+mod trn_http;
 mod trn_proxy;
 mod window_manager;
 mod updater;
@@ -1406,6 +1407,7 @@ pub fn run() {
             trn_proxy::trn_verify_open,
             trn_proxy::trn_warden_token,
             trn_proxy::trn_trace_log,
+            trn_http::trn_http_get,
             trn_cache::trn_cache_get,
             trn_cache::trn_cache_put,
             trn_cache::trn_cache_read,

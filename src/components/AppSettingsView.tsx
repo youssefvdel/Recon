@@ -53,6 +53,7 @@ import {
   isTauri,
 } from '../utils/ipc';
 import { APP_VERSION, appVersion } from '../utils/version';
+import { isTrnHttpEnabled, setTrnHttpEnabled } from '../utils/trn';
 import { listen } from '@tauri-apps/api/event';
 import { getRecentLogs } from '../utils/logger';
 import { isCrashOptIn, isPulseOptIn, setCrashOptIn, setPulseOptIn, CONSENT_EVENT } from '../utils/consent';
@@ -87,6 +88,8 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
   const [inGameToasts, setInGameToasts] = useState(() => {
     return localStorage.getItem('aspect_ingame_toasts') !== 'false';
   });
+  // Unofficial Tracker Network transport (default ON).
+  const [trnHttp, setTrnHttp] = useState(() => isTrnHttpEnabled());
   const [spaceSpam, setSpaceSpam] = useState(false);
 
   // In-game overlay monitor picker
@@ -373,6 +376,14 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
     const next = !inGameToasts;
     setInGameToasts(next);
     localStorage.setItem('aspect_ingame_toasts', next ? 'true' : 'false');
+  };
+
+  const handleToggleTrnHttp = () => {
+    const next = !trnHttp;
+    setTrnHttp(next);
+    // Off means every TRN call short-circuits with TRN_HTTP_DISABLED and the
+    // app keeps showing local-Riot data only.
+    setTrnHttpEnabled(next);
   };
 
   const handleOverlayMonitorChange = async (value: string) => {
@@ -894,6 +905,37 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
               {overlayStatus && (
                 <p className="text-[11px] text-m3-coral font-medium mt-1 leading-snug">{overlayStatus}</p>
               )}
+            </div>
+
+            {/* Tracked stats source */}
+            <div className="p-3.5 sm:p-4 flex items-start justify-between gap-4 border-t border-m3-outline-subtle">
+              <div className="space-y-0.5">
+                <div className="text-xs sm:text-sm font-semibold text-m3-on-surface">
+                  Tracker Network stats (unofficial)
+                </div>
+                <div className="text-[11px] text-m3-outline leading-snug">
+                  Uses a third-party compatibility header; may stop working without notice.
+                </div>
+                <div className="text-[11px] text-m3-outline leading-snug">
+                  Off keeps rank and act stats from the local Riot client only.
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={trnHttp}
+                aria-label="Use the unofficial Tracker Network transport"
+                onClick={handleToggleTrnHttp}
+                className={`w-11 h-6 shrink-0 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
+                  trnHttp ? 'bg-m3-primary' : 'bg-m3-surface-container-high'
+                }`}
+              >
+                <div
+                  className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                    trnHttp ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
             </div>
 
             {/* In-Game Notifications */}

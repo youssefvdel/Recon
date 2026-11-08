@@ -112,6 +112,97 @@ export function setTrackerEnabled(on: boolean): void {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * Direct transport (unofficial) + its opt-out
+ *
+ * api.tracker.network answers the same v2 JSON as the hidden WebView2 proxy
+ * for the standard/valorant paths, provided the request carries the
+ * Overwolf-compatible User-Agent — which Rust sets, in Rust, so it never
+ * appears in the bundle. No key, no cookies, no login: this is the public
+ * site API behind a compatibility header, not an official integration.
+ *
+ * Because it is unofficial it can stop working at any time, so it is BOTH a
+ * fallback-friendly transport and a user-visible switch. Default ON (absent
+ * = on), matching the tracker kill-switch convention.
+ * ------------------------------------------------------------------ */
+const TRN_HTTP_ENABLED_KEY = 'recon_trn_http_enabled_v1';
+let trnHttpEnabled: boolean | null = null;
+
+/** Parse the persisted opt-out: absent (default ON) or anything but '0' → on. Pure. */
+export function parseTrnHttpEnabledFlag(raw: unknown): boolean {
+  if (raw === null || raw === undefined) return true;
+  return String(raw) !== '0';
+}
+
+/** True unless the user switched the unofficial transport off. */
+export function isTrnHttpEnabled(): boolean {
+  if (trnHttpEnabled !== null) return trnHttpEnabled;
+  try {
+    trnHttpEnabled =
+      typeof localStorage !== 'undefined'
+        ? parseTrnHttpEnabledFlag(localStorage.getItem(TRN_HTTP_ENABLED_KEY))
+        : true;
+  } catch {
+    trnHttpEnabled = true;
+  }
+  return trnHttpEnabled;
+}
+
+export function setTrnHttpEnabled(on: boolean): void {
+  trnHttpEnabled = on;
+  if (typeof localStorage !== 'undefined') {
+    try {
+      if (on) localStorage.removeItem(TRN_HTTP_ENABLED_KEY);
+      else localStorage.setItem(TRN_HTTP_ENABLED_KEY, '0');
+    } catch {}
+  }
+}
+
+/** Test seam. */
+export function resetTrnHttpEnabledCache(): void {
+  trnHttpEnabled = null;
+}
+
+/** Shape returned when the user switched the direct transport off. */
+export const TRN_HTTP_DISABLED = 'TRN_HTTP_DISABLED';
+/** tracker.gg says this Riot profile is private (HTTP 451). Terminal — never retried. */
+export const TRN_PRIVATE = 'TRN_PRIVATE';
+
+/** True for the opt-out shape. Pure. */
+export function isTrnHttpDisabled(msg: unknown): boolean {
+  const s = typeof msg === 'string' ? msg : msg instanceof Error ? msg.message : String(msg ?? '');
+  return s.includes(TRN_HTTP_DISABLED);
+}
+
+/** True when tracker.gg returned 451 / our 451 marker. Pure. */
+export function isTrnPrivateMarked(msg: unknown): boolean {
+  const s = typeof msg === 'string' ? msg : msg instanceof Error ? msg.message : String(msg ?? '');
+  return s.includes(TRN_PRIVATE) || isTrnPrivateError(s);
+}
+
+/** The compatibility `source` parameter. PROVEN live 2026-11-08: it is this,
+ *  not the API key, that decides payload size — `overwolf-2` returns the full
+ *  profile (2.19 MB, season + weapon + map + map-agent segments), `web`
+ *  returns 1.57 MB with fewer, and no parameter returns 883 kB with a single
+ *  season segment and no weapon/map segments at all. The key changes nothing.
+ *  So exactly one helper writes it and every call site inherits it. */
+export const TRN_SOURCE_PARAM = 'overwolf-2';
+
+/** Force `source=overwolf-2` onto a TRN path, whatever it already carries.
+ *  Pure — checked by scripts/devqa-check.ts. */
+export function withOverwolfSource(path: string): string {
+  const forced = `source=${TRN_SOURCE_PARAM}`;
+  if (/([?&])source=[^&]*/.test(path)) {
+    return path.replace(/([?&])source=[^&]*/, `$1${forced}`);
+  }
+  return `${path}${path.includes('?') ? '&' : '?'}${forced}`;
+}
+
+/** Only the standard valorant endpoints are served by the direct transport. */
+function isDirectPath(path: string): boolean {
+  return path.startsWith('/api/v2/valorant/standard/');
+}
+
 /** Test seam: drop the in-memory cache so the next read re-hits storage. */
 export function resetTrackerEnabledCache(): void {
   trnEnabled = null;
@@ -171,6 +262,52 @@ async function edgeGet(path: string, drain = false): Promise<string> {
   } catch (e) {
     throw new Error(typeof e === 'string' ? e : e instanceof Error ? e.message : String(e));
   }
+}
+
+/**
+ * Direct GET through Rust (`trn_http_get`). Rust adds the compatibility
+ * User-Agent, so no header value ever enters the bundle. Returns the same raw
+ * v2 body the hidden window returns, which is why every parser above works
+ * unchanged for both transports.
+ */
+async function httpGet(path: string): Promise<string> {
+  if (!isTrnHttpEnabled()) throw new Error(TRN_HTTP_DISABLED);
+  try {
+    return await invoke<string>('trn_http_get', { path, enabled: true });
+  } catch (e) {
+    throw new Error(typeof e === 'string' ? e : e instanceof Error ? e.message : String(e));
+  }
+}
+
+/**
+ * Transport for one path: direct first for the standard endpoints, the hidden
+ * window otherwise, and the window as the fallback whenever the direct path is
+ * switched off or cannot be reached. A TRN answer (200 or an HTTP status the
+ * ladder owns) is returned as-is — we only fall back on transport failure.
+ */
+async function transportGet(path: string, drain: boolean): Promise<string> {
+  if (isDirectPath(path) && isTrnHttpEnabled()) {
+    try {
+      return await httpGet(path);
+    } catch (e) {
+      const msg = String(e);
+      if (import.meta.env.DEV) trnLog('direct transport miss', msg.slice(0, 100));
+      // Opt-out, a missing backend command, or a connection-level failure —
+      // all mean "use the window". An HTTP answer is NOT a transport failure
+      // and must reach the ladder untouched.
+      if (
+        !isTrnHttpDisabled(msg) &&
+        !msg.includes('EDGE_UNAVAILABLE') &&
+        !msg.includes('not found') &&
+        !msg.includes('unknown command') &&
+        !msg.includes('error sending request') &&
+        !msg.includes('connection')
+      ) {
+        throw new Error(msg);
+      }
+    }
+  }
+  return edgeGet(path, drain);
 }
 
 /* Best-known match phase for the proxy pause gate (tracker.ts poll loop
@@ -700,7 +837,7 @@ function trnCacheStore(path: string, body: string, ttlMs: number): void {
 }
 
 export async function trnGet(
-  path: string,
+  rawPath: string,
   opts?: {
     immediate?: boolean;
     onTransport?: (t: TrnTransport) => void;
@@ -715,6 +852,9 @@ export async function trnGet(
   // so every caller falls back to Riot-direct data untouched.
   // ponytail: QA-only tag (which transport served/would-serve). Never branched on.
   const report = (t: TrnTransport): void => opts?.onTransport?.(t);
+  // ONE place forces the compatibility source parameter: cache key, path
+  // backoff, negative registry and both transports all see the same path.
+  const path = withOverwolfSource(rawPath);
   if (!isTrackerEnabled()) {
     report('EDGE');
     throw new Error('TRN_DISABLED tracker off');
@@ -750,6 +890,15 @@ export async function trnGet(
         }
       }
     }
+  }
+
+  // User opt-out of the unofficial transport means NO TRN traffic at all —
+  // local-Riot-only, per the setting's own copy. Placed after the file cache
+  // so an already-held body still renders (a hold costs no network), and
+  // before every gate so nothing else runs.
+  if (!isTrnHttpEnabled()) {
+    report('EDGE');
+    throw new Error(TRN_HTTP_DISABLED);
   }
 
   // Captcha wall BEFORE anything with a cost. The hidden window can never
@@ -844,7 +993,7 @@ export async function trnGet(
     // Single transport: hidden same-origin window. HTTP statuses flow into
     // the shared ladder below unchanged; transport failures propagate to
     // the caller (Riot-direct fallback) with no pin and no retry here.
-    raw = await edgeGet(path, opts?.drain === true);
+    raw = await transportGet(path, opts?.drain === true);
     if (opts?.ttlMs) trnCacheStore(path, raw, opts.ttlMs);
     if (import.meta.env.DEV) trnLog('outcome', `transport=EDGE status=ok elapsed=${Date.now() - t0}ms`);
     // An answered request proves the path is alive — reset the dead breaker.
@@ -865,6 +1014,14 @@ export async function trnGet(
     // block that no amount of waiting clears, and stamping the path or the
     // dead breaker would keep failing fast after the user verifies. Set the
     // verdict, spend nothing, and let the banner ask for the human.
+    // A private profile is a FACT about the account, not a failure of ours:
+    // 451 will be 451 forever, so it is recorded once and never retried. The
+    // negative registry (7d) already short-circuits every later read.
+    if (isTrnPrivateMarked(msg)) {
+      noteNegativeFromPath(path, 'HTTP 451 CollectorResultStatus::Private');
+      setTrnHealth('ok');
+      throw new Error(`${TRN_PRIVATE} profile is private on tracker.gg`);
+    }
     if (isTrnCaptcha(msg)) {
       setTrnHealth('captcha', 'tracker.gg needs verification');
       throw new Error(msg);
@@ -1196,7 +1353,7 @@ async function fetchSeasonSeg(name: string, tag: string, playlist: string, seaso
   const task = (async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const j: any = await trnGet(
-      `${riotId(n, t)}/segments/season?playlist=${encodeURIComponent(pl)}${seasonId ? `&seasonId=${encodeURIComponent(seasonId)}` : ''}&source=web`,
+      `${riotId(n, t)}/segments/season?playlist=${encodeURIComponent(pl)}${seasonId ? `&seasonId=${encodeURIComponent(seasonId)}` : ''}`,
       {
         ...(trnDrainFor(n, t, drain) ? { drain: true } : {}),
         // Survive reloads: a restart must not re-request every act we already

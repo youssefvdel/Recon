@@ -794,6 +794,44 @@ check('log export reads the TRN trace ring, not the per-realm logger buffer', da
 check('empty export is reported as empty, never as success', dashboard.includes('trnExportReport(0, trnLogRows.length'), true);
 check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs') && !dashboard.includes('copyQaLogs'), true);
 
+// --- no TRN API key anywhere (task-37) -------------------------------------
+// The direct transport uses the public site API behind a compatibility header.
+// No key exists, none may be added, and the header value is set in Rust so it
+// never enters the bundle. This asserts the whole TS surface stays clean.
+{
+  const { readdirSync, readFileSync, statSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const root = new URL('../src/', import.meta.url).pathname;
+  const offenders: string[] = [];
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name);
+      if (statSync(full).isDirectory()) walk(full);
+      else if (/\.(ts|tsx)$/.test(name)) {
+        const text = readFileSync(full, 'utf8');
+        if (text.includes('TRN-API-Key') || text.includes('trnApiKey')) offenders.push(full);
+      }
+    }
+  };
+  walk(root);
+  // actual/expected style: an empty string means clean, and a failure prints
+  // exactly which files mention a key.
+  check('no TRN API key or key header anywhere in src/', offenders.join(','), '');
+
+  // The payload is decided by `source=overwolf-2`, not by any key. One helper
+  // forces it; this pins the helper's three shapes and the absence of the old
+  // hardcoded `source=web`, so a call site can never regress the payload.
+  const { withOverwolfSource } = await import('../src/utils/trn.ts');
+  check('source: appended with ? when absent', withOverwolfSource('/api/v2/x'), '/api/v2/x?source=overwolf-2');
+  check('source: appended with & when a query exists', withOverwolfSource('/api/v2/x?a=1'), '/api/v2/x?a=1&source=overwolf-2');
+  check('source: an existing source is replaced', withOverwolfSource('/api/v2/x?a=1&source=web'), '/api/v2/x?a=1&source=overwolf-2');
+  check('source: idempotent', withOverwolfSource('/api/v2/x?source=overwolf-2'), '/api/v2/x?source=overwolf-2');
+  const trnSrc = readFileSync(join(root, 'utils/trn.ts'), 'utf8');
+  check('source: helper is exported', trnSrc.includes('export function withOverwolfSource'), true);
+  check('source: no hardcoded source=web left', trnSrc.includes('source=web'), false);
+  check('source: forced at the single choke point', trnSrc.includes('withOverwolfSource(rawPath)'), true);
+}
+
 if (failures > 0) {
   console.error(`${failures} failure(s)`);
   process.exit(1);

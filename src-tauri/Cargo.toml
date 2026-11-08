@@ -7,7 +7,7 @@ license = "Proprietary"
 repository = "https://github.com/youssefvdel/Recon"
 homepage = "https://reconlab.app"
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.85.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -48,5 +48,15 @@ ini-preserve = "0.1.3"
 # Riot API transport: native-tls == Schannel on Windows (OS trust store, no
 # bundled TLS stack, no libclang/cmake). Replaces the per-request curl.exe spawn.
 native-tls = "0.2"
+# TRN v2 transport (trn_http.rs): rustls with the ring provider — no
+# native-tls/OpenSSL on this path. Mirrors tauri-plugin-updater's stack, which
+# is already in the lockfile, so no new TLS implementation enters the build;
+# `rustls-no-provider` means the module installs the ring provider itself
+# (idempotent, the same one the updater installs).
+reqwest = { version = "0.13.4", default-features = false, features = [
+    "json",
+    "rustls-no-provider",
+] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 tokio = { version = "=1.53.1", features = ["rt", "macros", "sync", "time", "net"] }
 
