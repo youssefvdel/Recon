@@ -485,11 +485,15 @@ export async function getWallet(force = false): Promise<WalletBalance[] | null> 
 
   const task = (async (): Promise<WalletBalance[] | null> => {
     try {
-      const { getEntitlements, detectRegion, riotGet } = await import('./tracker');
+      const { getEntitlements, detectRegion } = await import('./tracker');
+      const { readRiotValidated } = await import('../sources/riot');
       const ent = await getEntitlements().catch(() => null);
       if (!ent?.puuid) return memWallet?.data ?? null;
       const region = await detectRegion().catch(() => 'eu');
-      const raw = await riotGet(pdHostFor(region), `/store/v1/wallet/${ent.puuid}`);
+      const raw = await readRiotValidated<{ Balances?: Record<string, number> }>(
+        pdHostFor(region),
+        `/store/v1/wallet/${ent.puuid}`
+      );
       const balances: Record<string, number> = raw?.Balances ?? {};
       const currencies = await currencyMap();
       // Client-header order, matched by name — never hardcoded uuids.

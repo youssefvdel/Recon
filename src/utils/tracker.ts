@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
 import type { LiveMatchPlayer, LiveMatchState, LocalRiotAccount, MatchRoundDetail, MatchRoundPlayer, TrackerDuel, TrackerMatchDetail, TrackerMmrPoint, TrackerPlayer, TrackerProfile } from '../types';
 import { isTauri } from './ipc';
+import { initRiotSource } from '../sources/riot';
 import { aggregateActStats, type ActAggregate, type ActMatchSample } from './actStats';
 import { setTrnMatchPhase, setTrnLobbyKey, getTrnMatchPhase, trnLog, trnProxyPaused, openTrnDrainJob, closeTrnDrainJob, isTrnPrivateError, trnNoteNegative, trnNegativeBlocked, markTrnFetching, clearTrnFetching, TRN_CACHE_PREFIX } from './trn';
 import { getDevMockMatch, isDevNoClient } from './devTools';
@@ -56,6 +57,12 @@ export function getRiotClientDetail(): string {
 }
 
 /** Record a status. No emit when nothing changed. */
+// The new source module owns its own transport but reports through this store.
+initRiotSource({
+  onStatus: (status, detail) => setRiotClientStatus(status, detail),
+  onClassify: (e) => classifyRiotClientError(e),
+});
+
 export function setRiotClientStatus(status: RiotClientStatus, detail = ''): void {
   if (riotClientStatus === status && riotClientDetail === detail) return;
   riotClientStatus = status;
@@ -353,7 +360,10 @@ async function withRiotSlot<R>(fn: () => Promise<R>): Promise<R> {
 /** Authed Riot GET from Rust (browser origins are blocked). Refetches entitlements once on expiry.
  * Exported for player-data reads outside the tracker module (notably the wallet). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function riotGet(host: string, path: string): Promise<any> {
+/* NOT exported (step 1 of the data-layer design): the raw transport is the only
+ * way to obtain an unvalidated Riot payload, so it stays inside this module.
+ * Validated readers live in src/sources/riot.ts. */
+async function riotGet(host: string, path: string): Promise<any> {
   const call = async (e: DirectEnt): Promise<string> => {
     const version = await resolveVersion();
     return invoke<string>('riot_direct_get', {

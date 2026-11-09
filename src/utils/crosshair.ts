@@ -159,11 +159,12 @@ const profName = (p: any, i: number): string =>
 export async function getCrosshair(): Promise<{ state: CrosshairState } | { error: string }> {
   if (!isTauri()) return { error: 'Desktop app only.' };
   try {
-    const { detectRegion, riotGet } = await import('./tracker');
+    const { detectRegion } = await import('./tracker');
+    const { readRiotValidated } = await import('../sources/riot');
     const region = await detectRegion().catch(() => 'eu');
     const host = ppHostFor(region);
     if (!host) return { error: `Crosshair editing is verified for EU accounts only (yours: ${region.toUpperCase()}).` };
-    const res = await riotGet(host, '/playerPref/v3/getPreference/Ares.PlayerSettings');
+    const res = await readRiotValidated<{ data?: unknown }>(host, '/playerPref/v3/getPreference/Ares.PlayerSettings');
     if (!res || typeof res.data !== 'string') return { error: 'Unexpected settings response.' };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: any = JSON.parse(await inflateRaw(res.data));
