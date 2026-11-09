@@ -972,6 +972,25 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('no v6 key remains', trackerSrcV7.includes('recon_match_v6_'), false);
 }
 
+// --- negative-registry version + forced source param (task-61) --------------
+{
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../src/utils/trn.ts', import.meta.url), 'utf8');
+  check('negatives are stored under v2', src.includes("'recon_trn_negative_v2'"), true);
+  check('no v1 key in the read/write path', src.includes('recon_trn_negative_v1'), false);
+
+  // Every consumer goes through trnGet, where the source param is forced.
+  const getBody = src.slice(src.indexOf('export async function trnGet('));
+  check('trnGet forces source onto the raw path', /withOverwolfSource\(rawPath\)/.test(getBody), true);
+  check(
+    'the normalized path is what reaches the transport',
+    getBody.indexOf('withOverwolfSource(rawPath)') < getBody.indexOf('transportGet(path'),
+    true
+  );
+  // A caller-supplied path without the query must never reach a transport.
+  check('profile path builder has no query of its own', src.includes('%23${encodeURIComponent(tag)}`') && !/trnProfilePath[^\n]*source=/.test(src), true);
+}
+
 if (failures > 0) {
   console.error(`${failures} failure(s)`);
   process.exit(1);

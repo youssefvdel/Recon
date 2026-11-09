@@ -89,8 +89,11 @@ check('...and it is now blocked without a request', trnNegativeBlocked('other', 
 check('a 404 files missing, not private', noteNegativeFromPath(trnProfilePath('Ghost', '0003'), 'HTTP 404: not found'), 'missing');
 check('a plain failure files nothing', noteNegativeFromPath(trnProfilePath('Fine', '0004'), 'HTTP 500: boom'), null);
 check('the quiet backoff shape carries no ladder substring', /429|403|1015/.test(TRN_NEGATIVE_BACKOFF), false);
-check('the registry survived all of that', [...store.keys()].filter((k) => k.startsWith('recon_trn_negative_v1')).length, 1);
-check('and the negatives live under one key, not one per player', store.get('recon_trn_negative_v1')!.includes('private guy#0001'), true);
+// Version-agnostic on purpose: the key carries its own version and bumps on
+// every semantic change, so pinning v1 here would break the next migration.
+check('the registry survived all of that', [...store.keys()].filter((k) => k.startsWith('recon_trn_negative_v')).length, 1);
+const negKey = [...store.keys()].find((k) => k.startsWith('recon_trn_negative_v'));
+check('and the negatives live under one key, not one per player', !!negKey && (store.get(negKey) ?? '').includes('private guy#0001'), true);
 
 // --- the cooldown ladder is still a localStorage concern ---
 const { resetTrnCooldown, trnCooldownRemainingMs, trnCooldownStepCount, trnCooldownDelayMs } =

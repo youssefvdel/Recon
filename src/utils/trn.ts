@@ -376,7 +376,11 @@ export function trnDrainFor(name: string, tag: string, explicit = false): boolea
  * persisted so negatives survive restarts. Writers: fetchTrnStatsNow's catch
  * (tracker.ts) notes the kind its error proved. Same localStorage precedent
  * as the persisted cooldown. */
-const TRN_NEG_KEY = 'recon_trn_negative_v1';
+// v2 invalidates every negative recorded before tonight's semantic changes
+// (404 -> missing, privacy from metadata, transport-aware pause). The version in
+// the name IS the migration: v1 entries simply never match again. We stop
+// reading v1 and leave it on disk — deleting a user's key is not our call.
+const TRN_NEG_KEY = 'recon_trn_negative_v2';
 export const TRN_NEG_PRIVATE_MS = 7 * 24 * 60 * 60 * 1000;
 export const TRN_NEG_MISSING_MS = 24 * 60 * 60 * 1000;
 /** Quiet shape while blocked. No 429/403/1015 substring: never trips the
