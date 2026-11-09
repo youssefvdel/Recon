@@ -973,7 +973,22 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
 {
   const { readFileSync } = await import('node:fs');
   const trackerSrcV7 = readFileSync(new URL('../src/utils/tracker.ts', import.meta.url), 'utf8');
-  check('match-details cache is v7', trackerSrcV7.includes('recon_match_v7_'), true);
+  // The match-details reader and its cache moved to sources/matchDetails.ts.
+  const mdSrc = readFileSync(new URL('../src/sources/matchDetails.ts', import.meta.url), 'utf8');
+  check('match-details cache is v7', mdSrc.includes('recon_match_v7_'), true);
+  // A failed details read is a failed read, not an empty match. The fetcher
+  // goes through the validated reader, so an error payload throws instead of
+  // being parsed into zero players and cached under the v7 key.
+  check(
+    'match details come from the validated reader',
+    mdSrc.includes('readMatchDetailsRaw(matchId, region)'),
+    true
+  );
+  check(
+    'the details fetcher no longer calls the raw transport',
+    /fetchMatchDetailDirect[\s\S]{0,900}riotGet\(/.test(mdSrc),
+    false
+  );
   check('v6 is not used as a key', /localStorage\.(getItem|setItem)\(\s*'recon_match_v6_/.test(trackerSrcV7), false);
 }
 
@@ -1037,7 +1052,6 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('v6 match cache is pruned', pruned >= 2 && !localStorage.getItem('recon_match_v6_old1'), true);
 
   const realSet = localStorage.setItem.bind(localStorage);
-  let threw = false;
   let calls = 0;
   localStorage.setItem = ((k: string, v: string) => {
     calls++;
