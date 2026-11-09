@@ -10,6 +10,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '../utils/ipc';
+import { gameData } from './gameData';
 
 declare const VALIDATED: unique symbol;
 /** Proof that a payload passed the reader's own checks. Only this module can
@@ -240,6 +241,97 @@ export async function readPlayer24h(
   return validated(page(validated(j)));
 }
 
+/* ------------------------------------------------------------------ *
+ * Transport helpers, moved verbatim out of utils/tracker.ts.
+ *
+ * `shardFor` and `mapLimit` are unambiguously transport/utility. `normTeam` is
+ * arguably model code — it moves here now because it unblocks the act-stats
+ * split, and if it later looks like model it moves again in its own commit.
+ * ------------------------------------------------------------------ */
+
+export const shardFor = (region: string): string =>
+  (
+    {
+      eu: 'pd.eu.a.pvp.net',
+      na: 'pd.na.a.pvp.net',
+      ap: 'pd.ap.a.pvp.net',
+      br: 'pd.br.a.pvp.net',
+      latam: 'pd.latam.a.pvp.net',
+      kr: 'pd.kr.a.pvp.net',
+    } as Record<string, string>
+  )[region] ?? 'pd.eu.a.pvp.net';
+
+/** Run an async mapper over items with a hard concurrency cap. */
+export async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const idx = cursor++;
+      out[idx] = await fn(items[idx]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+export const normTeam = (t: unknown): string => {
+  const s = String(t ?? '').toLowerCase();
+  if (s === 'blue') return 'Blue';
+  if (s === 'red') return 'Red';
+  return String(t ?? '');
+};
+
+/* ------------------------------------------------------------------ *
+ * Typed readers for the act-stats cluster (added for the act-stats split).
+ * Additive on purpose: nothing calls them yet, so this changes no behaviour.
+ * When live/actStats.ts moves out of tracker.ts it will call these instead of
+ * the private transport, and THAT switch is the behaviour-changing commit.
+ * ------------------------------------------------------------------ */
+
+export interface MatchHistoryRow {
+  id: string;
+  queue: string;
+}
+
+/** One page of match history, validated. Throws RiotError on an error payload. */
+export async function readMatchHistoryPage(
+  puuid: string,
+  region: string,
+  start: number,
+  end: number
+): Promise<Validated<MatchHistoryRow[]>> {
+  if (!puuid) throw new RiotError('NO_PUUID', 'readMatchHistoryPage: puuid is required');
+  const j = await riotGet(
+    region,
+    `/match-history/v1/history/${puuid}?startIndex=${start}&endIndex=${end}`
+  );
+  assertRiotOk(j, 'match history');
+  const rows = (Array.isArray((j as { History?: unknown[] })?.History)
+    ? ((j as { History: unknown[] }).History as Record<string, unknown>[])
+    : []
+  ).map((h) => ({
+    id: String(h?.MatchID ?? ''),
+    queue: String(h?.QueueID ?? '').toLowerCase().trim(),
+  }));
+  return validated(rows);
+}
+
+/** Match details, validated, returned raw for the caller's own parser. */
+export async function readMatchDetailsRaw(
+  matchId: string,
+  region: string
+): Promise<Validated<Record<string, unknown>>> {
+  if (!matchId) throw new RiotError('NO_MATCH_ID', 'readMatchDetailsRaw: matchId is required');
+  const j = await riotGet(region, `/match-details/v1/matches/${matchId}`);
+  assertRiotOk(j, 'match details');
+  return validated(j as Record<string, unknown>);
+}
+
 /** Escape hatch for callers that read a Riot endpoint this module has no typed
  *  reader for yet (crosshair preferences, wallet). It still returns
  *  `Validated<unknown>`, so the result is checked before a parser sees it, and
@@ -251,4 +343,129 @@ export async function readRiotValidated<T = { data?: unknown; [k: string]: unkno
   const j = await riotGet(host, path);
   assertRiotOk(j, 'request');
   return validated(j as T);
+}
+
+/* ------------------------------------------------------------------ *
+ * Rank: the source read itself.
+ *
+ * Moved verbatim out of utils/tracker.ts. It lives here because the act-stats
+ * reader needs a rank row and would otherwise import tracker back — a cycle.
+ * ------------------------------------------------------------------ */
+
+export interface LocalRankRow {
+  /** Competitive tier number (0 = unranked/unknown). */
+  tier: number;
+  /** Current-act Ranked Rating. */
+  rr: number;
+  peakTier: number;
+  peakSeasonId?: string;
+  actWins: number;
+  actGames: number;
+  leaderboardRank: number;
+  isRankHidden: boolean;
+}
+
+/** Parse one /mmr/v1/players/{puuid} body. PURE — extracted verbatim from the
+ *  live lobby loop so the poll and the single-player path can never drift.
+ *  Checked by scripts/act-aggregate-check.ts. */
+export function parseLocalRank(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  j: any,
+  seasonOrder: string[]
+): LocalRankRow {
+  const latest = j?.LatestCompetitiveUpdate ?? {};
+  const tierId = Number(latest?.TierAfterUpdate ?? 0);
+  const seasons = j?.QueueSkills?.competitive?.SeasonalInfoBySeasonID ?? {};
+  // Current-act row carries the LIVE RR; LatestCompetitiveUpdate only holds
+  // the value as of the last ranked game.
+  const curSeasonId = String(latest?.SeasonID ?? '').toLowerCase();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cur = (Object.entries(seasons) as [string, any][]).find(
+    ([id]) => id.toLowerCase() === curSeasonId
+  )?.[1];
+  const rr =
+    cur?.RankedRating != null
+      ? Number(cur.RankedRating)
+      : Number(latest?.RankedRatingAfterUpdate ?? 0);
+  const peakInfo = extractPeakInfo(seasons, seasonOrder || []);
+  const peak = Math.max(tierId, peakInfo.tier);
+  return {
+    tier: tierId,
+    rr,
+    peakTier: peak,
+    peakSeasonId: peak === tierId && tierId > 0 ? curSeasonId : peakInfo.seasonId,
+    actWins: Number(cur?.NumberOfWins ?? 0),
+    actGames: Number(cur?.NumberOfGames ?? 0),
+    leaderboardRank: Number(cur?.LeaderboardRank ?? 0),
+    isRankHidden: !!j?.IsActRankBadgeHidden,
+  };
+}
+
+/** Rank + RR for ANY puuid through the local client. Throws when unreadable. */
+export async function fetchLocalRank(puuid: string, region: string): Promise<LocalRankRow> {
+  if (!puuid) throw new Error('LOCAL_NO_PUUID');
+  const { seasonOrder } = await gameData();
+  return parseLocalRank(await riotGet(shardFor(region), `/mmr/v1/players/${puuid}`), seasonOrder || []);
+}
+
+export interface LocalRiotCtx {
+  region: string;
+  queue: string;
+  drain?: boolean;
+  /** Opt IN to the act scan while VALORANT is in coregame. Default false: the
+   *  wave-1 in-game guard stays for every automatic caller. Only an explicit
+   *  user action (opening the player modal) sets this. */
+  allowAct?: boolean;
+  /** LOBBY FILL: take trnGet's fast path (no 6-8s serial slot). Only the
+   *  budgeted lobby fill sets this; nothing else may. */
+  fill?: boolean;
+}
+
+export function extractPeakInfo(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  seasonsObj: Record<string, any>,
+  orderNewestFirst: string[] = []
+): { tier: number; seasonId: string } {
+  const keys = Object.keys(seasonsObj || {});
+  if (keys.length === 0) return { tier: 0, seasonId: '' };
+
+  // Oldest → newest, so a strict `>` lets the newest act win every tie.
+  const rank = new Map<string, number>();
+  orderNewestFirst.forEach((id, i) => rank.set(String(id).toLowerCase(), orderNewestFirst.length - i));
+  const ordered = keys.slice().sort((a, b) => {
+    const ra = rank.get(a.toLowerCase());
+    const rb = rank.get(b.toLowerCase());
+    if (ra != null && rb != null) return ra - rb;
+    if (ra != null) return -1;
+    if (rb != null) return 1;
+    return 0;
+  });
+
+  let tier = 0;
+  let seasonId = '';
+  for (const id of ordered) {
+    const t = seasonPeakTier(seasonsObj[id]);
+    if (t > tier) {
+      tier = t;
+      seasonId = id;
+    }
+  }
+  return { tier, seasonId };
+}
+
+/** True all-time peak tier for one season row (end tier, act rank, or highest won tier). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function seasonPeakTier(s: any): number {
+  const endTier = Number(s?.CompetitiveTier ?? 0);
+  const actRank = Number(s?.Rank ?? 0);
+  let winTier = 0;
+  if (s?.WinsByTier && typeof s.WinsByTier === 'object') {
+    for (const tk of Object.keys(s.WinsByTier)) {
+      const num = Number(tk);
+      if (!isNaN(num) && Number(s.WinsByTier[tk]) > 0) {
+        winTier = Math.max(winTier, num);
+      }
+    }
+  }
+  return Math.max(endTier, actRank, winTier);
 }
