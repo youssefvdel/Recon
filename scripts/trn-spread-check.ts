@@ -110,6 +110,8 @@ check('acs alone counts as fetched', playerNeedsTrnStats(acsOnly) === false);
 
 // --- Wiring (source text): concurrent fill on top of the untouched gate ---
 const tracker = await Bun.file('src/utils/tracker.ts').text();
+// The persisted live-stats self-heal moved to live/playerStats.ts (step 2b).
+const playerStats = await Bun.file('src/live/playerStats.ts').text();
 const trn = await Bun.file('src/utils/trn.ts').text();
 const cacheRs = await Bun.file('src-tauri/src/trn_cache.rs').text();
 
@@ -120,7 +122,7 @@ check('fill keyed per lobby (match survives the flip)', tracker.includes('const 
 check('no per-phase key (budget is per lobby ≤10)', !tracker.includes('`${matchId}:${phase}`'), true);
 check('stale firing never fetches old lobby', tracker.includes('stale firings must never fetch for the old lobby'), true);
 check('fill stops when polls go stale', tracker.includes('TRN_SPREAD_STALE_MS'), true);
-check('heal skips flagged deliberate negatives', tracker.includes('!entry.negative &&'), true);
+check('heal skips flagged deliberate negatives', playerStats.includes('!entry.negative &&'), true);
 // Contract changed after the live-match incident: a hidden window must not stop
 // a live match's fill (the overlay is the surface showing it). Only idle work
 // parks while hidden.
