@@ -1145,10 +1145,23 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   // the only place a payload exists. When that count reaches zero the header
   // must be upgraded in the same commit — this check fails either way.
   const claimsExclusive = riotSrc.includes('the ONLY place a raw');
+  // check(name, actual, expected) — the boolean is the actual, not a detail.
+  check('the source header matches the code', rawSites > 0 ? !claimsExclusive : claimsExclusive, true);
+}
+
+// --- two silent failures become failures (upstream audit finding) ----------
+{
+  const { readFileSync } = await import('node:fs');
+  const trk = readFileSync(new URL('../src/utils/tracker.ts', import.meta.url), 'utf8');
+  const riotSrc = readFileSync(new URL('../src/sources/riot.ts', import.meta.url), 'utf8');
+
+  check('history meta goes through the validated reader', /readHistoryMeta\(ent\.puuid/.test(trk), true);
+  check('the history-meta reader validates', /readHistoryMeta[\s\S]{0,400}assertRiotOk\(j, 'match history'\)/.test(riotSrc), true);
+  check('history meta no longer reports a bare total 0', /total: Number\(j\?\.Total \?\? 0\)/.test(trk), false);
   check(
-    'the source header matches the code',
-    rawSites > 0 ? !claimsExclusive : claimsExclusive,
-    { rawSites, claimsExclusive }
+    'a failed 24h read is marked, not a zero',
+    /failed: true/.test(trk) && /failed\?: boolean/.test(trk),
+    true
   );
 }
 

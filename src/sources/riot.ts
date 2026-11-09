@@ -330,6 +330,32 @@ export async function readMatchHistoryPage(
   return validated(rows);
 }
 
+/** History page metadata (total rows + per-match queue). Validated: an error
+ *  payload throws instead of reporting `total: 0`, which read as "you have no
+ *  matches" rather than "we could not ask". */
+export async function readHistoryMeta(
+  puuid: string,
+  region: string,
+  start: number,
+  count: number
+): Promise<Validated<{ total: number; queueById: Record<string, string> }>> {
+  if (!puuid) throw new RiotError('NO_PUUID', 'readHistoryMeta: puuid is required');
+  const j = await riotGet(
+    region,
+    `/match-history/v1/history/${puuid}?startIndex=${start}&endIndex=${start + count}`
+  );
+  assertRiotOk(j, 'match history');
+  const queueById: Record<string, string> = {};
+  const h = Array.isArray((j as { History?: unknown[] })?.History)
+    ? ((j as { History: Record<string, unknown>[] }).History as Record<string, unknown>[])
+    : [];
+  for (const x of h) {
+    const id = String(x?.MatchID ?? '');
+    if (id) queueById[id] = String(x?.QueueID ?? '');
+  }
+  return validated({ total: Number((j as { Total?: number })?.Total ?? 0), queueById });
+}
+
 /** Match details, validated, returned raw for the caller's own parser. */
 export async function readMatchDetailsRaw(
   matchId: string,

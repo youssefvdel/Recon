@@ -757,18 +757,9 @@ export async function fetchHistoryMeta(
   count: number
 ): Promise<{ total: number; queueById: Record<string, string> }> {
   const ent = await getEntitlements();
-  const j = await riotGet(
-    shardFor(region),
-    `/match-history/v1/history/${ent.puuid}?startIndex=${start}&endIndex=${start + count}`
-  );
-  const queueById: Record<string, string> = {};
-  const h = Array.isArray(j?.History) ? j.History : [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  for (const x of h as any[]) {
-    const id = String(x?.MatchID ?? '');
-    if (id) queueById[id] = String(x?.QueueID ?? '');
-  }
-  return { total: Number(j?.Total ?? 0), queueById };
+  // Validated reader: an error payload throws instead of reporting total 0,
+  // which the UI could not distinguish from "you have played no matches".
+  return readHistoryMeta(ent.puuid, shardFor(region), start, count);
 }
 
 export const queueLabel = (q: string): string => {
@@ -1154,7 +1145,7 @@ import { inCurrentLobby, setCurrentLobbyPuuids } from '../live/lobbyScope';
 import { fetchLocalActStats, actStateFor } from '../live/actStats';
 export { fetchLocalActStats, actStateFor, LOCAL_ACT_MAX_MATCHES, LOCAL_ACT_BUDGET_MS } from '../live/actStats';
 export type { LocalActCtx } from '../live/actStats';
-import { shardFor, mapLimit, normTeam, fetchLocalRank, parseLocalRank, resolvePlayerNames, rememberPlayerNames } from '../sources/riot';
+import { shardFor, mapLimit, normTeam, fetchLocalRank, parseLocalRank, resolvePlayerNames, rememberPlayerNames, readHistoryMeta } from '../sources/riot';
 export { resolvePlayerNames, rememberPlayerNames } from '../sources/riot';
 import { fetchMatchDetailDirect } from '../sources/matchDetails';
 export { fetchMatchDetailDirect, parseRoundDetails } from '../sources/matchDetails';
@@ -1286,6 +1277,9 @@ async function fetchLiteMatchResult(
 export interface Recent24hRecord {
   won: number;
   lost: number;
+  /** True when the read FAILED. 0W/0L with this unset is a real "no games";
+   *  with it set it is "we could not ask" — the UI must not show a 0 for it. */
+  failed?: boolean;
   /** Most recent results, newest first — used for the streak badge. */
   streak: number;
   streakIsWin: boolean;
@@ -1572,7 +1566,8 @@ export async function fetchPlayer24hRecord(
       // full TTL (contrast the MMR path, which preserves last-good). Keep the
       // previous record; only genuine results are cached.
       const prev = recent24hCache.get(key);
-      return prev ?? empty;
+      // Mark it: a failed read must be distinguishable from a real 0W/0L.
+      return prev ? { ...prev, failed: true } : { ...empty, failed: true };
     } finally {
       recent24hInflight.delete(key);
     }
