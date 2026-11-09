@@ -2490,6 +2490,14 @@ export function mergeMmrRow(
   };
 }
 
+/** A hidden window must not stop a live match's fill: mid-game the main window
+ *  is minimised and the overlay is the surface showing this data. Idle work
+ *  still parks when hidden - that is the case this guard was written for. */
+function skipHiddenWork(): boolean {
+  if (typeof document === 'undefined' || !document.hidden) return false;
+  return getTrnMatchPhase() === 'idle';
+}
+
 async function enqueueTrnSpread(
   matchId: string,
   phase: string,
@@ -2497,7 +2505,7 @@ async function enqueueTrnSpread(
   isDeathmatch = false,
   ctx: LocalRiotCtx = { region: '', queue: 'competitive' }
 ): Promise<void> {
-  if (typeof document !== 'undefined' && document.hidden) return;
+  if (skipHiddenWork()) return;
   const budget = trnSpreadBudget(isDeathmatch);
   // Per-LOBBY key (match, not match+phase): a fill dispatched pre-flip keeps
   // its budget and drains to completion across the phase flip.
@@ -2557,7 +2565,7 @@ async function enqueueTrnSpread(
       // design: dispatch-time budgeting already decided, and drain:true
       // below exempts the run across the phase flip.
       if (fireKey !== trnSpreadKey || !playerNeedsTrnStats(puuid)) return;
-      if (typeof document !== 'undefined' && document.hidden) return;
+      if (skipHiddenWork()) return;
       if (Date.now() - trnSpreadLastPollAt > TRN_SPREAD_STALE_MS) return;
       if (trnInFlightLive.has(puuid.toLowerCase())) return;
       if (trnSpreadSpent >= budget) return;
