@@ -859,7 +859,15 @@ const PlayerRow: React.FC<{
             <StatValue reason={TS_STATE_TIP} />
           )
         ) : (
-          <StatValue reason={LIVE_UNKNOWN_TIP} />
+          /* Unknown = no Tracker data for this player yet, not a problem.
+             A quiet dash, never a warning icon. */
+          <span
+            data-tip={LIVE_UNKNOWN_TIP}
+            className="inline-flex items-center justify-center text-m3-outline"
+          >
+            <span aria-hidden="true">—</span>
+            <span className="sr-only">{LIVE_UNKNOWN_TIP}</span>
+          </span>
         )}
       </div>
 
