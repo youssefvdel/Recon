@@ -1145,10 +1145,15 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   // the only place a payload exists. When that count reaches zero the header
   // must be upgraded in the same commit — this check fails either way.
   const claimsExclusive = riotSrc.includes('the ONLY place a raw');
+  // The diagnostic object is logged, not compared: the assertion's expected
+  // value is the boolean, otherwise it can never pass.
+  if (rawSites > 0 && claimsExclusive) {
+    console.error(`  detail: ${rawSites} raw site(s) in tracker, header claims exclusivity`);
+  }
   check(
     'the source header matches the code',
     rawSites > 0 ? !claimsExclusive : claimsExclusive,
-    { rawSites, claimsExclusive }
+    true
   );
 }
 
