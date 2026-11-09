@@ -6,7 +6,6 @@ import { useTrackerData } from '../hooks/useTrackerData';
 import { ServerChip } from './ServerChip';
 import OverlayCrosshair from './OverlayCrosshair';
 import { DEFAULT_OVERLAY_CROSSHAIR, sanitizeCrosshairShape } from '../utils/crosshairOverlay';
-import { queueLabel } from '../utils/playerDisplay';
 import { computeMapAgentStats, getRankTierLabel, type AgentStatSummary } from '../utils/mapMeta';
 import { fetchBlitzAgentStats, peekBlitzAgentStats, type BlitzAgentStat } from '../utils/blitzMeta';
 import { getOverlayEditMode, setOverlayEditMode, isTabDown, isTauri } from '../utils/ipc';
@@ -35,8 +34,9 @@ export {
 } from './hud/overlayConfig';
 export type { OverlayConfig, WidgetPos } from './hud/overlayConfig';
 
-import { PregameTeamColumn, VerticalSquadColumn } from './hud/TeamBoard';
+import { VerticalSquadColumn } from './hud/TeamBoard';
 import { MetaTiles } from './hud/MetaTiles';
+import { PregamePanel } from './hud/PregamePanel';
 
 
 /* Overlay failures are shown inline for ~6 s, then gone — the window is
@@ -1661,70 +1661,15 @@ export const OverlayView: React.FC = () => {
               </div>
             </>
           )}
-          <div
-            className={`rounded-2xl border p-3 shadow-2xl flex flex-col gap-2 transition-all ${
-              isEditMode
-                ? 'bg-m3-surface-container/[0.85] border-m3-outline-variant/50 shadow-[0_16px_50px_rgba(0,0,0,0.9)] ring-1 ring-m3-outline-variant/30'
-                : 'bg-m3-surface-container/[0.85] border-m3-outline-variant/50 shadow-2xl'
-            }`}
-          >
-            {/* Header: Map • Starting Side Badge */}
-            <div className="flex items-center justify-between px-1">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="w-2 h-2 rounded-full bg-m3-mint shadow-[0_0_8px_rgba(58,227,116,0.8)]" />
-                <span className="font-display font-black text-m3-on-surface text-xs tracking-wider uppercase">
-                  {matchState?.mapName || 'Ascent'} • Team Scout
-                </span>
-                {/* Precise queue when Riot tells us (Competitive vs Unrated share
-                    a ModeID, so `mode` alone can't distinguish them). */}
-                {(queueLabel(matchState?.queueId) || matchState?.mode) && (
-                  <span
-                    className="text-[10px] font-mono text-m3-on-surface-variant truncate"
-                    data-tip={matchState?.queueId ? `Queue: ${matchState.queueId}` : undefined}
-                  >
-                    • {queueLabel(matchState?.queueId) || matchState?.mode}
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                {/* Match server — hides when Riot reports none (menus / no match) */}
-                <ServerChip serverName={matchState?.serverName} />
-                {config.showStartingSide && matchState?.startingSide && (
-                  <span
-                    className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-mono font-extrabold uppercase shrink-0 border ${
-                      matchState.startingSide === 'Defense'
-                        ? 'bg-m3-mint/15 text-m3-mint border-m3-mint/30'
-                        : 'bg-m3-coral/15 text-m3-coral border-m3-coral/30'
-                    }`}
-                  >
-                    {matchState.startingSide === 'Defense' ? (
-                      <>
-                        <Shield className="w-3 h-3 text-m3-mint" />
-                        <span>Starting Defense</span>
-                      </>
-                    ) : (
-                      <>
-                        <Swords className="w-3 h-3 text-m3-coral" />
-                        <span>Starting Attack</span>
-                      </>
-                    )}
-                  </span>
-                )}
-                <span className="px-2 py-0.5 rounded-full bg-m3-surface-container-high/60 border border-m3-outline-subtle/55 text-m3-on-surface-variant text-[9px] font-mono font-bold uppercase shrink-0">
-                  {isPregame ? 'Agent Select' : 'Preview'}
-                </span>
-              </div>
-            </div>
-
-            <PregameTeamColumn
-              title="Your Team"
-              tagColor="text-m3-primary"
-              players={yourTeam}
-              tierIcons={tierIcons}
-              seasons={seasonNames}
-              queueId={matchState?.queueId}
-            />
-          </div>
+          <PregamePanel
+            isEditMode={isEditMode}
+            matchState={matchState}
+            isPregame={isPregame}
+            showStartingSide={config.showStartingSide}
+            yourTeam={yourTeam}
+            tierIcons={tierIcons}
+            seasonNames={seasonNames}
+          />
         </div>
       )}
 
