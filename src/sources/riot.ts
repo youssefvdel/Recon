@@ -11,6 +11,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '../utils/ipc';
 import { gameData } from './gameData';
+import { logger } from '../utils/logger';
 
 declare const VALIDATED: unique symbol;
 /** Proof that a payload passed the reader's own checks. Only this module can
@@ -468,4 +469,151 @@ function seasonPeakTier(s: any): number {
     }
   }
   return Math.max(endTier, actRank, winTier);
+}
+
+/* ------------------------------------------------------------------ *
+ * Name service: Riot's own answer to "who is this puuid".
+ * Moved verbatim out of utils/tracker.ts because the match-details reader
+ * resolves missing names through it.
+ * ------------------------------------------------------------------ */
+
+export async function resolvePlayerNames(
+  puuids: string[],
+  shard = 'eu'
+): Promise<Record<string, { name: string; tag: string }>> {
+  if (puuids.length === 0) return {};
+  const cacheKey = 'aspect_names_cache_v2';
+  const legacyKey = 'aspect_names_cache_v1';
+  let cache: Record<string, { name: string; tag: string }> = {};
+  try {
+    const raw = localStorage.getItem(cacheKey);
+    if (raw) cache = JSON.parse(raw);
+  } catch {}
+  // One-time migration: v1 held ~200+ resolved names. Merge them into v2
+  // instead of dropping them — otherwise every live lobby re-PUTs 10
+  // PUUIDs and risks Riot 1015 rate-limiting mid-game.
+  try {
+    const legacyRaw = localStorage.getItem(legacyKey);
+    if (legacyRaw) {
+      const legacy = JSON.parse(legacyRaw) as Record<string, { name: string; tag: string }>;
+      let migrated = 0;
+      for (const [k, v] of Object.entries(legacy || {})) {
+        if (v?.name && !cache[k]) {
+          cache[k] = v;
+          migrated++;
+        }
+      }
+      if (migrated > 0) {
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify(cache));
+        } catch {}
+      }
+      try {
+        localStorage.removeItem(legacyKey);
+      } catch {}
+    }
+  } catch {}
+
+  const cachedFor = (p: string) => cache[p] ?? cache[p.toLowerCase()] ?? cache[p.toUpperCase()];
+  const missing = puuids.filter((p) => !cachedFor(p)?.name);
+  if (missing.length === 0) return cache;
+
+  // Path 1 — the Riot Client's own account service. Local, batched, no
+  // entitlements token, no remote round trip, no 1015 rate limit. It also
+  // reports an explicit per-PUUID error, so a blank name here is a real
+  // "unknown", not a silent failure. This is the primary path; the remote
+  // name-service below is the fallback.
+  try {
+    const localRes = await invoke<string>('riot_local_namesets', { puuids: missing });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const localParsed = JSON.parse(localRes) as any[];
+    if (Array.isArray(localParsed)) {
+      for (const item of localParsed) {
+        const sub = String(item?.puuid ?? item?.Subject ?? '').trim();
+        const gn = String(item?.alias?.gameName ?? item?.alias?.game_name ?? '').trim();
+        const tl = String(item?.alias?.tagLine ?? item?.alias?.tag_line ?? '').trim();
+        if (sub && gn) {
+          cache[sub] = { name: gn, tag: tl };
+          cache[sub.toLowerCase()] = { name: gn, tag: tl };
+          cache[sub.toUpperCase()] = { name: gn, tag: tl };
+        }
+      }
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify(cache));
+      } catch {}
+    }
+  } catch (e) {
+    if (import.meta.env.DEV) logger.warn('Local nameset lookup failed:', e);
+  }
+
+  // Only PUUIDs the local service could not answer go to the remote call.
+  const stillMissing = puuids.filter((p) => !cachedFor(p)?.name);
+  if (stillMissing.length === 0) return cache;
+
+  try {
+    // Accept either a short region ('eu') or a full pd host — Rust
+    // normalizes both, but short codes are unambiguous.
+    const short = shard.replace(/^pd\./i, '').replace(/\.a\.pvp\.net$/i, '').toLowerCase() || 'eu';
+    const res = await invoke<string>('riot_resolve_names', {
+      shard: short,
+      puuids: stillMissing,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const parsed = JSON.parse(res) as any[];
+    if (Array.isArray(parsed)) {
+      for (const item of parsed) {
+        const sub = String(item?.Subject ?? item?.subject ?? '').trim();
+        const gn = String(item?.GameName ?? item?.gameName ?? item?.DisplayName ?? item?.displayName ?? '').trim();
+        const tl = String(item?.TagLine ?? item?.tagLine ?? '').trim();
+        if (sub && gn) {
+          cache[sub] = { name: gn, tag: tl };
+          cache[sub.toLowerCase()] = { name: gn, tag: tl };
+          cache[sub.toUpperCase()] = { name: gn, tag: tl };
+        }
+      }
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify(cache));
+      } catch {}
+    }
+  } catch (e) {
+    if (import.meta.env.DEV) logger.warn('Failed to resolve player names:', e);
+  }
+
+  return cache;
+}
+
+/**
+ * Permanently remember Riot IDs from a trusted source (post-game
+ * match-details payload, live presences). This is how strict-hidden players
+ * get unmasked: Riot blanks their live name-service entry, but reveals the
+ * real gameName/tagLine after the match — once seen, Recon knows them in
+ * every future lobby, even while hidden.
+ */
+export function rememberPlayerNames(entries: { puuid: string; name: string; tag: string }[]): void {
+  if (entries.length === 0) return;
+  const cacheKey = 'aspect_names_cache_v2';
+  let cache: Record<string, { name: string; tag: string }> = {};
+  try {
+    const raw = localStorage.getItem(cacheKey);
+    if (raw) cache = JSON.parse(raw);
+  } catch {}
+  let touched = false;
+  for (const e of entries) {
+    const sub = String(e?.puuid ?? '').trim();
+    const nm = String(e?.name ?? '').trim();
+    if (!sub || !nm || nm.startsWith('Player ')) continue;
+    const tg = String(e?.tag ?? '').trim();
+    const val = { name: nm, tag: tg };
+    if (cache[sub]?.name !== nm || cache[sub]?.tag !== tg) {
+      cache[sub] = val;
+      cache[sub.toLowerCase()] = val;
+      cache[sub.toUpperCase()] = val;
+      touched = true;
+    }
+  }
+  if (touched) {
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify(cache));
+    } catch {}
+  }
 }
