@@ -34,7 +34,6 @@ import {
 import { LoadoutViewer } from './LoadoutViewer';
 import { useSeasonNames } from '../hooks/useTrackerData';
 import { peekLivePlayerStatsAsOf } from '../live/playerStats';
-import { ScoreBadge, scoreTier } from './ScoreBadge';
 import { ServerChip } from './ServerChip';
 import { StatValue } from './StatValue';
 import { formatKd, formatPct } from '../utils/format';
@@ -61,7 +60,6 @@ const LIVE_UNAVAILABLE_TIP = 'Not available for this player';
 const LIVE_PRIVATE_TIP = 'Private profile — data is not public';
 const LIVE_MISSING_TIP = 'Tracker has no profile for this account';
 const LIVE_UNKNOWN_TIP = 'No Tracker data available';
-const TS_STATE_TIP = 'Tracker Score is retired (tracker.gg stopped serving it, Nov 2026). This cell shows the Tracker state: fetching, private, no Tracker profile, or ready.';
 
 /** Tracker numbers older than this are hidden, not greyed: past the window the
  *  source is an archive, and an archive number read as current is the bug. */
@@ -541,7 +539,7 @@ const MatchStatusStrip: React.FC<{
 /* Player table — mirrors the Agent Select widget's columns            */
 /* ------------------------------------------------------------------ */
 
-const GRID = 'grid grid-cols-[1fr_52px_64px_56px_70px_68px_42px_38px_42px_38px_34px] items-center gap-x-1.5';
+const GRID = 'grid grid-cols-[1fr_52px_64px_70px_68px_42px_38px_42px_38px_34px] items-center gap-x-1.5';
 
 const ACCENTS: Record<string, { tag: string; border: string }> = {
   primary: { tag: 'bg-m3-primary/15 text-m3-primary border-m3-primary/30', border: 'border-m3-primary/25' },
@@ -569,7 +567,7 @@ const PlayerTable: React.FC<{
   // the rows that actually carry Tracker values. No timestamp = unknown age,
   // never "fresh"; past the archive window the block hides instead of greying.
   const hasTrackerValues = (p: LiveMatchPlayer): boolean =>
-    p.acs != null || p.kd != null || p.winPct != null || p.hsPct != null || p.trnScore != null;
+    p.acs != null || p.kd != null || p.winPct != null || p.hsPct != null;
   const rowsWithValues = players.filter(hasTrackerValues);
   const knownAges = rowsWithValues
     .map((p) => peekLivePlayerStatsAsOf(p.puuid))
@@ -617,7 +615,6 @@ const PlayerTable: React.FC<{
         <span>Player</span>
         <span className="text-center" data-tip="External tracker pages for this player">Links</span>
         <span className="text-center" data-tip="Equipped weapon skins & cosmetics">Skins</span>
-        <span className="text-center" data-tip={TS_STATE_TIP}>TS</span>
         <span className="text-left pl-1">Rank</span>
         <span className="text-left pl-1" data-tip="Peak rank — the act it was earned in is shown under the emblem">Peak</span>
         <span className="text-right" data-tip="Act-wide average combat score — the column this board is sorted by">ACS</span>
@@ -694,7 +691,7 @@ const PlayerRow: React.FC<{
       <span className="sr-only">{reason}</span>
     </span>
   );
-  /* Non-TS cells never pulse: only the TS cell may look busy while fetching. */
+  /* Tracker cells never pulse: fetching is a transient state, never an animation. */
   const trnBlankReason =
     trnState === 'fetching'
       ? LIVE_FETCHING_TIP
@@ -875,7 +872,7 @@ const PlayerRow: React.FC<{
         )}
       </div>
 
-      {/* 3. Skins / Loadout button — between Links and TS so it pops out */}
+      {/* 3. Skins / Loadout button — between Links and the stats block so it pops out */}
       <div className="flex items-center justify-center">
         {onShowLoadout && (
           <button
@@ -890,51 +887,6 @@ const PlayerRow: React.FC<{
             <Sparkles className="w-2.5 h-2.5 text-purple-300" />
             <span>Skins</span>
           </button>
-        )}
-      </div>
-
-      {/* 4. Tracker profile state. TS is retired, so this cell says what
-          Tracker actually knows about the row instead of showing a permanent
-          dash that reads as "still loading". A pulse appears here ONLY while
-          a real request is in flight; missing/private are terminal labels. */}
-      <div className="flex items-center justify-center min-w-0">
-        {trnState === 'fetching' ? (
-          <span data-tip={LIVE_FETCHING_TIP} className="inline-flex items-center justify-center">
-            <span className="sr-only">{LIVE_FETCHING_TIP}</span>
-            <span
-              aria-hidden="true"
-              className="block h-1 w-1 rounded-full bg-m3-primary/80 animate-pulse"
-            />
-          </span>
-        ) : trnState === 'missing' ? (
-          <span
-            data-tip={LIVE_MISSING_TIP}
-            className="flex flex-col items-center text-micro font-mono leading-[10px] text-m3-outline"
-          >
-            <span>no</span>
-            <span>Tracker</span>
-            <span>profile</span>
-          </span>
-        ) : trnState === 'private' ? (
-          lockCell
-        ) : trnState === 'ready' ? (
-          trackerHidden ? (
-            hiddenTrackerCell(trackerHidden)
-          ) : p.trnScore != null ? (
-            <span data-tip={`Tracker Score: ${p.trnScore} / 1000 — Tier ${scoreTier(p.trnScore).tier}`}>
-              <ScoreBadge tier={scoreTier(p.trnScore).tier} size={20} />
-            </span>
-          ) : (
-            <StatValue reason={TS_STATE_TIP} />
-          )
-        ) : (
-          /* Unknown = no Tracker data for this player yet. Blank, never a dash:
-             the design reserves `—` for a local field the source returned empty,
-             and a Tracker dash reads as a value. The honest tooltip + sr-only
-             label carry the meaning for hover and screen readers. */
-          <span data-tip={LIVE_UNKNOWN_TIP} className="inline-flex items-center justify-center">
-            <span className="sr-only">{LIVE_UNKNOWN_TIP}</span>
-          </span>
         )}
       </div>
 
