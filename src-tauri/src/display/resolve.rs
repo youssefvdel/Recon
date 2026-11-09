@@ -11,6 +11,7 @@ use super::registry::{
     setupdi_instance_id, setupdi_is_disabled,
 };
 use windows::Win32::Devices::DeviceAndDriverInstallation::{
+use super::registry::{pnp_instance_from_monitor_device_path};
     SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInfo, SetupDiGetClassDevsW, DIGCF_ALLCLASSES,
     DIGCF_PRESENT, GUID_DEVCLASS_MONITOR, SETUP_DI_GET_CLASS_DEVS_FLAGS, SP_DEVINFO_DATA,
 };
@@ -273,4 +274,107 @@ pub(super) fn friendly_name_from_instance_id(instance_id: &str, fallback: &str) 
     } else {
         fallback.to_string()
     }
+}
+
+
+/// Bridges `\\.\DISPLAYx` -> PnP `DISPLAY\<model>\<uid>` via CCD
+/// `QueryDisplayConfig` + `DisplayConfigGetDeviceInfo`.
+///
+/// `DISPLAYCONFIG_SOURCE_DEVICE_NAME.viewGdiDeviceName` links a CCD source to
+/// the GDI name; the same path's target then yields `monitorDevicePath`,
+/// which embeds the PnP instance id. This is the only reliable way to tell
+/// apart two identical panels (same model, different UID).
+pub(super) fn resolve_display_gdi_to_pnp(display_name: &str) -> Option<String> {
+    let want = display_name.trim();
+    if !is_gdi_display_name(want) {
+        return None;
+    }
+    unsafe {
+        for flags in [QDC_ONLY_ACTIVE_PATHS, QDC_DATABASE_CURRENT, QDC_ALL_PATHS] {
+            let mut path_count: u32 = 0;
+            let mut mode_count: u32 = 0;
+            if GetDisplayConfigBufferSizes(flags, &mut path_count, &mut mode_count).0 != 0 {
+                continue;
+            }
+            if path_count == 0 {
+                continue;
+            }
+            let mut paths = vec![DISPLAYCONFIG_PATH_INFO::default(); path_count as usize];
+            let mut modes = vec![DISPLAYCONFIG_MODE_INFO::default(); mode_count as usize];
+            if QueryDisplayConfig(
+                flags,
+                &mut path_count,
+                paths.as_mut_ptr(),
+                &mut mode_count,
+                modes.as_mut_ptr(),
+                None,
+            )
+            .0 != 0
+            {
+                continue;
+            }
+            paths.truncate(path_count as usize);
+            for p in &paths {
+                let mut src = DISPLAYCONFIG_SOURCE_DEVICE_NAME {
+                    header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
+                        r#type: DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+                        size: std::mem::size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32,
+                        adapterId: p.sourceInfo.adapterId,
+                        id: p.sourceInfo.id,
+                    },
+                    ..Default::default()
+                };
+                if DisplayConfigGetDeviceInfo(
+                    &mut src.header as *mut DISPLAYCONFIG_DEVICE_INFO_HEADER,
+                ) != 0
+                {
+                    continue;
+                }
+                let gdi = String::from_utf16_lossy(&src.viewGdiDeviceName)
+                    .trim_matches(char::from(0))
+                    .trim()
+                    .to_string();
+                if !gdi.eq_ignore_ascii_case(want) {
+                    continue;
+                }
+                let mut tgt = DISPLAYCONFIG_TARGET_DEVICE_NAME {
+                    header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
+                        r#type: DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+                        size: std::mem::size_of::<DISPLAYCONFIG_TARGET_DEVICE_NAME>() as u32,
+                        adapterId: p.targetInfo.adapterId,
+                        id: p.targetInfo.id,
+                    },
+                    ..Default::default()
+                };
+                if DisplayConfigGetDeviceInfo(
+                    &mut tgt.header as *mut DISPLAYCONFIG_DEVICE_INFO_HEADER,
+                ) != 0
+                {
+                    continue;
+                }
+                let raw_path = String::from_utf16_lossy(&tgt.monitorDevicePath)
+                    .trim_matches(char::from(0))
+                    .trim()
+                    .to_string();
+                if raw_path.is_empty() {
+                    continue;
+                }
+                let pnp = pnp_instance_from_monitor_device_path(&raw_path);
+                if !pnp.is_empty() {
+                    log::info!(
+                        "[display] DisplayConfig bridge '{}' -> '{}' (raw '{}')",
+                        want,
+                        pnp,
+                        raw_path
+                    );
+                    return Some(pnp);
+                }
+            }
+        }
+    }
+    log::warn!(
+        "[display] DisplayConfig bridge found no PnP path for '{}'",
+        want
+    );
+    None
 }

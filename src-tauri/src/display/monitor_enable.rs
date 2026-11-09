@@ -13,6 +13,7 @@ use super::resolve::{resolve_display_to_instance_id, resolve_to_pnp_instance};
 use std::thread;
 use std::time::Duration;
 use windows::Win32::Devices::DeviceAndDriverInstallation::{
+use super::registry::{setupdi_needs_reboot};
     SetupDiCallClassInstaller, SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInfo,
     SetupDiGetClassDevsW, SetupDiGetDeviceInstallParamsW, SetupDiSetClassInstallParamsW,
     DICS_DISABLE, DICS_ENABLE, DICS_FLAG_CONFIGSPECIFIC, DIF_PROPERTYCHANGE, DIGCF_ALLCLASSES,
@@ -20,29 +21,6 @@ use windows::Win32::Devices::DeviceAndDriverInstallation::{
     SP_CLASSINSTALL_HEADER, SP_DEVINFO_DATA, SP_DEVINSTALL_PARAMS_W, SP_PROPCHANGE_PARAMS,
 };
 
-/// Returns true when the devnode currently needs a reboot to complete a
-/// property change (DI_NEEDREBOOT in its install params).
-pub(super) fn setupdi_needs_reboot<H>(hdev: H, devinfo: &SP_DEVINFO_DATA) -> bool
-where
-    H: windows::core::Param<windows::Win32::Devices::DeviceAndDriverInstallation::HDEVINFO> + Copy,
-{
-    unsafe {
-        let mut params = SP_DEVINSTALL_PARAMS_W {
-            cbSize: std::mem::size_of::<SP_DEVINSTALL_PARAMS_W>() as u32,
-            ..Default::default()
-        };
-        if SetupDiGetDeviceInstallParamsW(
-            hdev,
-            Some(devinfo as *const SP_DEVINFO_DATA),
-            &mut params,
-        )
-        .is_ok()
-        {
-            return (params.Flags.0 & DI_NEEDREBOOT.0) != 0;
-        }
-    }
-    false
-}
 
 /// True Device Manager enable/disable for a monitor devnode.
 ///
