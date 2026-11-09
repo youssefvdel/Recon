@@ -223,13 +223,6 @@ pub fn trim_working_set() {
     }
 }
 
-/// Start-minimized pref for boot launches. Lives in settings.json (not
-/// localStorage) so the backend can honor it before any window exists.
-/// Default ON: a login launch should never pop a window over the game.
-fn start_minimized_enabled() -> bool {
-    crate::settings::is_start_minimized()
-}
-
 /// Directory `tauri-plugin-log` writes to: `%LOCALAPPDATA%\<identifier>\logs` —
 /// the same path the plugin resolves through `app_log_dir()`. Duplicated here so
 /// failures that happen BEFORE the logger attaches (WebView2 guard, startup)

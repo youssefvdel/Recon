@@ -4,7 +4,10 @@
 use tauri::State;
 
 use crate::display;
+use crate::paths;
+use crate::trim_working_set;
 use crate::shortcuts;
+use crate::updater;
 use crate::state::AppState;
 
 #[tauri::command]
@@ -109,4 +112,11 @@ pub(crate) fn open_external_url(url: String) -> Result<(), String> {
 pub(crate) fn trim_memory() -> Result<(), String> {
     trim_working_set();
     Ok(())
+}
+
+/// Start-minimized pref for boot launches. Lives in settings.json (not
+/// localStorage) so the backend can honor it before any window exists.
+/// Default ON: a login launch should never pop a window over the game.
+pub(crate) fn start_minimized_enabled() -> bool {
+    crate::settings::is_start_minimized()
 }
