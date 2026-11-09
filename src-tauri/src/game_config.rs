@@ -452,20 +452,6 @@ pub fn update_config_custom(path: &Path, opts: &CustomOptions) -> Result<(), Str
     )
 }
 
-pub fn apply_to_all_configs(w: u32, h: u32, lock_readonly: bool) -> Result<usize, String> {
-    let results = apply_to_all_configs_verbose(w, h, lock_readonly);
-    let ok_verified = results.iter().filter(|r| r.ok && r.verified).count();
-    if ok_verified == 0 {
-        let first_err = results
-            .iter()
-            .find(|r| !r.ok)
-            .map(|r| r.message.clone())
-            .unwrap_or_else(|| "Failed to update game configuration files".to_string());
-        return Err(first_err);
-    }
-    Ok(ok_verified)
-}
-
 /// Per-file apply with verification — backs the new editor tab + Sync All.
 pub fn apply_to_all_configs_verbose(w: u32, h: u32, lock_readonly: bool) -> Vec<ApplyResult> {
     // 1. Ensure GPU scaling is correctly configured for the user's active GPU vendor

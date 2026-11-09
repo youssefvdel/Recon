@@ -21,7 +21,6 @@ pub use hotkey_listener::{start_hotkey_listener, HotkeyController};
 pub use mode::{get_all_supported_modes, get_current_display_mode, get_native_resolution, get_primary_device_name, get_supported_refresh_rates_for, DisplayMode};
 pub use mode_switch::{apply_display_mode, apply_gpu_scaling_stretched, set_display_scaling_mode};
 pub use monitor_enable::set_monitor_device_enabled;
-pub use monitor_switch::{launch_cru, set_monitor_primary, set_monitor_topology_attached};
 pub use registry::{is_process_elevated};
 pub use report::{get_all_monitors, MonitorDevice};
 pub use resolve::resolve_display_to_instance_id;

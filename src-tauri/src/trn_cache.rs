@@ -421,33 +421,6 @@ fn cache_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// One dashboard row: how many entries the directory holds and their bytes.
-/// Committed `.trn` files only — `.tmp` files are uncommitted crash residue
-/// (swept on the next put) and never counted.
-#[derive(Clone, Debug, serde::Serialize)]
-pub struct TrnCacheStats {
-    pub files: u64,
-    pub bytes: u64,
-}
-
-/// Sum one directory. Pure over the scan inputs — unit-tested via `scan`.
-fn stats_for(dir: &Path) -> TrnCacheStats {
-    let Ok(rd) = fs::read_dir(dir) else {
-        return TrnCacheStats { files: 0, bytes: 0 };
-    };
-    let mut files: u64 = 0;
-    let mut bytes: u64 = 0;
-    for e in rd.flatten() {
-        let name = e.file_name().to_string_lossy().to_string();
-        if !name.ends_with(&format!(".{ENTRY_EXT}")) {
-            continue;
-        }
-        files += 1;
-        bytes += e.metadata().map(|m| m.len()).unwrap_or(0);
-    }
-    TrnCacheStats { files, bytes }
-}
-
 /// Read a cached body: `trn_cache_read { path } -> Ok(Some|None)`.
 ///
 /// `Ok(None)` is a miss and is NOT an error: absent files, rejected paths,
@@ -457,7 +430,6 @@ fn stats_for(dir: &Path) -> TrnCacheStats {
 /// lookup would turn one bad write into a permanent miss — and the deletion
 /// is traced, never silent. No TTL here: a stale entry still returns with its
 /// timestamp, and `trn.ts` decides freshness.
-#[tauri::command]
 pub async fn trn_cache_read(
     app: tauri::AppHandle,
     path: String,
@@ -611,40 +583,6 @@ fn enforce_bound(dir: &Path) {
     }
 }
 
-/// Store a body: `trn_cache_write { path, body } -> Ok(())`.
-///
-/// LOUD refusal, never silent: a body over `MAX_BODY_BYTES` returns `Err`
-/// naming the cap (the failure mode being replaced was a swallowed
-/// `QuotaExceededError`), and the refusal is traced. Rejected paths are also
-/// `Err` — a write must never look like it succeeded when nothing was stored.
-#[tauri::command]
-pub async fn trn_cache_write(
-    app: tauri::AppHandle,
-    path: String,
-    body: String,
-) -> Result<(), String> {
-    validate_cache_path(&path).map_err(|e| format!("cache write rejected path: {e}"))?;
-    let dir = cache_dir(&app)?;
-    let _guard = CACHE_LOCK
-        .lock()
-        .map_err(|_| "cache lock poisoned".to_string())?;
-    let out = write_entry(&dir, &path, &body, now_ms())?;
-    if !out.stored {
-        cache_trace!(
-            "CACHE refused path={} bytes={} cap={} reason={}",
-            path,
-            out.bytes,
-            out.cap,
-            out.reason
-        );
-        return Err(out.reason);
-    }
-    cache_trace!("CACHE write path={} bytes={}", path, out.bytes);
-    enforce_bound(&dir);
-    // Keep the byte/age bounds too: the entry cap alone allows 100 x 4 MiB.
-    enforce_age_and_total(&dir);
-    Ok(())
-}
 
 /// Store a body, then bring the directory back under `MAX_ENTRIES`. The scan
 /// runs after the write so the just-written file is part of the count and a
@@ -688,19 +626,6 @@ pub async fn trn_cache_put(
     Ok(out)
 }
 
-/// Dashboard readout: entry count + bytes. Missing dir = zeros, never an
-/// error — a cold start with no cache is the normal case.
-#[tauri::command]
-pub async fn trn_cache_stats(app: tauri::AppHandle) -> Result<TrnCacheStats, String> {
-    let _guard = CACHE_LOCK
-        .lock()
-        .map_err(|_| "cache lock poisoned".to_string())?;
-    let dir = match app.path().app_data_dir() {
-        Ok(d) => d.join("trn-cache"),
-        Err(_) => return Ok(TrnCacheStats { files: 0, bytes: 0 }),
-    };
-    Ok(stats_for(&dir))
-}
 
 /* ---- Dev trace log: cache lines, same cursor shape as the proxy ring ---- *
  * Release builds return an empty log (the macro is compiled out), so the panel

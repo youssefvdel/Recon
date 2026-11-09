@@ -6,7 +6,6 @@ use tauri::State;
 use crate::display;
 use crate::paths;
 use crate::trim_working_set;
-use crate::shortcuts;
 use crate::updater;
 use crate::state::AppState;
 
@@ -25,10 +24,6 @@ pub(crate) fn save_shortcut_binding(
     Ok(())
 }
 
-#[tauri::command]
-pub(crate) fn get_quick_shortcuts() -> Result<Vec<shortcuts::QuickShortcut>, String> {
-    Ok(shortcuts::load_shortcuts())
-}
 
 #[tauri::command]
 pub(crate) fn check_requested_tab() -> Option<String> {
