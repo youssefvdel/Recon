@@ -274,7 +274,18 @@ check(
 // --- hidden same-origin proxy: the SOLE TRN transport (no Rust HTTP) ---
 check('edgeGet goes through the hidden proxy', trnSrc.includes("invoke<string>('trn_proxy_fetch'"), true);
 check('no direct api fetch left in trn.ts', trnSrc.includes('https://api.tracker.gg'), false);
-const proxySrc = await Bun.file('src-tauri/src/trn_proxy.rs').text();
+// The proxy is a module tree now: read the whole surface so a split cannot
+// silently empty a source-grep assertion.
+// Test modules are excluded: several assertions below mean "production proxy
+// code never does X", and the tests legitimately do X on purpose.
+const proxyAllFiles = await Array.fromAsync(new Bun.Glob('src-tauri/src/trn_proxy/**/*.rs').scan('.'));
+const proxySrc = (await Promise.all(
+  proxyAllFiles
+    .filter((f) => !/tests?_[^/]*\.rs$|\/tests\.rs$/.test(f))
+    .map((f) => Bun.file(f).text()),
+)).join('\n');
+// Tests included: some assertions below are about what the test suite covers.
+const proxyAll = (await Promise.all(proxyAllFiles.map((f) => Bun.file(f).text()))).join('\n');
 check('proxy window hidden', proxySrc.includes('.visible(false)'), true);
 check('proxy window off taskbar', proxySrc.includes('.skip_taskbar(true)'), true);
 check('proxy window never focused', proxySrc.includes('.focused(false)'), true);
@@ -329,7 +340,7 @@ check('poll loop stamps live phase', trackerSrc.includes('setTrnMatchPhase(phase
 check('idle path stamps idle (no stale coregame pause)', trackerSrc.includes("setTrnMatchPhase('idle')"), true);
 check('pause gate reads the phase', proxySrc.includes('game_foreground: bool, phase: &str'), true);
 check('pause is foreground-only (no rect check)', proxySrc.includes('fn game_has_focus') && !proxySrc.includes('is_window_borderless_fullscreen'), true);
-check('tabbed-out never pauses (sees Recon, zero FPS risk)', proxySrc.includes('"tabbed-out phase: {phase}"'), true);
+check('tabbed-out never pauses (sees Recon, zero FPS risk)', proxyAll.includes('"tabbed-out phase: {phase}"'), true);
 check('pregame never pauses', proxySrc.includes('"pregame" | "lobby" | "menu" | "menus" | "idle" => false'), true);
 check('in-match pause keeps EDGE_PAUSED shape', proxySrc.includes('EDGE_PAUSED game fullscreen'), true);
 

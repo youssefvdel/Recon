@@ -113,7 +113,10 @@ const tracker = await Bun.file('src/utils/tracker.ts').text();
 // The persisted live-stats self-heal moved to live/playerStats.ts (step 2b).
 const playerStats = await Bun.file('src/live/playerStats.ts').text();
 const trn = await Bun.file('src/utils/trn.ts').text();
-const cacheRs = await Bun.file('src-tauri/src/trn_cache.rs').text();
+const cacheRs = (await Promise.all(
+  (await Array.fromAsync(new Bun.Glob('src-tauri/src/trn_cache/**/*.rs').scan('.')))
+    .map((f) => Bun.file(f).text()),
+)).join('\n');
 
 check('concurrent fill fans out per player', tracker.includes('}, trnFillJitterMs());'), true);
 check('no 6s serialization left', !tracker.includes('TRN_SPREAD_MS') && !tracker.includes('TRN_SPREAD_FIRST_MS') && !tracker.includes('pumpTrnSpread'), true);
@@ -218,7 +221,10 @@ check(
   { sites: trn.split("invoke<string>('trn_proxy_fetch'").length - 1 }
 );
 check('no rust trn_get egress left', !trn.includes("invoke<string>('trn_get'"), true);
-const proxyRs = await Bun.file('src-tauri/src/trn_proxy.rs').text();
+const proxyRs = (await Promise.all(
+  (await Array.fromAsync(new Bun.Glob('src-tauri/src/trn_proxy/**/*.rs').scan('.')))
+    .map((f) => Bun.file(f).text()),
+)).join('\n');
 check('proxy hits the api origin', proxyRs.includes('const API_BASE: &str = "https://api.tracker.gg"'), true);
 const trackerRs = await Bun.file('src-tauri/src/tracker.rs').text();
 check('rust trn_get command deleted', !trackerRs.includes('pub async fn trn_get'), true);

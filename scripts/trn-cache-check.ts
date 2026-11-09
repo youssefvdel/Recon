@@ -112,7 +112,10 @@ check('and a reset clears the persisted stamp too', store.has('recon_trn_cooldow
 // --- source wiring: the cache is opt-in per call, and the dead path is gone ---
 const trnSrc = await Bun.file('src/utils/trn.ts').text();
 const libSrc = await Bun.file('src-tauri/src/lib.rs').text();
-const cacheRs = await Bun.file('src-tauri/src/trn_cache.rs').text();
+const cacheRs = (await Promise.all(
+  (await Array.fromAsync(new Bun.Glob('src-tauri/src/trn_cache/**/*.rs').scan('.')))
+    .map((f) => Bun.file(f).text()),
+)).join('\n');
 
 check('trnGet reads the file cache', trnSrc.includes("invoke<TrnCacheEntry | null>('trn_cache_get'"), true);
 check('trnGet writes the file cache', trnSrc.includes("invoke<TrnCachePut>('trn_cache_put'"), true);
