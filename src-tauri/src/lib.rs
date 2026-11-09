@@ -103,21 +103,6 @@ fn open_dev_window(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn get_shortcut_binding() -> Result<display::ShortcutBinding, String> {
-    Ok(display::load_saved_hotkey())
-}
-
-#[tauri::command]
-fn save_shortcut_binding(
-    state: State<'_, AppState>,
-    binding: display::ShortcutBinding,
-) -> Result<(), String> {
-    display::save_saved_hotkey(&binding);
-    state.hotkey_controller.set_shortcut(binding);
-    Ok(())
-}
-
-#[tauri::command]
 fn get_windows() -> Result<Vec<window_manager::WindowInfo>, String> {
     Ok(window_manager::list_visible_windows())
 }
@@ -142,20 +127,6 @@ fn make_window_borderless(hwnd: isize) -> Result<String, String> {
 #[tauri::command]
 fn restore_window_framed(hwnd: isize) -> Result<String, String> {
     window_manager::restore_window(hwnd)
-}
-
-#[tauri::command]
-fn get_quick_shortcuts() -> Result<Vec<shortcuts::QuickShortcut>, String> {
-    Ok(shortcuts::load_shortcuts())
-}
-
-#[tauri::command]
-fn check_requested_tab() -> Option<String> {
-    let content = paths::read_data_file("requested_tab.txt")?;
-    // One-shot flag: consume it from both dirs so the migrated legacy copy is
-    // not replayed by the read fallback on the next launch.
-    paths::remove_data_file("requested_tab.txt");
-    Some(content.trim().to_lowercase())
 }
 
 #[cfg(target_os = "windows")]
@@ -252,86 +223,11 @@ pub fn trim_working_set() {
     }
 }
 
-#[tauri::command]
-async fn check_channel_update(
-    webview: tauri::Webview,
-    channel: String,
-) -> Result<Option<updater::UpdateMetadata>, String> {
-    updater::check_channel_update_internal(webview, channel).await
-}
-
-#[tauri::command]
-fn get_autostart_enabled() -> Result<bool, String> {
-    use winreg::enums::*;
-    use winreg::RegKey;
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let run = hkcu.open_subkey_with_flags("Software\\Microsoft\\Windows\\CurrentVersion\\Run", KEY_READ)
-        .map_err(|e| format!("Failed to open Run key: {}", e))?;
-    match run.get_value::<String, _>("Recon") {
-        Ok(_) => Ok(true),
-        Err(_) => Ok(false),
-    }
-}
-
-#[tauri::command]
-fn set_autostart_enabled(enabled: bool) -> Result<bool, String> {
-    use winreg::enums::*;
-    use winreg::RegKey;
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let (run, _) = hkcu.create_subkey("Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run")
-        .map_err(|e| format!("Failed to open Run key for write: {}", e))?;
-    if enabled {
-        let exe_path = std::env::current_exe()
-            .map_err(|e| format!("Cannot get current exe path: {}", e))?;
-        // Boot lands in the tray when the start-minimized pref is on
-        // (default): the flag is read back in setup to hide the window.
-        let exe_str = if start_minimized_enabled() {
-            format!("\"{}\" --minimized", exe_path.to_string_lossy())
-        } else {
-            format!("\"{}\"", exe_path.to_string_lossy())
-        };
-        run.set_value("Recon", &exe_str)
-            .map_err(|e| format!("Failed to set registry value: {}", e))?;
-        // Drop the legacy pre-rename entry so the app doesn't boot twice.
-        let _ = run.delete_value("Aspect");
-    } else {
-        let _ = run.delete_value("Aspect");
-        let _ = run.delete_value("Recon");
-    }
-    Ok(enabled)
-}
-
 /// Start-minimized pref for boot launches. Lives in settings.json (not
 /// localStorage) so the backend can honor it before any window exists.
 /// Default ON: a login launch should never pop a window over the game.
 fn start_minimized_enabled() -> bool {
     crate::settings::is_start_minimized()
-}
-
-#[tauri::command]
-fn get_start_minimized() -> Result<bool, String> {
-    Ok(start_minimized_enabled())
-}
-
-#[tauri::command]
-fn set_start_minimized(enabled: bool) -> Result<bool, String> {
-    crate::settings::set_start_minimized(enabled);
-    // Re-write the Run entry so a stored boot launch picks up the new flag.
-    if get_autostart_enabled().unwrap_or(false) {
-        return set_autostart_enabled(true);
-    }
-    Ok(enabled)
-}
-
-#[tauri::command]
-fn open_external_url(url: String) -> Result<(), String> {
-    updater::open_url(&url)
-}
-
-#[tauri::command]
-fn trim_memory() -> Result<(), String> {
-    trim_working_set();
-    Ok(())
 }
 
 /// Directory `tauri-plugin-log` writes to: `%LOCALAPPDATA%\<identifier>\logs` —
@@ -941,8 +837,8 @@ pub fn run() {
             commands::display::get_preferred_stretched_res,
             commands::display::set_preferred_stretched_res,
             commands::display::apply_custom_res_to_all_configs,
-            get_shortcut_binding,
-            save_shortcut_binding,
+            commands::settings::get_shortcut_binding,
+            commands::settings::save_shortcut_binding,
             commands::gpu::get_gpu_info,
             commands::gpu::get_gpu_settings,
             commands::gpu::set_gpu_setting,
@@ -1007,9 +903,9 @@ pub fn run() {
             trn_cache::trn_cache_trace_log,
             perf::perf_poll,
             space_spam::set_space_spam,
-            get_quick_shortcuts,
-            check_requested_tab,
-            trim_memory,
+            commands::settings::get_quick_shortcuts,
+            commands::settings::check_requested_tab,
+            commands::settings::trim_memory,
             commands::display::get_all_monitors,
             win::overlay::get_overlay_monitor,
             win::overlay::set_overlay_monitor,
@@ -1024,12 +920,12 @@ pub fn run() {
             commands::display::add_custom_resolution,
             commands::display::remove_custom_override,
             commands::display::list_supported_modes,
-            check_channel_update,
-            get_autostart_enabled,
-            set_autostart_enabled,
-            get_start_minimized,
-            set_start_minimized,
-            open_external_url,
+            commands::settings::check_channel_update,
+            commands::settings::get_autostart_enabled,
+            commands::settings::set_autostart_enabled,
+            commands::settings::get_start_minimized,
+            commands::settings::set_start_minimized,
+            commands::settings::open_external_url,
             open_dev_window,
             commands::window::window_minimize,
             commands::window::window_toggle_maximize,
