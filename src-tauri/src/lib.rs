@@ -28,6 +28,7 @@ pub(crate) use state::{
     AppState, DisplayInfo, AUTO_BORDERLESS_ENABLED, MAIN_WINDOW_SIZE_LOGICAL, OVERLAY_AVAILABLE,
     OVERLAY_EDIT_WATCHDOG_MS, OVERLAY_PRESENT, OVERLAY_WINDOWED,
 };
+pub(crate) use commands::display::build_display_info;
 pub(crate) use win::tray::build_tray;
 pub(crate) use win::overlay::{
     build_overlay_window, force_overlay_edit_mode_off, get_overlay_edit_mode, get_overlay_monitor,
@@ -99,102 +100,6 @@ fn open_dev_window(app: tauri::AppHandle) -> Result<(), String> {
     } else {
         build_dev_window(&app).map(|_| ())
     }
-}
-
-fn build_display_info() -> DisplayInfo {
-    let (native_w, native_h) = display::get_native_resolution();
-    let cur = display::get_current_display_mode().unwrap_or(display::DisplayMode {
-        width: native_w,
-        height: native_h,
-        refresh_rate: 260,
-    });
-    let rates = display::get_supported_refresh_rates_for(cur.width, cur.height);
-    let active_profile = if cur.width == native_w && cur.height == native_h {
-        "native".to_string()
-    } else {
-        "stretched".to_string()
-    };
-    let dev_name = display::get_primary_device_name();
-
-    DisplayInfo {
-        current_width: cur.width,
-        current_height: cur.height,
-        current_hz: cur.refresh_rate,
-        native_width: native_w,
-        native_height: native_h,
-        supported_refresh_rates: rates,
-        active_profile,
-        device_name: dev_name,
-    }
-}
-
-#[tauri::command]
-async fn get_display_info() -> Result<DisplayInfo, String> {
-    tauri::async_runtime::spawn_blocking(build_display_info)
-        .await
-        .map_err(|e| format!("Task failed: {}", e))
-}
-
-#[tauri::command]
-fn apply_resolution(width: u32, height: u32, hz: u32) -> Result<(), String> {
-    display::apply_display_mode(width, height, hz)
-}
-
-#[tauri::command]
-fn toggle_profile(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<DisplayInfo, String> {
-    let cur = display::get_current_display_mode().ok_or("Failed to query display mode")?;
-    let (native_w, native_h) = display::get_native_resolution();
-
-    let (target_w, target_h) = if cur.width == native_w {
-        let pref = state.preferred_stretched.lock().unwrap();
-        *pref
-    } else {
-        (native_w, native_h)
-    };
-
-    display::apply_display_mode(target_w, target_h, cur.refresh_rate)?;
-    let info = build_display_info();
-    let _ = app.emit("display-mode-changed", &info);
-    Ok(info)
-}
-
-#[tauri::command]
-fn get_preferred_stretched_res(state: State<'_, AppState>) -> Result<[u32; 2], String> {
-    let pref = state.preferred_stretched.lock().unwrap();
-    Ok([pref.0, pref.1])
-}
-
-#[tauri::command]
-fn set_preferred_stretched_res(
-    state: State<'_, AppState>,
-    width: u32,
-    height: u32,
-) -> Result<[u32; 2], String> {
-    if width == 0 || height == 0 {
-        return Err("Invalid resolution dimensions".to_string());
-    }
-    display::save_saved_stretched_res(width, height);
-    let mut pref = state.preferred_stretched.lock().unwrap();
-    *pref = (width, height);
-    Ok([width, height])
-}
-
-#[tauri::command]
-fn apply_custom_res_to_all_configs(
-    width: u32,
-    height: u32,
-    lock_readonly: bool,
-) -> Result<String, String> {
-    let count = game_config::apply_to_all_configs(width, height, lock_readonly)?;
-    let lock_text = if lock_readonly {
-        "and write-protected (Read-Only) against game updates"
-    } else {
-        "unlocked for manual in-game edits"
-    };
-    Ok(format!(
-        "Successfully applied {}×{} {} across {} game config file(s)!",
-        width, height, lock_text, count
-    ))
 }
 
 #[tauri::command]
@@ -270,19 +175,6 @@ fn update_valorant_config_custom(
 #[tauri::command]
 fn verify_valorant_configs(width: u32, height: u32) -> Result<Vec<game_config::VerifyResult>, String> {
     Ok(game_config::verify_all_configs(width, height))
-}
-
-#[tauri::command]
-fn apply_custom_res_verbose(
-    width: u32,
-    height: u32,
-    lock_readonly: bool,
-) -> Result<Vec<game_config::ApplyResult>, String> {
-    let results = game_config::apply_to_all_configs_verbose(width, height, lock_readonly);
-    if results.is_empty() {
-        return Err("No VALORANT GameUserSettings.ini files found. Please launch VALORANT once to generate configuration files.".to_string());
-    }
-    Ok(results)
 }
 
 #[tauri::command]
@@ -497,72 +389,6 @@ fn open_external_url(url: String) -> Result<(), String> {
 fn trim_memory() -> Result<(), String> {
     trim_working_set();
     Ok(())
-}
-
-#[tauri::command]
-async fn get_all_monitors() -> Result<Vec<display::MonitorDevice>, String> {
-    tauri::async_runtime::spawn_blocking(display::get_all_monitors)
-        .await
-        .map_err(|e| format!("Task failed: {}", e))
-}
-
-/// Kept for backend compat only. The Display Manager UI no longer exposes CCD
-/// Attached/Detached — only Device Manager Enable/Disable remains. Retained so
-/// existing invokes / restore paths don't break.
-#[tauri::command]
-fn set_monitor_attached(device_name: String, attached: bool) -> Result<Vec<display::MonitorDevice>, String> {
-    display::set_monitor_topology_attached(&device_name, attached)
-}
-
-#[tauri::command]
-fn set_monitor_device_enabled(monitor_id: String, enabled: bool) -> Result<Vec<display::MonitorDevice>, String> {
-    display::set_monitor_device_enabled(&monitor_id, enabled)
-}
-
-#[tauri::command]
-fn set_monitor_primary(device_name: String) -> Result<Vec<display::MonitorDevice>, String> {
-    display::set_monitor_primary(&device_name)
-}
-
-#[tauri::command]
-fn launch_cru() -> Result<(), String> {
-    display::launch_cru()
-}
-
-#[tauri::command]
-fn restart_graphics_driver() -> Result<String, String> {
-    Ok(custom_res::restart_driver_stack())
-}
-
-#[tauri::command]
-fn reset_all_cru_overrides() -> Result<String, String> {
-    custom_res::reset_all_edid_overrides()
-}
-
-#[tauri::command]
-fn reset_all_edid_overrides() -> Result<String, String> {
-    custom_res::reset_all_edid_overrides()
-}
-
-#[tauri::command]
-fn test_custom_mode(width: u32, height: u32, hz: u32) -> Result<custom_res::CustomModeTest, String> {
-    custom_res::validate_custom_resolution(width, height, hz)?;
-    Ok(custom_res::test_display_mode(None, width, height, hz))
-}
-
-#[tauri::command]
-fn add_custom_resolution(monitor_id: String, width: u32, height: u32, hz: u32) -> Result<String, String> {
-    custom_res::add_custom_resolution(&monitor_id, width, height, hz)
-}
-
-#[tauri::command]
-fn remove_custom_override(monitor_id: String) -> Result<String, String> {
-    custom_res::remove_custom_override(&monitor_id)
-}
-
-#[tauri::command]
-fn list_supported_modes() -> Result<Vec<display::DisplayMode>, String> {
-    Ok(display::get_all_supported_modes())
 }
 
 /// Directory `tauri-plugin-log` writes to: `%LOCALAPPDATA%\<identifier>\logs` —
@@ -1166,12 +992,12 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            get_display_info,
-            apply_resolution,
-            toggle_profile,
-            get_preferred_stretched_res,
-            set_preferred_stretched_res,
-            apply_custom_res_to_all_configs,
+            commands::display::get_display_info,
+            commands::display::apply_resolution,
+            commands::display::toggle_profile,
+            commands::display::get_preferred_stretched_res,
+            commands::display::set_preferred_stretched_res,
+            commands::display::apply_custom_res_to_all_configs,
             get_shortcut_binding,
             save_shortcut_binding,
             commands::gpu::get_gpu_info,
@@ -1197,7 +1023,7 @@ pub fn run() {
             update_valorant_config,
             update_valorant_config_custom,
             verify_valorant_configs,
-            apply_custom_res_verbose,
+            commands::display::apply_custom_res_verbose,
             get_valorant_config_raw,
             get_valorant_config_sections,
             set_valorant_config_value,
@@ -1241,20 +1067,20 @@ pub fn run() {
             get_quick_shortcuts,
             check_requested_tab,
             trim_memory,
-            get_all_monitors,
+            commands::display::get_all_monitors,
             win::overlay::get_overlay_monitor,
             win::overlay::set_overlay_monitor,
-            set_monitor_attached,
-            set_monitor_device_enabled,
-            set_monitor_primary,
-            launch_cru,
-            restart_graphics_driver,
-            reset_all_cru_overrides,
-            reset_all_edid_overrides,
-            test_custom_mode,
-            add_custom_resolution,
-            remove_custom_override,
-            list_supported_modes,
+            commands::display::set_monitor_attached,
+            commands::display::set_monitor_device_enabled,
+            commands::display::set_monitor_primary,
+            commands::display::launch_cru,
+            commands::display::restart_graphics_driver,
+            commands::display::reset_all_cru_overrides,
+            commands::display::reset_all_edid_overrides,
+            commands::display::test_custom_mode,
+            commands::display::add_custom_resolution,
+            commands::display::remove_custom_override,
+            commands::display::list_supported_modes,
             check_channel_update,
             get_autostart_enabled,
             set_autostart_enabled,
