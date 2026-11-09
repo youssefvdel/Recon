@@ -19,6 +19,7 @@ mod webview_guard;
 mod settings;
 mod state;
 mod win;
+mod commands;
 
 // Re-exported at the crate root so the split moved code without moving any
 // caller: `crate::OVERLAY_EDIT_MODE` and friends still resolve.
@@ -43,35 +44,6 @@ use tauri::{
     Emitter, Manager, State,
 };
 
-
-#[tauri::command]
-fn window_minimize(window: tauri::WebviewWindow) -> Result<(), String> {
-    window.minimize().map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn window_toggle_maximize(window: tauri::WebviewWindow) -> Result<(), String> {
-    if window.is_maximized().unwrap_or(false) {
-        window.unmaximize().map_err(|e| e.to_string())
-    } else {
-        window.maximize().map_err(|e| e.to_string())
-    }
-}
-
-#[tauri::command]
-fn window_close(window: tauri::WebviewWindow) -> Result<(), String> {
-    window.close().map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn window_start_dragging(window: tauri::WebviewWindow) -> Result<(), String> {
-    window.start_dragging().map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn window_is_maximized(window: tauri::WebviewWindow) -> Result<bool, String> {
-    window.is_maximized().map_err(|e| e.to_string())
-}
 
 /// Build the dev-dashboard window at runtime instead of declaring it in
 /// `tauri.conf.json`.
@@ -1347,11 +1319,11 @@ pub fn run() {
             set_start_minimized,
             open_external_url,
             open_dev_window,
-            window_minimize,
-            window_toggle_maximize,
-            window_close,
-            window_start_dragging,
-            window_is_maximized,
+            commands::window::window_minimize,
+            commands::window::window_toggle_maximize,
+            commands::window::window_close,
+            commands::window::window_start_dragging,
+            commands::window::window_is_maximized,
         ])
         .run(context);
 
