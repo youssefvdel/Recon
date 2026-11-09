@@ -999,7 +999,11 @@ export async function trnGet(
   // Dead-network breaker BEFORE anything with a cost: consecutive status-0
   // deaths mean the page's network is down — fail quiet without touching the
   // gate, the budget, or the wire. A later success reopens automatically.
-  if (isTrnDeadQuiet()) {
+  // EDGE-state breakers. They describe the webview transport, so they must not
+  // refuse a request the direct transport will serve — an edge hiccup otherwise
+  // empties the live board during a match (the direct path never touches it).
+  const directServes = canServeDirect(path);
+  if (!directServes && isTrnDeadQuiet()) {
     if (import.meta.env.DEV) trnLog('dead-quiet fail-fast', `remaining=${Math.ceil((trnDeadQuietUntil - Date.now()) / 1000)}s`);
     report('EDGE');
     throw new Error(`${TRN_DEAD_QUIET} ${Math.ceil((trnDeadQuietUntil - Date.now()) / 1000)}s`);
@@ -1009,7 +1013,7 @@ export async function trnGet(
   // must not be retried by every view on every poll (each attempt pays a window
   // create + eval). Bounded and cleared by the next answered request; kept
   // separate from the status-0 breaker, which is about the page's network.
-  if (trnProxyBackoffRemainingMs() > 0) {
+  if (!directServes && trnProxyBackoffRemainingMs() > 0) {
     if (import.meta.env.DEV) trnLog('proxy-backoff fail-fast', `remaining=${Math.ceil(trnProxyBackoffRemainingMs() / 1000)}s`);
     report('EDGE');
     throw new Error(`TRN_PROXY_BACKOFF ${Math.ceil(trnProxyBackoffRemainingMs() / 1000)}s`);

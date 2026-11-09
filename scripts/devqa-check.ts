@@ -1050,6 +1050,18 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('writeLocalSafe always returns a boolean', typeof ok === 'boolean', true);
 }
 
+// --- EDGE breakers must not refuse a DIRECT request (task-72b) --------------
+{
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../src/utils/trn.ts', import.meta.url), 'utf8');
+  check('direct capability is computed once', src.includes('const directServes = canServeDirect(path);'), true);
+  check('dead-quiet is edge-only', src.includes('if (!directServes && isTrnDeadQuiet())'), true);
+  check('proxy backoff is edge-only', src.includes('if (!directServes && trnProxyBackoffRemainingMs() > 0)'), true);
+  // Both breakers still EXIST for the edge path.
+  check('dead-quiet still throws when it applies', src.includes('TRN_DEAD_QUIET} '), true);
+  check('proxy backoff still throws when it applies', src.includes("throw new Error(`TRN_PROXY_BACKOFF"), true);
+}
+
 if (failures > 0) {
   console.error(`${failures} failure(s)`);
   process.exit(1);

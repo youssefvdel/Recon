@@ -1,8 +1,8 @@
 # Design — the data layer (buildable, no decisions left)
 
-Implements `target.md` step 1–5. Every signature below is final; if a builder has to
-choose something, this document is wrong. Replaces `tracker.ts:3794` (unvalidated MMR
-parse), `tracker.ts:1740` (cross-module prune), `trn.ts:1028` (gate before transport).
+Implements `target.md` steps 1–5. Every signature is final: if a builder has to choose
+something, this doc is wrong. Replaces `tracker.ts:3794` (unvalidated MMR parse),
+`tracker.ts:1740` (cross-module prune), `trn.ts:1028` (gate before transport).
 
 ## 1. File layout
 
@@ -20,7 +20,6 @@ Absorbed, not rewritten: `tracker.ts` keeps only pure parsers (`parseLocalRank`,
 `parseRoundDetails`, `mergeMmrRow`) and loses every storage call to `cache/`.
 
 ## 2. Interfaces
-
 ```ts
 // model/types.ts — the only thing a parser may accept.
 declare const VALIDATED: unique symbol;
@@ -137,6 +136,5 @@ not in that variant's type — not because someone remembered to check first.
 - No new data source; TRN keeps only what Riot cannot answer (precomputed aggregates).
 - No rewrite of pure helpers (`parseLocalRank`, `parseRoundDetails`, `mergeMmrRow`,
   `splitFillWaves`) — they move file and keep their bodies.
-- No UI redesign beyond the four-state TS column.
+- No UI redesign beyond the four-state TS column; no test framework change.
 - No change to the Rust commands, `source=overwolf-2`, or the negative TTLs.
-- No test framework change: acceptance lives in the existing `scripts/*-check.ts`.
