@@ -33,6 +33,7 @@ import {
 } from '../utils/loadout';
 import { LoadoutViewer } from './LoadoutViewer';
 import { useSeasonNames } from '../hooks/useTrackerData';
+import { peekLivePlayerStatsAsOf } from '../live/playerStats';
 import { ScoreBadge, scoreTier } from './ScoreBadge';
 import { ServerChip } from './ServerChip';
 import { StatValue } from './StatValue';
@@ -61,6 +62,22 @@ const LIVE_PRIVATE_TIP = 'Private profile — data is not public';
 const LIVE_MISSING_TIP = 'Tracker has no profile for this account';
 const LIVE_UNKNOWN_TIP = 'No Tracker data available';
 const TS_STATE_TIP = 'Tracker Score is retired (tracker.gg stopped serving it, Nov 2026). This cell shows the Tracker state: fetching, private, no Tracker profile, or ready.';
+
+/** Tracker numbers older than this are hidden, not greyed: past the window the
+ *  source is an archive, and an archive number read as current is the bug. */
+const TRACKER_ARCHIVE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** One age format everywhere the Tracker block is stamped: 45m, 6h, 8d, then a
+ *  date past 30 days. An unknown age is rendered by the caller as "unknown",
+ *  never as "just now". */
+function formatTrackerAge(asOf: number, now: number): string {
+  const s = Math.max(0, Math.round((now - asOf) / 1000));
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86_400) return `${Math.floor(s / 3600)}h`;
+  if (s < 30 * 86_400) return `${Math.floor(s / 86_400)}d`;
+  return new Date(asOf).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
 
 /* In-app Live Match page.
 
@@ -350,6 +367,7 @@ export const LiveMatchView: React.FC = () => {
           hideHeader
           accent="gold"
           players={teams.yours}
+          now={effectiveState?.updatedAt ?? 0}
           tierIcons={tierIcons}
           seasonNames={seasonNames}
           queueId={effectiveState?.queueId}
@@ -360,6 +378,7 @@ export const LiveMatchView: React.FC = () => {
           data-tip="The Range — Practice"
           accent="mint"
           players={teams.yours}
+          now={effectiveState?.updatedAt ?? 0}
           tierIcons={tierIcons}
           seasonNames={seasonNames}
           queueId={effectiveState?.queueId}
@@ -371,6 +390,7 @@ export const LiveMatchView: React.FC = () => {
             data-tip="Your Team"
             accent="primary"
             players={teams.yours}
+            now={effectiveState?.updatedAt ?? 0}
             tierIcons={tierIcons}
             seasonNames={seasonNames}
             queueId={effectiveState?.queueId}
@@ -382,6 +402,7 @@ export const LiveMatchView: React.FC = () => {
               data-tip="Enemy Team"
               accent="coral"
               players={teams.theirs}
+              now={effectiveState?.updatedAt ?? 0}
               tierIcons={tierIcons}
               seasonNames={seasonNames}
               queueId={effectiveState?.queueId}
@@ -533,14 +554,45 @@ const PlayerTable: React.FC<{
   title?: string;
   accent: keyof typeof ACCENTS;
   players: LiveMatchPlayer[];
+  /** Poll clock (state.updatedAt) — ages are measured against this, not render time. */
+  now: number;
   tierIcons: Record<number, string>;
   seasonNames: Record<string, string>;
   /** Queue being played — captions the Last-24h column so it reads mode-scoped. */
   queueId?: string;
   onShowLoadout?: (p: LiveMatchPlayer) => void;
   hideHeader?: boolean;
-}> = ({ title, accent, players, tierIcons, seasonNames, onShowLoadout, hideHeader }) => {
+}> = ({ title, accent, players, now, tierIcons, seasonNames, onShowLoadout, hideHeader }) => {
   const a = ACCENTS[accent] ?? ACCENTS.primary;
+
+  // One age dimension for the Tracker block, driven by the cached fetchedAt of
+  // the rows that actually carry Tracker values. No timestamp = unknown age,
+  // never "fresh"; past the archive window the block hides instead of greying.
+  const hasTrackerValues = (p: LiveMatchPlayer): boolean =>
+    p.acs != null || p.kd != null || p.winPct != null || p.hsPct != null || p.trnScore != null;
+  const rowsWithValues = players.filter(hasTrackerValues);
+  const knownAges = rowsWithValues
+    .map((p) => peekLivePlayerStatsAsOf(p.puuid))
+    .filter((n): n is number => n != null);
+  const unknownAge =
+    rowsWithValues.length > 0 && (knownAges.length < rowsWithValues.length || now <= 0);
+  const oldestAsOf = knownAges.length > 0 ? Math.min(...knownAges) : null;
+  const archived =
+    now > 0 && oldestAsOf != null && now - oldestAsOf > TRACKER_ARCHIVE_MS;
+  const trackerLabel =
+    rowsWithValues.length === 0
+      ? null
+      : unknownAge || oldestAsOf == null
+        ? 'Tracker · age unknown — hidden'
+        : archived
+          ? `Tracker · as of ${formatTrackerAge(oldestAsOf, now)} — hidden`
+          : `Tracker · as of ${formatTrackerAge(oldestAsOf, now)}`;
+  const trackerHidden =
+    rowsWithValues.length === 0 || (!unknownAge && !archived)
+      ? null
+      : unknownAge || oldestAsOf == null
+        ? 'Tracker age unknown — values hidden'
+        : `Tracker archived (${formatTrackerAge(oldestAsOf, now)}) — values hidden`;
 
   return (
     <section
@@ -576,8 +628,13 @@ const PlayerTable: React.FC<{
       </div>
       {/* Plain key. Per-row labels carry the state; a dash only ever means
           "not available", never "still loading". */}
-      <div className="px-2 pb-0.5 text-micro font-mono text-m3-outline/80 uppercase tracking-wider">
-        — not available
+      <div className="px-2 pb-0.5 flex items-center justify-between gap-2 text-micro font-mono text-m3-outline/80 uppercase tracking-wider">
+        <span>— not available</span>
+        {trackerLabel && (
+          <span className="normal-case text-[9.5px] text-m3-outline" data-tip={trackerHidden ?? trackerLabel}>
+            {trackerLabel}
+          </span>
+        )}
       </div>
 
       <div className="flex flex-col gap-1.5 overflow-hidden shrink-0">
@@ -589,6 +646,7 @@ const PlayerTable: React.FC<{
             p={p}
             tierIcons={tierIcons}
             seasonNames={seasonNames}
+            trackerHidden={trackerHidden}
             onShowLoadout={onShowLoadout}
           />
         ))}
@@ -606,8 +664,10 @@ const PlayerRow: React.FC<{
   p: LiveMatchPlayer;
   tierIcons: Record<number, string>;
   seasonNames: Record<string, string>;
+  /** Non-null when the table's Tracker age is unknown/archived: numbers hide. */
+  trackerHidden: string | null;
   onShowLoadout?: (p: LiveMatchPlayer) => void;
-}> = ({ p, tierIcons, seasonNames, onShowLoadout }) => {
+}> = ({ p, tierIcons, seasonNames, trackerHidden, onShowLoadout }) => {
   const [copied, setCopied] = useState(false);
   const rankIcon = tierIcons[p.tier];
   const peakIcon = tierIcons[p.peakTier];
@@ -627,6 +687,13 @@ const PlayerRow: React.FC<{
     </span>
   );
   const blankCell = (reason = LIVE_UNAVAILABLE_TIP) => <StatValue reason={reason} />;
+  /** A Tracker number with no defensible age is not printed at all; the reason
+   *  lives in the tooltip, never as a greyed value. */
+  const hiddenTrackerCell = (reason: string) => (
+    <span data-tip={reason} className="inline-flex items-center justify-center">
+      <span className="sr-only">{reason}</span>
+    </span>
+  );
   /* Non-TS cells never pulse: only the TS cell may look busy while fetching. */
   const trnBlankReason =
     trnState === 'fetching'
@@ -851,7 +918,9 @@ const PlayerRow: React.FC<{
         ) : trnState === 'private' ? (
           lockCell
         ) : trnState === 'ready' ? (
-          p.trnScore != null ? (
+          trackerHidden ? (
+            hiddenTrackerCell(trackerHidden)
+          ) : p.trnScore != null ? (
             <span data-tip={`Tracker Score: ${p.trnScore} / 1000 — Tier ${scoreTier(p.trnScore).tier}`}>
               <ScoreBadge tier={scoreTier(p.trnScore).tier} size={20} />
             </span>
@@ -914,7 +983,9 @@ const PlayerRow: React.FC<{
 
       {/* 7. ACS — the sort key, so it reads first among the numbers */}
       <div className="text-right font-mono text-[10.5px] font-bold" data-tip="Act-wide average combat score">
-        {p.acs != null ? (
+        {trackerHidden ? (
+          hiddenTrackerCell(trackerHidden)
+        ) : p.acs != null ? (
           <span className={p.acs >= 200 ? 'text-m3-primary' : p.acs >= 150 ? 'text-m3-on-surface' : 'text-m3-outline'}>
             {p.acs}
           </span>
@@ -925,7 +996,9 @@ const PlayerRow: React.FC<{
 
       {/* 8. K/D */}
       <div className="text-right font-mono text-[10.5px] font-bold" data-tip="Act-wide K/D">
-        {!kdKnown ? (
+        {trackerHidden ? (
+          hiddenTrackerCell(trackerHidden)
+        ) : !kdKnown ? (
           blankCell(trnBlankReason)
         ) : (
           <span className={kdValue >= 1 ? 'text-m3-mint font-bold' : 'text-m3-coral font-bold'}>
@@ -936,7 +1009,9 @@ const PlayerRow: React.FC<{
 
       {/* 9. Win % */}
       <div className="text-right font-mono text-[10.5px]" data-tip="Act-wide win rate">
-        {p.winPct != null ? (
+        {trackerHidden ? (
+          hiddenTrackerCell(trackerHidden)
+        ) : p.winPct != null ? (
           <span className={p.winPct >= 50 ? 'text-m3-mint font-semibold' : 'text-rose-400'}>
             {formatPct(p.winPct, 0)}
           </span>
@@ -947,7 +1022,9 @@ const PlayerRow: React.FC<{
 
       {/* 10. HS % */}
       <div className="text-right font-mono text-[10.5px] text-amber-500" data-tip="Act-wide headshot %">
-        {p.hsPct != null && p.hsPct > 0 ? (
+        {trackerHidden ? (
+          hiddenTrackerCell(trackerHidden)
+        ) : p.hsPct != null && p.hsPct > 0 ? (
           formatPct(p.hsPct, 0)
         ) : locked ? (
           lockCell

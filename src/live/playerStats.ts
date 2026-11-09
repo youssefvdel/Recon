@@ -105,6 +105,27 @@ export function clearLocalStatsRetry(): void {
   } catch {}
 }
 
+/** Source timestamp for a player's persisted stats even after the freshness
+ *  TTL has expired. The UI uses it to age-label or hide stored values; it
+ *  deliberately returns the age, never the expired entry, so it cannot become
+ *  data. Null means no stored timestamp at all (unknown age, not "fresh"). */
+export function peekLivePlayerStatsAsOf(puuid: string): number | null {
+  if (!puuid) return null;
+  const pU = puuid.toLowerCase();
+  const mem = livePlayerStatsCache.get(pU);
+  if (mem && typeof mem.fetchedAt === 'number') return mem.fetchedAt;
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(LIVE_STATS_CACHE_KEY);
+    if (!raw) return null;
+    const store = JSON.parse(raw) as Record<string, LivePlayerStatsEntry>;
+    const entry = store[pU];
+    return entry && typeof entry.fetchedAt === 'number' ? entry.fetchedAt : null;
+  } catch {
+    return null;
+  }
+}
+
 export function getCachedLivePlayerStats(puuid: string): LivePlayerStatsEntry | undefined {
   if (!puuid) return undefined;
   const pU = puuid.toLowerCase();
