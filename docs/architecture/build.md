@@ -9,7 +9,7 @@ Evidence: the workflows, `tauri.conf.json`, `updater.rs`, `fetch-webview2.mjs`,
 | Workflow | Trigger | Produces |
 | --- | --- | --- |
 | `release.yml` | push tag `v*`; `workflow_dispatch` on a tag ref | Release: setup.exe + `.sig` + `latest.json` |
-| `build-windows.yml` | push `fix/**`; `workflow_dispatch` | branch artifacts; runs `cargo test --lib` |
+| `build-windows.yml` | push `fix/**`; `workflow_dispatch` | exe artifact + `cargo test --lib`; no runtime, no zip |
 | `deploy-website.yml` | push `main` under `website/**` | marketing site only — not in the app chain |
 
 Release steps (alpha17 ~13 min total; alpha9 ~15 min):
@@ -17,14 +17,15 @@ Release steps (alpha17 ~13 min total; alpha9 ~15 min):
 | Step | alpha17 | alpha9 | Notes |
 | --- | --- | --- | --- |
 | validate tag / version / secrets | 10 s | 3 s | tag must equal `package.json`; fails before building |
-| cache + fetch WebView2 CAB | 1 + 7 s | 9 s | 310 MB CAB, sha256-pinned; alpha17 was a cache miss and downloaded it |
+| fetch WebView2 CAB | 7 s | 9 s | 310 MB CAB, sha256-pinned; no cache (tag scopes never hit, see risks) |
 | build signed bundle | **702 s** | **833 s** | dominant: Rust release + NSIS/LZMA over the 679 MB runtime |
 | Authenticode setup.exe | 3 s | 3 s | self-signed PFX from `WINDOWS_SIGN_PFX_*` |
 | refresh updater `.sig` | 1 s | 1 s | re-minisign after Authenticode changed the bytes |
 | latest.json + publish | 17 s | 15 s | `gh release create --latest` |
 
-`build-windows.yml` shares cache + fetch + build, signs the bare exe, and uploads
-`recon-windows-x64` and `recon-portable-windows-x64` (7-day retention).
+`build-windows.yml` stops at the bare exe: frontend, `cargo test --lib`, the
+`--no-bundle` build, Authenticode, one artifact (`recon-windows-x64`, 7 days). It
+fetches no runtime — branch CI cannot test the bundled installer anyway.
 
 ## 2. Artifacts
 
@@ -34,7 +35,6 @@ Release steps (alpha17 ~13 min total; alpha9 ~15 min):
 | `...setup.exe.sig` | 424 B | minisign, pubkey `77FD5160E2EB15E6` | source of the manifest signature |
 | `latest.json` | 1,206 B | carries that signature | app update check |
 | `recon-windows-x64` (artifact) | ~22 MB zipped exe | Authenticode, skipped without secrets | branch CI / manual testing |
-| `recon-portable-windows-x64` (artifact) | ~300 MB (exe + runtime) | same payload as the installer | testers only |
 
 ## 3. Bundle contents — why 253 MB
 
@@ -88,10 +88,9 @@ flowchart LR
 - **CAB download**: one 310 MB stream from Microsoft's CDN, no retry in the script; a
   hiccup fails the release before build. The URL embeds a GUID path, so a Microsoft
   republish needs a script bump.
-- **Cache keyed by script hash**: any edit to the fetch script costs one more 310 MB
-  download; a stale entry self-corrects via sha256. Scope follows the ref — alpha17
-  (first run with the cache) still downloaded, so tag-run reuse is unproven, and
-  entries unused for 7 days are evicted.
+- **CAB cache removed**: `actions/cache` scope is the tag ref (API: every tag owns
+  its own `refs/…/tags/vX` entry), so alpha17 and alpha18 both logged
+  `Cache not found` while storing 310 MB each. The 7 s download is cheaper.
 - **Unauth GitHub API**: 60 req/h per IP (shared NAT can exhaust it), 4 s timeouts,
   responses can lag or shuffle. Failure falls back to the floating `alpha` ref
   (usually 404), then to the plugin's configured `releases/latest` endpoint.
@@ -104,16 +103,16 @@ flowchart LR
 
 ## 6. Proposed simplification for the redraw
 
-- **Drop the portable zip artifact** (or keep it as an explicit tester tool): it
-  duplicates the runtime payload in CI and adds a layout to keep correct; nothing in
-  the update path uses it.
-- **Collapse build-windows and release into one reusable workflow** (`workflow_call`):
-  setup, cache/fetch and build are identical; only signing and publishing differ.
-  That is the real maintenance win.
+- **Portable zip and CAB cache are gone** (done): the tester-only 300 MB artifact is
+  dropped and the dead cache step removed; the runtime and signature chain stay.
+- **A single reusable workflow was evaluated and rejected.** A called workflow runs
+  as a separate job on another runner, so it cannot share a checkout; merging means
+  conditional steps in one job, where branch CI and release differ in permissions
+  (read vs write), secrets, artifacts and failure modes. Gating publish behind `if:`
+  makes the tag → publish path harder to audit and risks publishing from a branch.
 - **Keep, no substitutes**: tag/version guard; CAB pin + sha256 + cache; fixed runtime
   via `bundle.resources`; Authenticode then re-minisign order; `latest.json`; the
   semver picker/comparator; the NSIS hooks; `cargo test --lib` before bundling.
 - **Do not drop the runtime to save build time.** The 253 MB installer is the product
   decision; cheaper NSIS compression would trade ~4 min of CI for a bigger download
   for every user.
-- Fix the stale `build-windows.yml` comment claiming the app uses the machine's WebView2.

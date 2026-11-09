@@ -37,22 +37,6 @@ jobs:
         shell: bash
         run: bun install --frozen-lockfile || bun install
 
-      - name: Cache WebView2 CAB
-        # The fetch script keeps a sha256-checked CAB in .webview2-cache/ and
-        # reuses it. Keying on the script hash invalidates the cache when the
-        # pinned version changes; a corrupt or stale entry is rejected by the
-        # script's sha256 check and re-downloaded.
-        uses: actions/cache@v4
-        with:
-          path: .webview2-cache/*.cab
-          key: webview2-cab-${{ hashFiles('scripts/fetch-webview2.mjs') }}
-
-      - name: Fetch WebView2 fixed runtime
-        # Official Microsoft CAB, pinned and sha256-checked. Must exist before
-        # the build: bundle.resources ships it to $INSTDIR\webview2-runtime,
-        # which is where Tauri points WEBVIEW2_BROWSER_EXECUTABLE_FOLDER.
-        run: bun scripts/fetch-webview2.mjs
-
       - name: Build frontend
         # Fail fast on tsc/vite errors before the long Rust compile.
         run: bun run build:ui
@@ -97,6 +81,8 @@ jobs:
           if (-not $sig.SignerCertificate) { throw 'recon.exe is not signed' }
 
       - name: Upload recon.exe
+        # Branch CI only. The exe is not runnable alone: the app expects a
+        # webview2-runtime/ folder next to it (shipped by the installer).
         uses: actions/upload-artifact@v4
         with:
           name: recon-windows-x64
@@ -104,22 +90,3 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Package portable zip
-        # Top zip folder is the app folder so unzip-and-run works. The app uses
-        # the machine's WebView2 (Tauri's fixedRuntime mode is not in use).
-        shell: pwsh
-        run: |
-          $stage = 'src-tauri/target/portable/Recon'
-          New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item 'src-tauri/target/release/recon.exe' $stage -Force
-          Copy-Item 'src-tauri/webview2-runtime' $stage -Recurse
-          Compress-Archive -Path 'src-tauri/target/portable/Recon' `
-            -DestinationPath 'src-tauri/target/portable/recon-portable-windows-x64.zip' -Force
-
-      - name: Upload portable zip
-        uses: actions/upload-artifact@v4
-        with:
-          name: recon-portable-windows-x64
-          path: src-tauri/target/portable/recon-portable-windows-x64.zip
-          if-no-files-found: error
-          retention-days: 7
