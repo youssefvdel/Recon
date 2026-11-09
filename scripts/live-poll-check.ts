@@ -25,7 +25,7 @@ const live = await Bun.file('src/components/LiveMatchView.tsx').text();
 // relocating the polling code.
 const overlayFiles = [
   'src/components/OverlayView.tsx',
-  ...(await Array.fromAsync(new Bun.Glob('src/components/hud/*.tsx').scan('.'))),
+  ...(await Array.fromAsync(new Bun.Glob('src/components/hud/*.{ts,tsx}').scan('.'))),
 ];
 const overlay = (await Promise.all(overlayFiles.map((f) => Bun.file(f).text()))).join('\n');
 const tracker = await Bun.file('src/utils/tracker.ts').text();
