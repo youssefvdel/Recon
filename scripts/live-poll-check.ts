@@ -83,10 +83,25 @@ for (const map of [
 ]) {
   check(`${map} evicts oldest-first`, tracker.includes(`evictOldest(\n          ${map},`) || tracker.includes(`evictOldest(${map},`), true);
 }
-check('lobby-aware protect predicate exists', tracker.includes('const inCurrentLobby = (key: string): boolean'), true);
+// The predicate moved to live/lobbyScope.ts (stage 2b step 1). The contract is
+// unchanged: a lobby-aware `inCurrentLobby` exists and `tracker.ts` imports it.
+const lobbyScope = await Bun.file('src/live/lobbyScope.ts').text();
+check(
+  'lobby-aware protect predicate exists',
+  lobbyScope.includes('export function inCurrentLobby(key: string): boolean') &&
+    tracker.includes("from '../live/lobbyScope'"),
+  true
+);
 check('live stats eviction spares the lobby (flicker fix)', /evictOldest\(livePlayerStatsCache,[^;]*inCurrentLobby\)/.test(tracker), true);
 check('mmr eviction spares the lobby', /evictOldest\(liveMmrCache,[^;]*inCurrentLobby\)/.test(tracker), true);
-check('current lobby captured once per poll', tracker.includes('currentLobbyPuuids = lobbyPuuids;'), true);
+check(
+  'current lobby captured once per poll',
+  // The poll now calls the owner's setter; the raw assignment lives in the
+  // module that owns the set.
+  /setCurrentLobbyPuuids\(lobbyPuuids\)/.test(tracker) &&
+    /currentLobbyPuuids = new Set\(puuids\)/.test(lobbyScope),
+  true
+);
 check('persisted store prune spares the lobby too', tracker.includes('if (inCurrentLobby(k)) continue;'), true);
 
 // --- cross-realm TRN latch: a poorer poll must never revert enrichment ---

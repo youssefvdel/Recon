@@ -1700,10 +1700,8 @@ export async function fetchMatchLoadouts(
  * So the lobby is never a victim, however far over cap we are.
  * ------------------------------------------------------------------ */
 
-/** Puuids in the lobby as of the last completed poll (lower-cased). */
-let currentLobbyPuuids = new Set<string>();
-/** True for a key naming a player who is in the lobby right now. */
-const inCurrentLobby = (key: string): boolean => currentLobbyPuuids.has(key);
+/** Puuids in the lobby as of the last completed poll — now owned by
+ *  live/lobbyScope.ts (stage 2b, step 1). */
 
 /** Track-Overview rows: 12 players a lobby, ~50 lobbies an evening is far
  *  past any realistic need, and Riot-local re-resolves a miss cheaply. */
@@ -1723,6 +1721,7 @@ export type { PersistedRank } from '../cache/namespace';
 // Local binding for tracker's own call sites (the re-export above is for
 // external importers; a re-export does not bring the name into this scope).
 import { evictOldest, pruneSupersededCaches, persistLiveRank, readPersistedRank } from '../cache/namespace';
+import { inCurrentLobby, setCurrentLobbyPuuids } from '../live/lobbyScope';
 
 const liveMmrCache = new Map<
   string,
@@ -3911,7 +3910,7 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
       lastPartyIndexByPuuid.clear();
     }
     const lobbyPuuids = new Set(rawPlayers.map((rp) => rp.puuid.toLowerCase()));
-    currentLobbyPuuids = lobbyPuuids;
+    setCurrentLobbyPuuids(lobbyPuuids);
     restoreLatchedParties(
       clusterIdByPuuid,
       playerPartyIndexMap,
