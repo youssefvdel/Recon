@@ -6,14 +6,13 @@ use super::monitors::{
 };
 use super::registry::{
     get_monitor_hardware_id, is_gdi_display_name, is_gdi_monitor_id, is_pnp_monitor_instance,
-    is_process_elevated, model_from_instance_path, setupdi_instance_id,
+    is_process_elevated, model_from_instance_path, setupdi_instance_id, setupdi_needs_reboot,
 };
 use super::report::{get_all_monitors, MonitorDevice};
 use super::resolve::{resolve_display_to_instance_id, resolve_to_pnp_instance};
 use std::thread;
 use std::time::Duration;
 use windows::Win32::Devices::DeviceAndDriverInstallation::{
-use super::registry::{setupdi_needs_reboot};
     SetupDiCallClassInstaller, SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInfo,
     SetupDiGetClassDevsW, SetupDiGetDeviceInstallParamsW, SetupDiSetClassInstallParamsW,
     DICS_DISABLE, DICS_ENABLE, DICS_FLAG_CONFIGSPECIFIC, DIF_PROPERTYCHANGE, DIGCF_ALLCLASSES,

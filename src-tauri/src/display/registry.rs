@@ -4,8 +4,9 @@
 use std::path::PathBuf;
 use windows::core::PCWSTR;
 use windows::Win32::Devices::DeviceAndDriverInstallation::{
-    SetupDiGetDeviceInstanceIdW, SetupDiGetDeviceRegistryPropertyW, CONFIGFLAG_DISABLED,
-    SPDRP_CONFIGFLAGS, SP_DEVINFO_DATA,
+    SetupDiGetDeviceInstallParamsW, SetupDiGetDeviceInstanceIdW,
+    SetupDiGetDeviceRegistryPropertyW, CONFIGFLAG_DISABLED, DI_NEEDREBOOT, SPDRP_CONFIGFLAGS,
+    SP_DEVINFO_DATA, SP_DEVINSTALL_PARAMS_W,
 };
 use windows::Win32::Devices::Display::{
     DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QueryDisplayConfig,

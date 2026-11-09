@@ -2,12 +2,12 @@
 //! (moved verbatim from `display.rs`; split only, behaviour unchanged.)
 
 use super::monitors::{candidates_matching_model, collect_monitor_candidates, MonitorCandidate};
-use super::registry::{
-    model_from_instance_path, resolve_display_gdi_to_pnp, ENUM_REGISTRY_SETTINGS,
-};
+use super::registry::{model_from_instance_path, ENUM_REGISTRY_SETTINGS};
 use super::resolution_cache::CachedRes;
 use super::resolution_cache::{load_monitor_res_cache, save_monitor_res_cache};
-use super::resolve::{friendly_name_from_instance_id, get_monitor_disabled_map};
+use super::resolve::{
+    friendly_name_from_instance_id, get_monitor_disabled_map, resolve_display_gdi_to_pnp,
+};
 use windows::core::PCWSTR;
 use windows::Win32::Graphics::Gdi::{
     EnumDisplayDevicesW, EnumDisplaySettingsW, DEVMODEW, DISPLAY_DEVICEW, ENUM_CURRENT_SETTINGS,

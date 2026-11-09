@@ -7,11 +7,18 @@ use super::monitors::{
 };
 use super::registry::{
     find_display_name_for_gdi_id, get_monitor_hardware_id, is_gdi_display_name, is_gdi_monitor_id,
-    is_pnp_monitor_instance, model_from_instance_path, resolve_display_gdi_to_pnp,
+    is_pnp_monitor_instance, model_from_instance_path, pnp_instance_from_monitor_device_path,
     setupdi_instance_id, setupdi_is_disabled,
 };
+use windows::core::PCWSTR;
+use windows::Win32::Devices::Display::{
+    DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QueryDisplayConfig,
+    DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+    DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO,
+    DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME, QDC_ALL_PATHS,
+    QDC_DATABASE_CURRENT, QDC_ONLY_ACTIVE_PATHS,
+};
 use windows::Win32::Devices::DeviceAndDriverInstallation::{
-use super::registry::{pnp_instance_from_monitor_device_path};
     SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInfo, SetupDiGetClassDevsW, DIGCF_ALLCLASSES,
     DIGCF_PRESENT, GUID_DEVCLASS_MONITOR, SETUP_DI_GET_CLASS_DEVS_FLAGS, SP_DEVINFO_DATA,
 };
