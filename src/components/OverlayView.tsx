@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState, useRef } from 'react';
-import { Move, X, AlertTriangle, Crosshair } from 'lucide-react';
+import { Move, X, AlertTriangle } from 'lucide-react';
 import type { LiveMatchState, LiveMatchPlayer } from '../types';
 import { fetchLiveMatchState, gameData, matchEndHarvest, harvestMatchNames, isMatchStateEqual, mergeLiveMatchStateNonRegressing } from '../utils/tracker';
 import { useTrackerData } from '../hooks/useTrackerData';
@@ -35,6 +35,7 @@ import { MetaTiles } from './hud/MetaTiles';
 import { PregamePanel } from './hud/PregamePanel';
 import { EditChrome } from './hud/EditChrome';
 import { MatchPanel } from './hud/MatchPanel';
+import { PrepickBadge } from './hud/PrepickBadge';
 
 
 /* Overlay failures are shown inline for ~6 s, then gone — the window is
@@ -1353,30 +1354,7 @@ export const OverlayView: React.FC = () => {
             </div>
           )}
 
-          <div className="rounded-2xl border border-m3-outline-variant/50 bg-m3-surface-container/[0.85] shadow-m3-2 px-3 py-2.5 flex items-center gap-2.5">
-            {prepickIcon ? (
-              <img
-                src={prepickIcon}
-                alt=""
-                draggable={false}
-                className="w-9 h-9 rounded-xl object-cover shrink-0 border border-m3-outline-variant/50 bg-m3-surface-container-high/60 pointer-events-none select-none"
-              />
-            ) : (
-              <div className="w-9 h-9 rounded-xl shrink-0 border border-m3-outline-variant/50 bg-m3-surface-container-high/60 flex items-center justify-center">
-                <Crosshair className="w-4 h-4 text-m3-primary" />
-              </div>
-            )}
-            <div className="flex flex-col leading-tight min-w-0">
-              <span className="font-display font-bold text-[11px] text-m3-on-surface-variant tracking-wider uppercase">
-                Pre-Pick
-              </span>
-              <span className="font-mono text-[11px] text-m3-on-surface font-bold truncate">
-                {prepickAgent}
-                <span className="text-m3-outline font-normal"> • hover only</span>
-              </span>
-            </div>
-            <span className="ml-1 w-1.5 h-1.5 rounded-full bg-m3-mint shrink-0" />
-          </div>
+          <PrepickBadge icon={prepickIcon} agent={prepickAgent} />
         </div>
       )}
 
