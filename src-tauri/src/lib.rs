@@ -213,63 +213,6 @@ fn save_shortcut_binding(
 }
 
 #[tauri::command]
-async fn get_gpu_info() -> Result<gpu::GpuInfo, String> {
-    tauri::async_runtime::spawn_blocking(gpu::detect_gpu)
-        .await
-        .map_err(|e| format!("Task failed: {}", e))
-}
-
-#[tauri::command]
-async fn get_gpu_settings() -> Result<gpu::GpuSettingsReport, String> {
-    tauri::async_runtime::spawn_blocking(gpu::get_gpu_settings_report)
-        .await
-        .map_err(|e| format!("Task failed: {}", e))
-}
-
-#[tauri::command]
-fn set_gpu_setting(id: String, value: bool) -> Result<gpu::GpuSettingsReport, String> {
-    gpu::apply_single_gpu_setting(&id, value)
-}
-
-#[tauri::command]
-fn open_gpu_panel(vendor: String) -> Result<(), String> {
-    let v = match vendor.to_lowercase().as_str() {
-        "nvidia" => gpu::GpuVendor::Nvidia,
-        "amd" => gpu::GpuVendor::Amd,
-        "intel" => gpu::GpuVendor::Intel,
-        _ => gpu::GpuVendor::Unknown,
-    };
-    gpu::launch_control_panel(&v)
-}
-
-#[tauri::command]
-fn auto_configure_gpu_scaling(state: State<'_, AppState>) -> Result<String, String> {
-    let (msg, _report) = gpu::auto_configure_all_gpu_settings()?;
-
-    let (pref_w, pref_h) = {
-        let pref = state.preferred_stretched.lock().unwrap();
-        *pref
-    };
-
-    let configs = game_config::find_valorant_configs();
-    let mut config_count = 0;
-    for cfg in configs {
-        let p = std::path::Path::new(&cfg.path);
-        if game_config::update_config(p, true, Some((pref_w, pref_h)), true).is_ok() {
-            config_count += 1;
-        }
-    }
-
-    let extra = if config_count > 0 {
-        format!(" • Synchronized 1.45:1 ({}×{}) in {} game config(s)", pref_w, pref_h, config_count)
-    } else {
-        String::new()
-    };
-
-    Ok(format!("{}{}", msg, extra))
-}
-
-#[tauri::command]
 fn get_windows() -> Result<Vec<window_manager::WindowInfo>, String> {
     Ok(window_manager::list_visible_windows())
 }
@@ -1231,11 +1174,11 @@ pub fn run() {
             apply_custom_res_to_all_configs,
             get_shortcut_binding,
             save_shortcut_binding,
-            get_gpu_info,
-            get_gpu_settings,
-            set_gpu_setting,
-            open_gpu_panel,
-            auto_configure_gpu_scaling,
+            commands::gpu::get_gpu_info,
+            commands::gpu::get_gpu_settings,
+            commands::gpu::set_gpu_setting,
+            commands::gpu::open_gpu_panel,
+            commands::gpu::auto_configure_gpu_scaling,
             get_windows,
             set_auto_borderless,
             get_auto_borderless,
