@@ -740,15 +740,6 @@ pub async fn account_current() -> Result<Option<String>, String> {
         .ok())
 }
 
-/// Snapshot whoever is signed in right now (upsert by Riot ID).
-#[tauri::command]
-pub async fn account_save_current(app: tauri::AppHandle) -> Result<AccountMeta, String> {
-    let live = riot_client_dir()?;
-    let now = now_millis();
-    tauri::async_runtime::spawn_blocking(move || snapshot_current(&app, &live, now, true))
-        .await
-        .map_err(|e| format!("Task failed: {}", e))?
-}
 
 /// Watchdog tick — the UI calls this on a timer; ALL policy lives here.
 /// Renewal is driven by the files, not the clock: whoever is signed in gets
@@ -935,16 +926,6 @@ pub async fn account_add_new(app: tauri::AppHandle) -> Result<bool, String> {
     .map_err(|e| format!("Task failed: {}", e))?
 }
 
-/// Launch RiotClientServices.exe detached from Recon so it survives Recon exit/kill.
-#[tauri::command]
-pub async fn account_launch_client() -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let exe = find_client_exe()?;
-        launch_client_detached(&exe)
-    })
-    .await
-    .map_err(|e| format!("Task failed: {}", e))?
-}
 
 /// Refuse an account switch while a VALORANT match is live (audit ux-gaps#3).
 ///

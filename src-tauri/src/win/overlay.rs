@@ -41,24 +41,6 @@ pub(crate) fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
     window.hide().map_err(|e| format!("Overlay hide failed: {e}"))
 }
 
-#[tauri::command]
-pub(crate) fn set_overlay_clickthrough(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
-    let window = app
-        .get_webview_window("overlay")
-        .ok_or_else(|| "Overlay window not found".to_string())?;
-    window
-        .set_ignore_cursor_events(enabled)
-        .map_err(|e| format!("Overlay click-through failed: {e}"))?;
-    #[cfg(windows)]
-    {
-        if let Ok(hwnd) = window.hwnd() {
-            window_manager::toggle_overlay_clickthrough(hwnd.0 as isize, enabled)?;
-        }
-    }
-    // Deliberately no set_focus() when disabling: focus belongs to the game
-    // (audit overlay#5). Nothing here needs activation.
-    Ok(())
-}
 
 /// Fail-safe exit from edit mode. Works without the overlay webview: the DOM
 /// Esc handler is gone the moment that renderer dies, and that is exactly when

@@ -58,23 +58,6 @@ pub(crate) fn set_preferred_stretched_res(
     Ok([width, height])
 }
 
-#[tauri::command]
-pub(crate) fn apply_custom_res_to_all_configs(
-    width: u32,
-    height: u32,
-    lock_readonly: bool,
-) -> Result<String, String> {
-    let count = game_config::apply_to_all_configs(width, height, lock_readonly)?;
-    let lock_text = if lock_readonly {
-        "and write-protected (Read-Only) against game updates"
-    } else {
-        "unlocked for manual in-game edits"
-    };
-    Ok(format!(
-        "Successfully applied {}×{} {} across {} game config file(s)!",
-        width, height, lock_text, count
-    ))
-}
 
 #[tauri::command]
 pub(crate) fn apply_custom_res_verbose(
@@ -96,49 +79,17 @@ pub(crate) async fn get_all_monitors() -> Result<Vec<display::MonitorDevice>, St
         .map_err(|e| format!("Task failed: {}", e))
 }
 
-/// Kept for backend compat only. The Display Manager UI no longer exposes CCD
-/// Attached/Detached — only Device Manager Enable/Disable remains. Retained so
-/// existing invokes / restore paths don't break.
-#[tauri::command]
-pub(crate) fn set_monitor_attached(device_name: String, attached: bool) -> Result<Vec<display::MonitorDevice>, String> {
-    display::set_monitor_topology_attached(&device_name, attached)
-}
 
 #[tauri::command]
 pub(crate) fn set_monitor_device_enabled(monitor_id: String, enabled: bool) -> Result<Vec<display::MonitorDevice>, String> {
     display::set_monitor_device_enabled(&monitor_id, enabled)
 }
 
-#[tauri::command]
-pub(crate) fn set_monitor_primary(device_name: String) -> Result<Vec<display::MonitorDevice>, String> {
-    display::set_monitor_primary(&device_name)
-}
 
-#[tauri::command]
-pub(crate) fn launch_cru() -> Result<(), String> {
-    display::launch_cru()
-}
 
-#[tauri::command]
-pub(crate) fn restart_graphics_driver() -> Result<String, String> {
-    Ok(custom_res::restart_driver_stack())
-}
 
-#[tauri::command]
-pub(crate) fn reset_all_cru_overrides() -> Result<String, String> {
-    custom_res::reset_all_edid_overrides()
-}
 
-#[tauri::command]
-pub(crate) fn reset_all_edid_overrides() -> Result<String, String> {
-    custom_res::reset_all_edid_overrides()
-}
 
-#[tauri::command]
-pub(crate) fn test_custom_mode(width: u32, height: u32, hz: u32) -> Result<custom_res::CustomModeTest, String> {
-    custom_res::validate_custom_resolution(width, height, hz)?;
-    Ok(custom_res::test_display_mode(None, width, height, hz))
-}
 
 #[tauri::command]
 pub(crate) fn add_custom_resolution(monitor_id: String, width: u32, height: u32, hz: u32) -> Result<String, String> {

@@ -9,17 +9,6 @@ pub(crate) async fn get_valorant_configs() -> Result<Vec<game_config::ConfigFile
         .map_err(|e| format!("Task failed: {}", e))
 }
 
-#[tauri::command]
-pub(crate) fn update_valorant_config(
-    path: String,
-    set_windowed: bool,
-    res: Option<[u32; 2]>,
-    lock_readonly: bool,
-) -> Result<(), String> {
-    let p = std::path::Path::new(&path);
-    let res_tuple = res.map(|r| (r[0], r[1]));
-    game_config::update_config(p, set_windowed, res_tuple, lock_readonly)
-}
 
 #[tauri::command]
 pub(crate) fn update_valorant_config_custom(
