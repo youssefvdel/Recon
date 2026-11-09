@@ -22,6 +22,8 @@ function check(name: string, actual: unknown, expected: unknown): void {
 const live = await Bun.file('src/components/LiveMatchView.tsx').text();
 const overlay = await Bun.file('src/components/OverlayView.tsx').text();
 const tracker = await Bun.file('src/utils/tracker.ts').text();
+// The live-stats map moved to live/playerStats.ts (stage 2b, step 2).
+const playerStats = await Bun.file('src/live/playerStats.ts').text();
 const trn = await Bun.file('src/utils/trn.ts').text();
 
 // --- Riot-local pollers: fast ---
@@ -72,7 +74,8 @@ for (const cap of [
   'LIVE_STATS_STORE_MAX',
   'LIVE_STATS_STORE_PRUNE',
 ]) {
-  check(`${cap} is a named constant (no magic number)`, tracker.includes(`const ${cap} =`), true);
+  const owner = cap.startsWith('LIVE_STATS_') ? playerStats : tracker;
+  check(`${cap} is a named constant (no magic number)`, owner.includes(`const ${cap} =`), true);
 }
 check('mmr cache cap is 2 keys per player', tracker.includes('const MMR_CACHE_MAX_ENTRIES = MMR_CACHE_MAX_PLAYERS * 2'), true);
 for (const map of [
@@ -81,7 +84,8 @@ for (const map of [
   'livePlayerRecentMatchesCache',
   'liveMmrCache',
 ]) {
-  check(`${map} evicts oldest-first`, tracker.includes(`evictOldest(\n          ${map},`) || tracker.includes(`evictOldest(${map},`), true);
+  const owner = map === 'livePlayerStatsCache' ? playerStats : tracker;
+  check(`${map} evicts oldest-first`, owner.includes(`evictOldest(\n          ${map},`) || owner.includes(`evictOldest(${map},`), true);
 }
 // The predicate moved to live/lobbyScope.ts (stage 2b step 1). The contract is
 // unchanged: a lobby-aware `inCurrentLobby` exists and `tracker.ts` imports it.
@@ -92,8 +96,22 @@ check(
     tracker.includes("from '../live/lobbyScope'"),
   true
 );
-check('live stats eviction spares the lobby (flicker fix)', /evictOldest\(livePlayerStatsCache,[^;]*inCurrentLobby\)/.test(tracker), true);
+check(
+  'live stats eviction spares the lobby (flicker fix)',
+  /evictOldest\(livePlayerStatsCache,[^;]*inCurrentLobby\)/.test(playerStats) &&
+    playerStats.includes("from './lobbyScope'"),
+  true
+);
 check('mmr eviction spares the lobby', /evictOldest\(liveMmrCache,[^;]*inCurrentLobby\)/.test(tracker), true);
+// The v3 snapshot guard only works if the poll STAMPS the match. It was
+// defined, exported and tested in isolation for hours while never being
+// called — so this asserts the wiring, not the function.
+check(
+  'the poll stamps the live snapshot with the match',
+  /setLiveSnapshotMatch\(matchId\)/.test(tracker) &&
+    /setLiveSnapshotMatch/.test(playerStats),
+  true
+);
 check(
   'current lobby captured once per poll',
   // The poll now calls the owner's setter; the raw assignment lives in the
@@ -102,7 +120,12 @@ check(
     /currentLobbyPuuids = new Set\(puuids\)/.test(lobbyScope),
   true
 );
-check('persisted store prune spares the lobby too', tracker.includes('if (inCurrentLobby(k)) continue;'), true);
+check(
+  'persisted store prune spares the lobby too',
+  // Moved into the persisted-store prune inside setCachedLivePlayerStats.
+  playerStats.includes('if (inCurrentLobby(k)) continue;'),
+  true
+);
 
 // --- cross-realm TRN latch: a poorer poll must never revert enrichment ---
 // The main and overlay windows each load tracker.ts separately, so each has

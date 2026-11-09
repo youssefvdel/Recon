@@ -1009,7 +1009,9 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   // Imported locally so the names cannot land in the wrong destructure.
   const tk = await import('../src/utils/tracker.ts');
 
-  check('live stats key is v3', trk.includes("'recon_live_player_stats_v3'"), true);
+  // The key moved with the map into live/playerStats.ts; assert it there.
+  const psSrc = readFileSync(new URL('../src/live/playerStats.ts', import.meta.url), 'utf8');
+  check('live stats key is v3', psSrc.includes("'recon_live_player_stats_v3'"), true);
   // The old name may still be MENTIONED (prune list, comments) but must never
   // be used as a live storage key again.
   check('v2 live-stats is not used as a key', /localStorage\.(getItem|setItem)\(\s*'recon_live_player_stats_v2'/.test(trk), false);
