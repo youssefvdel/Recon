@@ -1717,6 +1717,141 @@ const MMR_CACHE_MAX_PLAYERS = 200;
 /** Half the MMR cap: every entry is written TWICE (as given + lower-cased). */
 const MMR_CACHE_MAX_ENTRIES = MMR_CACHE_MAX_PLAYERS * 2;
 
+/* ------------------------------------------------------------------ *
+ * Quota-safe local storage
+ *
+ * QA measured this machine at ~5.24 M chars against the ~5 MB quota, with 11
+ * `recon_match_v6_*` entries and ZERO `recon_match_v7_*`. Storage was full, so
+ * every cache version bump we shipped silently did nothing — and the stale
+ * `recon_live_player_stats_v2` survived for the same reason.
+ * ------------------------------------------------------------------ */
+
+/** Superseded key generations: we no longer read them, so they are ballast. */
+const SUPERSEDED_PREFIXES = [
+  'recon_match_v6_',
+  'recon_match_v5_',
+  'aspect_match_v5_',
+  'recon_live_player_stats_v2',
+  'recon_trn_negative_v1',
+  'recon_trn_cache_v1',
+];
+
+/** Delete every superseded generation. Idempotent, cheap, never throws. */
+export function pruneSupersededCaches(): number {
+  if (typeof localStorage === 'undefined') return 0;
+  let removed = 0;
+  try {
+    const doomed: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && SUPERSEDED_PREFIXES.some((p) => k.startsWith(p))) doomed.push(k);
+    }
+    for (const k of doomed) {
+      try {
+        localStorage.removeItem(k);
+        removed++;
+      } catch {}
+    }
+  } catch {}
+  return removed;
+}
+
+/** setItem that never throws: on quota, drop the oldest entries of the same
+ *  family and retry ONCE. A cache write must never surface to a caller. */
+export function writeLocalSafe(key: string, value: string): boolean {
+  if (typeof localStorage === 'undefined') return false;
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    try {
+      const family = key.replace(/[0-9a-f]{6,}.*$/i, '');
+      const victims: { k: string; at: number }[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k !== key && k.startsWith(family)) {
+          victims.push({ k, at: 0 });
+        }
+      }
+      // Oldest first is unknowable here; drop a batch so one retry can win.
+      for (const v of victims.slice(0, Math.max(5, victims.length - 10))) {
+        try {
+          localStorage.removeItem(v.k);
+        } catch {}
+      }
+      localStorage.setItem(key, value);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Rank/peak live OUTSIDE the TRN live-stats block.
+ *
+ * A TRN rebuild can reset the stats snapshot; it must never blank a rank we
+ * already resolved. This map is written on every successful /mmr read and read
+ * back when the live read fails, so the board keeps the last-known-good rank
+ * (marked stale) instead of flipping every row to "Unrated".
+ * ------------------------------------------------------------------ */
+const LIVE_RANK_KEY = 'recon_live_rank_v1';
+const LIVE_RANK_MAX = 200;
+
+export interface PersistedRank {
+  tier: number;
+  rr: number;
+  peakTier: number;
+  peakSeasonId?: string;
+  at: number;
+}
+
+function readPersistedRanks(): Record<string, PersistedRank> {
+  try {
+    if (typeof localStorage === 'undefined') return {};
+    return JSON.parse(localStorage.getItem(LIVE_RANK_KEY) ?? '{}') as Record<string, PersistedRank>;
+  } catch {
+    return {};
+  }
+}
+
+/** Remember a resolved rank. NEVER writes a zero tier over a known one: a zero
+ *  means "not read", not "unranked", and erasing a rank is a regression. */
+export function persistLiveRank(
+  puuid: string,
+  row: { tier: number; rr: number; peakTier: number; peakSeasonId?: string }
+): void {
+  if (!puuid || !(row.tier > 0)) return;
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const all = readPersistedRanks();
+    const key = puuid.toLowerCase();
+    const prev = all[key];
+    all[key] = {
+      tier: row.tier,
+      rr: row.rr,
+      peakTier: Math.max(row.peakTier || 0, prev?.peakTier ?? 0),
+      ...(row.peakSeasonId ?? prev?.peakSeasonId
+        ? { peakSeasonId: row.peakSeasonId ?? prev?.peakSeasonId }
+        : {}),
+      at: Date.now(),
+    };
+    const keys = Object.keys(all);
+    if (keys.length > LIVE_RANK_MAX) {
+      keys
+        .sort((a, b) => (all[a]?.at ?? 0) - (all[b]?.at ?? 0))
+        .slice(0, keys.length - LIVE_RANK_MAX)
+        .forEach((k) => delete all[k]);
+    }
+    writeLocalSafe(LIVE_RANK_KEY, JSON.stringify(all));
+  } catch {}
+}
+
+/** Last known rank for a puuid, or null. Survives a stats rebuild. */
+export function readPersistedRank(puuid: string): PersistedRank | null {
+  return readPersistedRanks()[String(puuid ?? '').toLowerCase()] ?? null;
+}
+
 const liveMmrCache = new Map<
   string,
   {
@@ -2168,6 +2303,8 @@ export interface LivePlayerStatsEntry {
    *  'local-failed' = the local Riot read itself failed. null/undefined means
    *  no verdict was recorded (blank for the ordinary "not fetched" reason). */
   actState?: 'too-long' | 'incomplete' | 'timeout' | 'local-failed' | null;
+  /** The match this entry was written for. Absent on older writes. */
+  matchId?: string;
   /** Last successful 24h-record refresh — decoupled from `fetchedAt`, which
    *  TRN updates also bump. Sharing one timestamp let each source suppress
    *  the other's refresh. */
@@ -2175,7 +2312,18 @@ export interface LivePlayerStatsEntry {
 }
 
 const livePlayerStatsCache = new Map<string, LivePlayerStatsEntry>();
-const LIVE_STATS_CACHE_KEY = 'recon_live_player_stats_v2';
+// v3: v2 snapshots were written by builds that could settle a lobby with
+// pre-match data; the version bump is the migration. The matchId stamp is the
+// ongoing guard — a snapshot from a previous match must never describe this one.
+const LIVE_STATS_CACHE_KEY = 'recon_live_player_stats_v3';
+
+/** The match the persisted live-stats snapshot belongs to. Set by the poll. */
+let liveSnapshotMatchId = '';
+
+/** Stamp the live snapshot with the current match id. Called from the poll. */
+export function setLiveSnapshotMatch(matchId: string): void {
+  liveSnapshotMatchId = String(matchId ?? '');
+}
 const LIVE_STATS_TTL = 24 * 60 * 60 * 1000; // 24 hours — player act stats & country do not change every minute
 /** Persisted-store cap: the in-memory `LIVE_STATS_CACHE_MAX` keys' worth. */
 const LIVE_STATS_STORE_MAX = 200;
@@ -2451,6 +2599,14 @@ async function enqueueTrnSpread(
  *  across the phase flip. Never throws into the poll loop. */
 /** Retry-after for a 451-private profile: it stays private until its owner
  *  acts on tracker.gg, so refetching every lobby is pure rate-limit burn. */
+// One-shot upgrade hygiene: superseded cache generations are unread ballast, and
+// a full quota is exactly why our key bumps were silent no-ops.
+if (typeof localStorage !== 'undefined') {
+  try {
+    pruneSupersededCaches();
+  } catch {}
+}
+
 export const TRN_PRIVATE_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
 /** Retry-after for an HTTP 404 (no tracker page yet): the page may be
  *  created later, so retry daily, not every lobby. */
@@ -2860,7 +3016,11 @@ export function getCachedLivePlayerStats(puuid: string): LivePlayerStatsEntry | 
   if (!puuid) return undefined;
   const pU = puuid.toLowerCase();
   const mem = livePlayerStatsCache.get(pU);
-  if (mem && Date.now() - mem.fetchedAt < LIVE_STATS_TTL) return mem;
+  // The match guard applies to the IN-MEMORY copy too: after a match change the
+  // map still holds the previous match's rows, and returning them was exactly
+  // how a stale snapshot kept the board settled without fetching.
+  const memIsCurrent = !mem?.matchId || !liveSnapshotMatchId || mem.matchId === liveSnapshotMatchId;
+  if (mem && memIsCurrent && Date.now() - mem.fetchedAt < LIVE_STATS_TTL) return mem;
 
   if (typeof localStorage !== 'undefined') {
     try {
@@ -2868,6 +3028,10 @@ export function getCachedLivePlayerStats(puuid: string): LivePlayerStatsEntry | 
       if (raw) {
         const store = JSON.parse(raw) as Record<string, LivePlayerStatsEntry>;
         const entry = store[pU];
+        // A snapshot describing a DIFFERENT match is not data about this one.
+        if (entry?.matchId && liveSnapshotMatchId && entry.matchId !== liveSnapshotMatchId) {
+          return undefined;
+        }
         if (entry) {
           // Self-heal: clear poisoned multi-hour lockouts from previous sessions —
           // but NEVER deliberate negatives (flagged 451-private/404-missing carry
@@ -2910,6 +3074,8 @@ export function setCachedLivePlayerStats(puuid: string, entry: Partial<LivePlaye
   // Non-destructive merge: NEVER overwrite existing valid fields with undefined
   const merged: LivePlayerStatsEntry = {
     ...existing,
+    // Every write records which match it describes.
+    ...(liveSnapshotMatchId ? { matchId: liveSnapshotMatchId } : {}),
     fetchedAt: entry.fetchedAt ?? existing?.fetchedAt ?? Date.now(),
   };
   for (const [k, v] of Object.entries(entry)) {
@@ -3584,6 +3750,17 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
         }
         evictOldest(liveMmrCache, MMR_CACHE_MAX_ENTRIES, (v) => v.fetchedAt, inCurrentLobby);
       }
+      // Re-seed from the persisted last-known-good first. A stats rebuild must
+      // never make a known rank look unknown; this is what keeps "Refresh all
+      // data" from blanking the board when the in-memory map was reset.
+      if (!liveMmrCache.get(p) && !liveMmrCache.get(pU)) {
+        const known = readPersistedRank(p);
+        if (known && known.tier > 0) {
+          const seeded = { ...known, fetchedAt: known.at };
+          liveMmrCache.set(p, seeded);
+          liveMmrCache.set(pU, seeded);
+        }
+      }
       const cached = liveMmrCache.get(p) ?? liveMmrCache.get(pU);
       if (cached) {
         // A failed entry backs off briefly; a resolved rank is good for the
@@ -3606,6 +3783,11 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
           batch.map(async (p) => {
             try {
               const j = await riotGet(shard, `/mmr/v1/players/${p}`);
+              // THE GUARD THAT WAS MISSING. The comment on assertRiotOk says it
+              // exists so a Riot error cannot parse into "no rank" and then be
+              // persisted — but this call site skipped it. A 403/5xx during a
+              // match produced tier 0 for every row: the all-"Unrated" board.
+              assertRiotOk(j, 'mmr');
               // Same parser the single-player local path uses (parseLocalRank):
               // one place decides how a rank payload becomes a row.
               const val = {
@@ -3616,6 +3798,8 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
               liveMmrCache.set(p.toLowerCase(), val);
               mmrMap.set(p, val);
               mmrMap.set(p.toLowerCase(), val);
+              // Rank survives a stats rebuild because it is persisted apart.
+              persistLiveRank(p, val);
             } catch {
               // A failed lookup must NEVER erase a rank we already know. Writing
               // tier 0 here (and stamping fetchedAt) is what made ranks flicker:
@@ -3623,7 +3807,11 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
               // for the full 15 minutes. Keep the last good value, back off
               // briefly, and let the next poll retry.
               const prev =
-                liveMmrCache.get(p) ?? liveMmrCache.get(p.toLowerCase()) ?? null;
+                liveMmrCache.get(p) ??
+                liveMmrCache.get(p.toLowerCase()) ??
+                // Last-known-good from disk, so a failed read keeps the rank
+                // (marked stale by retryAfter) instead of erasing it.
+                (readPersistedRank(p) ? { ...readPersistedRank(p)!, fetchedAt: Date.now() } : null);
               const val = prev
                 ? { ...prev, fetchedAt: Date.now(), retryAfter: true }
                 : { tier: 0, rr: 0, peakTier: 0, fetchedAt: Date.now(), retryAfter: true };

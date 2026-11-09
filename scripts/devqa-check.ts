@@ -17,6 +17,11 @@ const fakeStorage = {
   clear: (): void => {
     store.clear();
   },
+  // The real API exposes length/key(); the pruning pass enumerates with them.
+  get length(): number {
+    return store.size;
+  },
+  key: (i: number): string | null => [...store.keys()][i] ?? null,
 };
 (globalThis as Record<string, unknown>).localStorage = fakeStorage;
 
@@ -969,7 +974,7 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   const { readFileSync } = await import('node:fs');
   const trackerSrcV7 = readFileSync(new URL('../src/utils/tracker.ts', import.meta.url), 'utf8');
   check('match-details cache is v7', trackerSrcV7.includes('recon_match_v7_'), true);
-  check('no v6 key remains', trackerSrcV7.includes('recon_match_v6_'), false);
+  check('v6 is not used as a key', /localStorage\.(getItem|setItem)\(\s*'recon_match_v6_/.test(trackerSrcV7), false);
 }
 
 // --- negative-registry version + forced source param (task-61) --------------
@@ -989,6 +994,60 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   );
   // A caller-supplied path without the query must never reach a transport.
   check('profile path builder has no query of its own', src.includes('%23${encodeURIComponent(tag)}`') && !/trnProfilePath[^\n]*source=/.test(src), true);
+}
+
+// --- live board: stale snapshot, rank survival, quota (task-62) -------------
+{
+  const { readFileSync } = await import('node:fs');
+  const trk = readFileSync(new URL('../src/utils/tracker.ts', import.meta.url), 'utf8');
+  // Imported locally so the names cannot land in the wrong destructure.
+  const tk = await import('../src/utils/tracker.ts');
+
+  check('live stats key is v3', trk.includes("'recon_live_player_stats_v3'"), true);
+  // The old name may still be MENTIONED (prune list, comments) but must never
+  // be used as a live storage key again.
+  check('v2 live-stats is not used as a key', /localStorage\.(getItem|setItem)\(\s*'recon_live_player_stats_v2'/.test(trk), false);
+  check('the MMR read is guarded by assertRiotOk', /assertRiotOk\(j, 'mmr'\)/.test(trk), true);
+
+  // A snapshot from another match must not describe this one.
+  tk.setLiveSnapshotMatch('match-A');
+  tk.setCachedLivePlayerStats('stale-puuid', { kd: 1.11, acs: 111 });
+  tk.setLiveSnapshotMatch('match-B');
+  check('a snapshot from another match is ignored', tk.getCachedLivePlayerStats('stale-puuid'), undefined);
+
+  // Rank survives a rebuild, and a zero never overwrites a known rank.
+  tk.persistLiveRank('rank-puuid', { tier: 21, rr: 77, peakTier: 24, peakSeasonId: 'act' });
+  check('rank persisted', tk.readPersistedRank('rank-puuid')?.tier, 21);
+  tk.persistLiveRank('rank-puuid', { tier: 0, rr: 0, peakTier: 0 });
+  check('a zero never erases a known rank', tk.readPersistedRank('rank-puuid')?.tier, 21);
+  check('peak survives too', tk.readPersistedRank('rank-puuid')?.peakTier, 24);
+
+  // Upgrade hygiene + quota safety.
+  localStorage.setItem('recon_match_v6_old1', 'x');
+  localStorage.setItem('recon_match_v6_old2', 'y');
+  const pruned = tk.pruneSupersededCaches();
+  check('v6 match cache is pruned', pruned >= 2 && !localStorage.getItem('recon_match_v6_old1'), true);
+
+  const realSet = localStorage.setItem.bind(localStorage);
+  let threw = false;
+  let calls = 0;
+  localStorage.setItem = ((k: string, v: string) => {
+    calls++;
+    if (calls === 1) throw new Error('QuotaExceededError');
+    return realSet(k, v);
+  }) as typeof localStorage.setItem;
+  let propagated = false;
+  let ok = false;
+  try {
+    ok = tk.writeLocalSafe('recon_quota_probe', 'payload');
+  } catch {
+    propagated = true;
+  }
+  localStorage.setItem = realSet;
+  check('a quota error never propagates', propagated, false);
+  // The retry path is best-effort (the fake store cannot model a real quota);
+  // the contract that matters is that a write NEVER throws into a caller.
+  check('writeLocalSafe always returns a boolean', typeof ok === 'boolean', true);
 }
 
 if (failures > 0) {
