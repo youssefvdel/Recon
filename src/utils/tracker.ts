@@ -3,7 +3,6 @@ import { emit } from '@tauri-apps/api/event';
 import type { LiveMatchPlayer, LiveMatchState, LocalRiotAccount, MatchRoundDetail, MatchRoundPlayer, TrackerDuel, TrackerMatchDetail, TrackerMmrPoint, TrackerPlayer, TrackerProfile } from '../types';
 import { isTauri } from './ipc';
 import { initRiotSource } from '../sources/riot';
-import { aggregateActStats, type ActAggregate, type ActMatchSample } from './actStats';
 import { setTrnMatchPhase, setTrnLobbyKey, getTrnMatchPhase, trnLog, trnProxyPaused, openTrnDrainJob, closeTrnDrainJob, isTrnPrivateError, trnNoteNegative, trnNegativeBlocked, markTrnFetching, clearTrnFetching, pruneTrnCaches } from './trn';
 import { getDevMockMatch, isDevNoClient } from './devTools';
 import { extractGamePodId, parseGamePodId } from './matchServer';
@@ -280,17 +279,6 @@ const platformBlob = (): string => {
   }
 };
 
-const shardFor = (region: string): string =>
-  (
-    {
-      eu: 'pd.eu.a.pvp.net',
-      na: 'pd.na.a.pvp.net',
-      ap: 'pd.ap.a.pvp.net',
-      br: 'pd.br.a.pvp.net',
-      latam: 'pd.latam.a.pvp.net',
-      kr: 'pd.kr.a.pvp.net',
-    } as Record<string, string>
-  )[region] ?? 'pd.eu.a.pvp.net';
 
 interface DirectEnt {
   access_token: string;
@@ -478,102 +466,6 @@ export async function riotPost(host: string, path: string): Promise<any> {
   }
 }
 
-let gameDataMem: { agents: Record<string, string>; maps: Record<string, string>; seasons: Record<string, string>; seasonOrder: string[]; tierIcons: Record<number, string>; agentInfo: Record<string, { name: string; icon: string; role: string; roleIcon: string }>; weapons: Record<string, string> } | null = null;
-
-const GAME_DATA_KEY = 'aspect_game_data_v3';
-
-/** Latest valorant-api map index (mapUrl|uuid → display name), module-level so
- *  the SYNCHRONOUS read paths (persisted match state, caches) can re-derive a
- *  map name instead of trusting one stored by an older build. */
-let mapIndexMem: Record<string, string> = {};
-
-/** Static Riot metadata via public valorant-api.com, cached 30 days. */
-export async function gameData(): Promise<{ agents: Record<string, string>; maps: Record<string, string>; seasons: Record<string, string>; seasonOrder: string[]; tierIcons: Record<number, string>; agentInfo: Record<string, { name: string; icon: string; role: string; roleIcon: string }>; weapons: Record<string, string> }> {
-  if (gameDataMem) return gameDataMem;
-  try {
-    const raw = localStorage.getItem(GAME_DATA_KEY);
-    if (raw) {
-      const { savedAt, data } = JSON.parse(raw);
-      if (Date.now() - savedAt < 30 * 24 * 3600 * 1000 && data?.agents && data?.tierIcons && data?.agentInfo) {
-        gameDataMem = { agents: data.agents, maps: data.maps ?? {}, seasons: data.seasons ?? {}, seasonOrder: data.seasonOrder ?? [], tierIcons: data.tierIcons, agentInfo: data.agentInfo ?? {}, weapons: data.weapons ?? {} };
-        mapIndexMem = gameDataMem.maps;
-        return gameDataMem;
-      }
-    }
-  } catch {}
-  const agents: Record<string, string> = {};
-  const maps: Record<string, string> = {};
-  const seasons: Record<string, string> = {};
-  let seasonOrder: string[] = [];
-  const tierIcons: Record<number, string> = {};
-  const agentInfo: Record<string, { name: string; icon: string; role: string; roleIcon: string }> = {};
-  const weapons: Record<string, string> = {};
-  try {
-    const [aj, mj, cs, sn, ct, wj] = await Promise.all([
-      fetch('https://valorant-api.com/v1/agents?isPlayableCharacter=true').then((r) => r.json()),
-      fetch('https://valorant-api.com/v1/maps').then((r) => r.json()),
-      fetch('https://valorant-api.com/v1/seasons/competitive').then((r) => r.json()),
-      fetch('https://valorant-api.com/v1/seasons').then((r) => r.json()),
-      fetch('https://valorant-api.com/v1/competitivetiers').then((r) => r.json()),
-      fetch('https://valorant-api.com/v1/weapons').then((r) => r.json()),
-    ]);
-    for (const a of aj?.data ?? []) {
-      if (a?.uuid && a?.displayName) {
-        const id = String(a.uuid).toLowerCase();
-        agents[id] = a.displayName;
-        agentInfo[id] = {
-          name: a.displayName,
-          icon: String(a.displayIcon ?? ''),
-          role: String(a.role?.displayName ?? ''),
-          roleIcon: String(a.role?.displayIcon ?? ''),
-        };
-      }
-    }
-    for (const m of mj?.data ?? []) {
-      if (m?.mapUrl && m?.displayName) {
-        maps[String(m.mapUrl).toLowerCase()] = m.displayName;
-        if (m?.uuid) maps[String(m.uuid).toLowerCase()] = m.displayName;
-      }
-    }
-    // competitive uuid → "V26 · ACT V": episode from asset path, act from season name.
-    const names: Record<string, string> = {};
-    for (const s of sn?.data ?? []) {
-      if (s?.uuid && s?.displayName) names[String(s.uuid).toLowerCase()] = s.displayName;
-    }
-    const compList = Array.isArray(cs?.data) ? cs.data : [];
-    for (const c of compList) {
-      const cuuid = String(c?.uuid ?? '').toLowerCase();
-      const suuid = String(c?.seasonUuid ?? '').toLowerCase();
-      if (!cuuid && !suuid) continue;
-      const act = names[suuid] ?? '';
-      const ep = /Episode(V\d+)/i.exec(String(c?.assetPath ?? ''))?.[1] ?? '';
-      const label = [ep, act].filter(Boolean).join(' · ') || 'Season';
-      // Riot keys player seasons by the SEASON uuid (SeasonID), not the
-      // competitive uuid — index both so lookups always hit.
-      if (cuuid) seasons[cuuid] = label;
-      if (suuid) seasons[suuid] = label;
-    }
-    seasonOrder = compList
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .slice().sort((a: any, b: any) => String(b?.endTime ?? '').localeCompare(String(a?.endTime ?? '')))
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .map((c: any) => String(c?.seasonUuid ?? c?.uuid ?? '').toLowerCase()).filter(Boolean);
-    // newest tier set wins; tier id matches Riot's numbering 0–27.
-    const sets = Array.isArray(ct?.data) ? ct.data : [];
-    const tiers = sets.length > 0 ? sets[sets.length - 1]?.tiers ?? [] : [];
-    for (const t of tiers) {
-      const id = Number(t?.tier);
-      if (Number.isInteger(id) && t?.largeIcon) tierIcons[id] = String(t.largeIcon);
-    }
-    for (const w of wj?.data ?? []) {
-      if (w?.uuid && w?.displayName) weapons[String(w.uuid).toLowerCase()] = w.displayName;
-    }
-    localStorage.setItem(GAME_DATA_KEY, JSON.stringify({ savedAt: Date.now(), data: { agents, maps, seasons, seasonOrder, tierIcons, agentInfo, weapons } }));
-  } catch {}
-  gameDataMem = { agents, maps, seasons, seasonOrder, tierIcons, agentInfo, weapons };
-  mapIndexMem = maps;
-  return gameDataMem;
-}
 
 /** Last path segment of a /Game/Maps/X/X id, for maps valorant-api.com doesn't know yet. */
 export const shortMapName = (mapId: string, maps: Record<string, string>): string => {
@@ -635,22 +527,6 @@ function healMapName(s: LiveMatchState | null): LiveMatchState | null {
   return { ...s, mapName };
 }
 
-/** True all-time peak tier for one season row (end tier, act rank, or highest won tier). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function seasonPeakTier(s: any): number {
-  const endTier = Number(s?.CompetitiveTier ?? 0);
-  const actRank = Number(s?.Rank ?? 0);
-  let winTier = 0;
-  if (s?.WinsByTier && typeof s.WinsByTier === 'object') {
-    for (const tk of Object.keys(s.WinsByTier)) {
-      const num = Number(tk);
-      if (!isNaN(num) && Number(s.WinsByTier[tk]) > 0) {
-        winTier = Math.max(winTier, num);
-      }
-    }
-  }
-  return Math.max(endTier, actRank, winTier);
-}
 
 /**
  * True all-time peak tier PLUS the act it was reached in.
@@ -659,37 +535,6 @@ function seasonPeakTier(s: any): number {
  * rather than to arbitrary object insertion order.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function extractPeakInfo(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  seasonsObj: Record<string, any>,
-  orderNewestFirst: string[] = []
-): { tier: number; seasonId: string } {
-  const keys = Object.keys(seasonsObj || {});
-  if (keys.length === 0) return { tier: 0, seasonId: '' };
-
-  // Oldest → newest, so a strict `>` lets the newest act win every tie.
-  const rank = new Map<string, number>();
-  orderNewestFirst.forEach((id, i) => rank.set(String(id).toLowerCase(), orderNewestFirst.length - i));
-  const ordered = keys.slice().sort((a, b) => {
-    const ra = rank.get(a.toLowerCase());
-    const rb = rank.get(b.toLowerCase());
-    if (ra != null && rb != null) return ra - rb;
-    if (ra != null) return -1;
-    if (rb != null) return 1;
-    return 0;
-  });
-
-  let tier = 0;
-  let seasonId = '';
-  for (const id of ordered) {
-    const t = seasonPeakTier(seasonsObj[id]);
-    if (t > tier) {
-      tier = t;
-      seasonId = id;
-    }
-  }
-  return { tier, seasonId };
-}
 
 /** Calculate the true all-time peak tier from Riot's SeasonalInfoBySeasonID payload */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -938,12 +783,6 @@ export const queueLabel = (q: string): string => {
   return s ? s[0].toUpperCase() + s.slice(1) : '—';
 };
 
-const normTeam = (t: unknown): string => {
-  const s = String(t ?? '').toLowerCase();
-  if (s === 'blue') return 'Blue';
-  if (s === 'red') return 'Red';
-  return String(t ?? '');
-};
 
 /**
  * Resolve a list of PUUIDs into real GameName and TagLine via Riot Name-Service.
@@ -1722,6 +1561,15 @@ export type { PersistedRank } from '../cache/namespace';
 // external importers; a re-export does not bring the name into this scope).
 import { evictOldest, pruneSupersededCaches, persistLiveRank, readPersistedRank } from '../cache/namespace';
 import { inCurrentLobby, setCurrentLobbyPuuids } from '../live/lobbyScope';
+import { fetchLocalActStats, actStateFor } from '../live/actStats';
+export { fetchLocalActStats, actStateFor, LOCAL_ACT_MAX_MATCHES, LOCAL_ACT_BUDGET_MS } from '../live/actStats';
+export type { LocalActCtx } from '../live/actStats';
+import { shardFor, mapLimit, normTeam, fetchLocalRank, parseLocalRank } from '../sources/riot';
+import type { LocalRiotCtx } from '../sources/riot';
+export { fetchLocalRank, parseLocalRank, extractPeakInfo } from '../sources/riot';
+export type { LocalRankRow, LocalRiotCtx } from '../sources/riot';
+import { gameData, mapIndexMem } from '../sources/gameData';
+export { gameData } from '../sources/gameData';
 import { getCachedLivePlayerStats, setCachedLivePlayerStats, setLiveSnapshotMatch } from '../live/playerStats';
 import type { LivePlayerStatsEntry } from '../live/playerStats';
 /* Live-player stats moved to src/live/playerStats.ts (stage 2b, step 2).
@@ -1841,19 +1689,6 @@ async function fetchLiteMatchResult(
   }
 }
 
-/** Run an async mapper over items with a hard concurrency cap. */
-async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const out: R[] = new Array(items.length);
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (cursor < items.length) {
-      const idx = cursor++;
-      out[idx] = await fn(items[idx]);
-    }
-  });
-  await Promise.all(workers);
-  return out;
-}
 
 export interface Recent24hRecord {
   won: number;
@@ -2458,214 +2293,7 @@ export const TRN_MISSING_RETRY_MS = 24 * 60 * 60 * 1000;
  * ------------------------------------------------------------------ */
 
 /** Public rank for one player, straight from /mmr/v1. */
-export interface LocalRankRow {
-  /** Competitive tier number (0 = unranked/unknown). */
-  tier: number;
-  /** Current-act Ranked Rating. */
-  rr: number;
-  peakTier: number;
-  peakSeasonId?: string;
-  actWins: number;
-  actGames: number;
-  leaderboardRank: number;
-  isRankHidden: boolean;
-}
-
-/** Parse one /mmr/v1/players/{puuid} body. PURE — extracted verbatim from the
- *  live lobby loop so the poll and the single-player path can never drift.
- *  Checked by scripts/act-aggregate-check.ts. */
-export function parseLocalRank(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  j: any,
-  seasonOrder: string[]
-): LocalRankRow {
-  const latest = j?.LatestCompetitiveUpdate ?? {};
-  const tierId = Number(latest?.TierAfterUpdate ?? 0);
-  const seasons = j?.QueueSkills?.competitive?.SeasonalInfoBySeasonID ?? {};
-  // Current-act row carries the LIVE RR; LatestCompetitiveUpdate only holds
-  // the value as of the last ranked game.
-  const curSeasonId = String(latest?.SeasonID ?? '').toLowerCase();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cur = (Object.entries(seasons) as [string, any][]).find(
-    ([id]) => id.toLowerCase() === curSeasonId
-  )?.[1];
-  const rr =
-    cur?.RankedRating != null
-      ? Number(cur.RankedRating)
-      : Number(latest?.RankedRatingAfterUpdate ?? 0);
-  const peakInfo = extractPeakInfo(seasons, seasonOrder || []);
-  const peak = Math.max(tierId, peakInfo.tier);
-  return {
-    tier: tierId,
-    rr,
-    peakTier: peak,
-    peakSeasonId: peak === tierId && tierId > 0 ? curSeasonId : peakInfo.seasonId,
-    actWins: Number(cur?.NumberOfWins ?? 0),
-    actGames: Number(cur?.NumberOfGames ?? 0),
-    leaderboardRank: Number(cur?.LeaderboardRank ?? 0),
-    isRankHidden: !!j?.IsActRankBadgeHidden,
-  };
-}
-
-/** Rank + RR for ANY puuid through the local client. Throws when unreadable. */
-export async function fetchLocalRank(puuid: string, region: string): Promise<LocalRankRow> {
-  if (!puuid) throw new Error('LOCAL_NO_PUUID');
-  const { seasonOrder } = await gameData();
-  return parseLocalRank(await riotGet(shardFor(region), `/mmr/v1/players/${puuid}`), seasonOrder || []);
-}
-
-/** Matches read per player per fill. The act must be COVERED COMPLETELY or we
- *  report nothing, so this is the largest act we will aggregate (see
- *  `fetchLocalActStats`). 50 covers a normal act — a 10 was starving every
- *  active player, since almost everyone is past 10 competitive games by
- *  mid-act. Riot's own history is seen capped near 95 rows, so 50 stays well
- *  inside what the endpoint will page. */
-export const LOCAL_ACT_MAX_MATCHES = 50;
-
-/** Wall-clock budget for ONE player's act aggregation. A poll must never be
- *  held hostage by a slow client, so the aggregation gives up (reports
- *  nothing) rather than overrunning this. */
-export const LOCAL_ACT_BUDGET_MS = 20_000;
-
-/** Immutable per (match, player) sample cache: match details never change, so
- *  a second fill of the same lobby costs zero requests. */
-const actSampleCache = new Map<string, ActMatchSample | null>();
-const ACT_SAMPLE_CACHE_MAX = 300;
-
-/** One player's scoreboard line + the team result, from local match details. */
-async function loadActSample(
-  region: string,
-  matchId: string,
-  puuid: string
-): Promise<ActMatchSample | null> {
-  const key = `${matchId}:${puuid.toLowerCase()}`;
-  if (actSampleCache.has(key)) return actSampleCache.get(key) ?? null;
-  let out: ActMatchSample | null = null;
-  try {
-    const j = await riotGet(shardFor(region), `/match-details/v1/matches/${matchId}`);
-    const scores: Record<string, number> = {};
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    for (const t of (Array.isArray(j?.teams) ? j.teams : []) as any[]) {
-      scores[normTeam(t?.teamId)] = Number(t?.roundsWon ?? 0);
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const me = ((Array.isArray(j?.players) ? j.players : []) as any[]).find(
-      (p) => String(p?.subject ?? '').toLowerCase() === puuid.toLowerCase()
-    );
-    if (me) {
-      const st = me?.stats ?? {};
-      const mine = normTeam(me?.teamId);
-      // FFA modes have no two-sided result: unknown, never a guessed win.
-      const opp = Object.keys(scores).length === 2 ? Object.keys(scores).find((k) => k !== mine) : undefined;
-      const a = scores[mine] ?? 0;
-      const b = opp ? scores[opp] ?? 0 : 0;
-      out = {
-        won: opp && a !== b ? a > b : null,
-        kills: Number(st?.kills ?? 0),
-        deaths: Number(st?.deaths ?? 0),
-        score: Number(st?.score ?? 0),
-        rounds: Number(st?.roundsPlayed ?? 0),
-      };
-    }
-  } catch {
-    out = null;
-  }
-  actSampleCache.set(key, out);
-  if (actSampleCache.size > ACT_SAMPLE_CACHE_MAX) {
-    const first = actSampleCache.keys().next().value;
-    if (first !== undefined) actSampleCache.delete(first);
-  }
-  return out;
-}
-
-/** Act K/D, ACS and win rate for ANY puuid, computed from local Riot data.
- *
- *  The act window is exact, not guessed: /mmr/v1 tells us how many games this
- *  act holds (`NumberOfGames`), and we aggregate precisely that many newest
- *  queue-scoped matches. If any of them is unreadable the whole aggregate is
- *  refused — a partial window under an "act" label would be a wrong number,
- *  and this app does not print wrong numbers. Throws instead.
- *
- *  NOT computed here, because the payload does not carry them: headshot %,
- *  KAST, damage delta, percentiles, Tracker Score. They stay blank. */
-/** Everything one act scan needs. `preloadedRank` skips a duplicate /mmr read
- *  when the caller already has the row (the lobby fill always does). */
-export interface LocalActCtx extends LocalRiotCtx {
-  puuid: string;
-  preloadedRank?: LocalRankRow;
-}
-
-export async function fetchLocalActStats(
-  ctx: LocalActCtx,
-  opts?: { allowAct?: boolean }
-): Promise<ActAggregate> {
-  const puuid = ctx.puuid;
-  const region = ctx.region;
-  const queue = ctx.queue || 'competitive';
-  // In-game guard, second line of defence: the fill already returns early for
-  // every automatic caller, but this is the choke point, so an explicit
-  // `allowAct: true` is the ONLY way past it while the game is in coregame.
-  if (opts?.allowAct !== true && getTrnMatchPhase() === 'coregame') {
-    throw new Error('LOCAL_ACT_IN_MATCH');
-  }
-  const r = ctx.preloadedRank ?? (await fetchLocalRank(puuid, region));
-  const want = Number(r.actGames) || 0;
-  if (want <= 0) throw new Error('LOCAL_NO_ACT_GAMES');
-  if (want > LOCAL_ACT_MAX_MATCHES) throw new Error('LOCAL_ACT_TOO_LONG');
-  const q = queue.toLowerCase().trim();
-  const startedAt = Date.now();
-  const ids: string[] = [];
-  for (let page = 0; page < 5 && ids.length < want; page++) {
-    if (Date.now() - startedAt > LOCAL_ACT_BUDGET_MS) throw new Error('LOCAL_ACT_TIMEOUT');
-    const start = page * 20;
-    const j = await riotGet(
-      shardFor(region),
-      `/match-history/v1/history/${puuid}?startIndex=${start}&endIndex=${start + 20}`
-    );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rows = ((Array.isArray(j?.History) ? j.History : []) as any[]).map((h) => ({
-      id: String(h?.MatchID ?? ''),
-      queue: String(h?.QueueID ?? '').toLowerCase().trim(),
-    }));
-    if (rows.length === 0) break;
-    for (const row of rows) if (row.id && row.queue === q) ids.push(row.id);
-  }
-  const picked = ids.slice(0, want);
-  if (picked.length < want) throw new Error('LOCAL_ACT_INCOMPLETE');
-  if (Date.now() - startedAt > LOCAL_ACT_BUDGET_MS) throw new Error('LOCAL_ACT_TIMEOUT');
-  const samples = (
-    await mapLimit(picked, 4, (id) => loadActSample(region, id, puuid))
-  ).filter((s): s is ActMatchSample => s !== null);
-  if (samples.length < want) throw new Error('LOCAL_ACT_INCOMPLETE');
-  return aggregateActStats(samples);
-}
-
-/** Why an act aggregate was not produced. Pure — checked by
- *  scripts/act-aggregate-check.ts. Anything we cannot name is a local read
- *  failure, never a "private profile". */
-export function actStateFor(
-  msg: string
-): NonNullable<LivePlayerStatsEntry['actState']> {
-  if (msg.includes('LOCAL_ACT_TOO_LONG')) return 'too-long';
-  if (msg.includes('LOCAL_ACT_TIMEOUT')) return 'timeout';
-  if (msg.includes('LOCAL_ACT_INCOMPLETE') || msg.includes('LOCAL_NO_ACT_GAMES')) return 'incomplete';
-  return 'local-failed';
-}
-
 /** Context every local read needs; carried from the poll that already has it. */
-export interface LocalRiotCtx {
-  region: string;
-  queue: string;
-  drain?: boolean;
-  /** Opt IN to the act scan while VALORANT is in coregame. Default false: the
-   *  wave-1 in-game guard stays for every automatic caller. Only an explicit
-   *  user action (opening the player modal) sets this. */
-  allowAct?: boolean;
-  /** LOBBY FILL: take trnGet's fast path (no 6-8s serial slot). Only the
-   *  budgeted lobby fill sets this; nothing else may. */
-  fill?: boolean;
-}
-
 function fetchTrnStatsNow(
   puuid: string,
   realName: string,

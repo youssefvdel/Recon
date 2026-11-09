@@ -121,28 +121,56 @@ type Sample = { won: boolean | null; kills: number; deaths: number; score: numbe
   );
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(new URL('../src/utils/tracker.ts', import.meta.url), 'utf8');
+  // The act cluster moved to live/actStats.ts (stage 4, act-stats split).
+  const actSrc = readFileSync(new URL('../src/live/actStats.ts', import.meta.url), 'utf8');
 
   check('act cap covers a normal act (>= 50)', LOCAL_ACT_MAX_MATCHES >= 50, LOCAL_ACT_MAX_MATCHES);
   check('act cap stays inside Riot history (~95)', LOCAL_ACT_MAX_MATCHES <= 95, LOCAL_ACT_MAX_MATCHES);
   check('act aggregation has a time budget', LOCAL_ACT_BUDGET_MS > 0 && LOCAL_ACT_BUDGET_MS <= 30_000, LOCAL_ACT_BUDGET_MS);
   // Scoped to fetchLocalActStats: an older 24h-record helper also reads this
   // history path, so a whole-file indexOf would compare unrelated positions.
-  const actFn = src.slice(src.indexOf('export async function fetchLocalActStats'));
+  const actFn = actSrc.slice(actSrc.indexOf('export async function fetchLocalActStats'));
   check(
     'cap check happens BEFORE any history fetch',
     actFn.indexOf('LOCAL_ACT_TOO_LONG') !== -1 &&
-      actFn.indexOf('LOCAL_ACT_TOO_LONG') < actFn.indexOf('/match-history/v1/history/'),
+      actFn.indexOf('LOCAL_ACT_TOO_LONG') < actFn.indexOf('readMatchHistoryPage('),
     true
   );
-  check('aggregation concurrency stays at 4', src.includes('mapLimit(picked, 4,'), true);
-  check('immutable per-(match,player) cache kept', src.includes('const actSampleCache = new Map'), true);
-  check('budget is checked between pages', src.includes("throw new Error('LOCAL_ACT_TIMEOUT')"), true);
+  check('aggregation concurrency stays at 4', actSrc.includes('mapLimit(picked, 4,'), true);
+  check('immutable per-(match,player) cache kept', actSrc.includes('const actSampleCache = new Map'), true);
+  check('budget is checked between pages', actSrc.includes("throw new Error('LOCAL_ACT_TIMEOUT')"), true);
 
   check('too-long maps to its own verdict', actStateFor('LOCAL_ACT_TOO_LONG') === 'too-long', actStateFor('LOCAL_ACT_TOO_LONG'));
   check('timeout maps to its own verdict', actStateFor('LOCAL_ACT_TIMEOUT') === 'timeout', actStateFor('LOCAL_ACT_TIMEOUT'));
   check('incomplete window is named', actStateFor('LOCAL_ACT_INCOMPLETE') === 'incomplete', actStateFor('LOCAL_ACT_INCOMPLETE'));
   check('unranked act is named', actStateFor('LOCAL_NO_ACT_GAMES') === 'incomplete', actStateFor('LOCAL_NO_ACT_GAMES'));
   check('unknown failure is a LOCAL failure, never private', actStateFor('boom 500') === 'local-failed', actStateFor('boom 500'));
+  // A failed READ is not incomplete data. Since the act fetchers moved onto the
+  // validated readers, a Riot error payload throws RiotError and lands here as
+  // local-failed; a genuinely short window still reports incomplete. The two
+  // facts stay distinguishable in the UI copy.
+  check(
+    'a Riot error payload is a failed read, not incomplete data',
+    actStateFor('Riot match history failed: HTTP 403 Forbidden') === 'local-failed',
+    actStateFor('Riot match history failed: HTTP 403 Forbidden')
+  );
+  check(
+    'a short window is still incomplete, not a failure',
+    actStateFor('LOCAL_ACT_INCOMPLETE') === 'incomplete' && actStateFor('LOCAL_ACT_INCOMPLETE') !== 'local-failed',
+    actStateFor('LOCAL_ACT_INCOMPLETE')
+  );
+  // The wiring: both act fetchers go through the validated readers, so neither
+  // can be handed an unchecked payload again.
+  check(
+    'act history pages come from the validated reader',
+    actSrc.includes('readMatchHistoryPage(puuid, shardFor(region), start, start + 20)'),
+    true
+  );
+  check(
+    'act match details come from the validated reader',
+    actSrc.includes('readMatchDetailsRaw(matchId, shardFor(region))'),
+    true
+  );
   check('verdict never claims private', actStateFor('HTTP 451 private').includes('private') === false, true);
 }
 
