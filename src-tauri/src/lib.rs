@@ -145,63 +145,6 @@ fn restore_window_framed(hwnd: isize) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn get_valorant_configs() -> Result<Vec<game_config::ConfigFileInfo>, String> {
-    tauri::async_runtime::spawn_blocking(game_config::find_valorant_configs)
-        .await
-        .map_err(|e| format!("Task failed: {}", e))
-}
-
-#[tauri::command]
-fn update_valorant_config(
-    path: String,
-    set_windowed: bool,
-    res: Option<[u32; 2]>,
-    lock_readonly: bool,
-) -> Result<(), String> {
-    let p = std::path::Path::new(&path);
-    let res_tuple = res.map(|r| (r[0], r[1]));
-    game_config::update_config(p, set_windowed, res_tuple, lock_readonly)
-}
-
-#[tauri::command]
-fn update_valorant_config_custom(
-    path: String,
-    options: game_config::CustomOptions,
-) -> Result<(), String> {
-    let p = std::path::Path::new(&path);
-    game_config::update_config_custom(p, &options)
-}
-
-#[tauri::command]
-fn verify_valorant_configs(width: u32, height: u32) -> Result<Vec<game_config::VerifyResult>, String> {
-    Ok(game_config::verify_all_configs(width, height))
-}
-
-#[tauri::command]
-fn get_valorant_config_raw(path: String) -> Result<String, String> {
-    let p = std::path::Path::new(&path);
-    game_config::read_config_raw(p)
-}
-
-#[tauri::command]
-fn get_valorant_config_sections(path: String) -> Result<Vec<game_config::SectionInfo>, String> {
-    let p = std::path::Path::new(&path);
-    game_config::get_all_sections(p)
-}
-
-#[tauri::command]
-fn set_valorant_config_value(
-    path: String,
-    section: String,
-    key: String,
-    value: String,
-    lock_readonly: bool,
-) -> Result<(), String> {
-    let p = std::path::Path::new(&path);
-    game_config::set_config_value(p, &section, &key, &value, lock_readonly)
-}
-
-#[tauri::command]
 fn get_quick_shortcuts() -> Result<Vec<shortcuts::QuickShortcut>, String> {
     Ok(shortcuts::load_shortcuts())
 }
@@ -1019,14 +962,14 @@ pub fn run() {
             win::overlay::set_overlay_present,
             win::overlay::is_tab_down,
             win::overlay::set_overlay_windowed,
-            get_valorant_configs,
-            update_valorant_config,
-            update_valorant_config_custom,
-            verify_valorant_configs,
+            commands::config::get_valorant_configs,
+            commands::config::update_valorant_config,
+            commands::config::update_valorant_config_custom,
+            commands::config::verify_valorant_configs,
             commands::display::apply_custom_res_verbose,
-            get_valorant_config_raw,
-            get_valorant_config_sections,
-            set_valorant_config_value,
+            commands::config::get_valorant_config_raw,
+            commands::config::get_valorant_config_sections,
+            commands::config::set_valorant_config_value,
             tracker::is_riot_client_running,
             tracker::detect_local_account,
             tracker::local_entitlements,
