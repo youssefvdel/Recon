@@ -314,6 +314,35 @@ fn delete_entry_file(dir: &Path, path: &str) {
 /// fixed-alphabet hash, so it can never walk out of `dir` no matter what the
 /// path contains.
 #[cfg(test)]
+/// One dashboard row: how many entries the directory holds and their bytes.
+/// Committed `.trn` files only — `.tmp` files are uncommitted crash residue
+/// (swept on the next put) and never counted.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct TrnCacheStats {
+    pub files: u64,
+    pub bytes: u64,
+}
+
+#[cfg(test)]
+/// Sum one directory. Pure over the scan inputs — unit-tested via `scan`.
+fn stats_for(dir: &Path) -> TrnCacheStats {
+    let Ok(rd) = fs::read_dir(dir) else {
+        return TrnCacheStats { files: 0, bytes: 0 };
+    };
+    let mut files: u64 = 0;
+    let mut bytes: u64 = 0;
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if !name.ends_with(&format!(".{ENTRY_EXT}")) {
+            continue;
+        }
+        files += 1;
+        bytes += e.metadata().map(|m| m.len()).unwrap_or(0);
+    }
+    TrnCacheStats { files, bytes }
+}
+
+#[cfg(test)]
 fn resolved_entry_path(dir: &Path, path: &str) -> PathBuf {
     entry_path(dir, path)
 }
