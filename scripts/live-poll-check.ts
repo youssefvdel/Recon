@@ -20,7 +20,14 @@ function check(name: string, actual: unknown, expected: unknown): void {
 }
 
 const live = await Bun.file('src/components/LiveMatchView.tsx').text();
-const overlay = await Bun.file('src/components/OverlayView.tsx').text();
+// The overlay is no longer one file: the HUD is split into components/hud/.
+// Read the whole surface so a seam move cannot break the invariant by
+// relocating the polling code.
+const overlayFiles = [
+  'src/components/OverlayView.tsx',
+  ...(await Array.fromAsync(new Bun.Glob('src/components/hud/*.tsx').scan('.'))),
+];
+const overlay = (await Promise.all(overlayFiles.map((f) => Bun.file(f).text()))).join('\n');
 const tracker = await Bun.file('src/utils/tracker.ts').text();
 // The live-stats map moved to live/playerStats.ts (stage 2b, step 2).
 const playerStats = await Bun.file('src/live/playerStats.ts').text();
