@@ -26,7 +26,7 @@ Cite the command output or screenshot path next to each line. Derived from `regr
 | 11 | **Dash is local-empty only.** Lobby row where Riot returns empty for a local field. | A dash with a tooltip naming the local source; no dash on Tracker cells. | Dash on Tracker values, or dash while pending. |
 | 12 | **Lock is Tracker-private only.** Player whose Tracker profile is 451/private. | Lock inside the Tracker appendix only; rank/level/party never locked. | Lock on a local cell, or lock inferred from a failed fetch. |
 | 13 | **Pulse has a deadline.** Open a lobby; screenshot immediately and 15 s later. | At most one pulse, in the Tracker group header; gone at the 12 s timeout, replaced by "Tracker unavailable". | Per-cell pulses/spinners, or a pulse that outlives 15 s. |
-| 14 | **`as of` on every Tracker number.** Expand the appendix on a populated row. | Every Tracker value carries `as of 3m` (<24 h) or `as of 2 Nov`; values older than 7 days are absent. | Any Tracker number without a stamp, or an old value shown as fresh. |
+| 14 | **One `as of` stamp per Tracker block.** Look at each team table with Tracker values. | The block carries `Tracker · as of 3m` (<24 h) or a date past 30 d; values older than 7 days are absent, not greyed. One stamp covers the block — the block is one fetch, so one stamp is the honest unit. | A Tracker block with no stamp, a per-cell stamp (noise, and implies separate fetches), or an old value shown as fresh. |
 | 15 | **TS is gone from the board.** Screenshot + `grep -rn "Tracker Score" src/components/LiveMatchView.tsx`. | No TS column, no Tracker Score on the board (Overview archive banner is allowed). | Any TS/Tracker Score cell on the board. |
 
 ## C. Data-layer invariants — grep-shaped, run at review time
