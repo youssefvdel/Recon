@@ -30,6 +30,7 @@ pub(crate) use state::{
 };
 pub(crate) use commands::display::build_display_info;
 pub(crate) use win::tray::build_tray;
+use win::daemons;
 pub(crate) use win::overlay::{
     build_overlay_window, force_overlay_edit_mode_off, hide_overlay, show_overlay,
 };
@@ -378,9 +379,7 @@ pub fn run() {
     // ScaleOption*, DxgkUsePhysicalMode) that do nothing on current drivers and
     // left AMD machines with a broken scale/HDMI-audio state. Purge them once
     // per launch — idempotent and registry-only, so it is safe to always run.
-    std::thread::spawn(|| {
-        let _ = gpu::purge_legacy_vendor_overrides();
-    });
+    daemons::gpu_purge();
 
     let app_state = AppState {
         hotkey_controller,
@@ -447,89 +446,11 @@ pub fn run() {
                 }
             }
             space_spam::start(app.handle());
-            let handle = app.handle().clone();
-            std::thread::spawn(move || {
-                while let Ok(()) = rx.recv() {
-                    let cur_opt = display::get_current_display_mode();
-                    let (nw, nh) = display::get_native_resolution();
-                    if let Some(cur) = cur_opt {
-                        let (target_w, target_h) = if cur.width == nw {
-                            let pref = pref_clone.lock().unwrap();
-                            *pref
-                        } else {
-                            (nw, nh)
-                        };
-                        let _ = display::apply_display_mode(target_w, target_h, cur.refresh_rate);
-                        let info = build_display_info();
-                        let _ = handle.emit("display-mode-changed", &info);
-
-                        // If switching to stretched and auto-borderless is enabled, make Valorant borderless fullscreen
-                        if (target_w != nw || target_h != nh) && AUTO_BORDERLESS_ENABLED.load(Ordering::Relaxed) {
-                            std::thread::spawn(move || {
-                                std::thread::sleep(std::time::Duration::from_millis(300));
-                                if let Some(target) = window_manager::find_valorant_game_window() {
-                                    let _ = window_manager::make_borderless(target.hwnd);
-                                }
-                            });
-                        }
-                    }
-                }
-            });
+            daemons::display_hotkey(app.handle().clone(), rx, pref_clone);
 
             // Background Auto-Borderless Daemon for Valorant:
             // Runs continuously in the background only when explicitly enabled by the user.
-            let auto_bl_handle = app.handle().clone();
-            std::thread::spawn(move || {
-                let mut last_handled_hwnd: Option<isize> = None;
-                loop {
-                    std::thread::sleep(std::time::Duration::from_millis(1500));
-
-                    if !AUTO_BORDERLESS_ENABLED.load(Ordering::Relaxed) {
-                        continue;
-                    }
-
-                    let is_stretched = if let Some(cur) = display::get_current_display_mode() {
-                        let (nw, nh) = display::get_native_resolution();
-                        cur.width != nw || cur.height != nh
-                    } else {
-                        false
-                    };
-
-                    if is_stretched {
-                        if let Some(target) = window_manager::find_valorant_game_window() {
-                            let hwnd_val = target.hwnd;
-                            let hwnd = windows::Win32::Foundation::HWND(hwnd_val as *mut std::ffi::c_void);
-
-                            let needs_borderless = if last_handled_hwnd != Some(hwnd_val) {
-                                true
-                            } else {
-                                !window_manager::is_window_borderless_fullscreen(hwnd)
-                            };
-
-                            if needs_borderless {
-                                match window_manager::make_borderless(hwnd_val) {
-                                    Ok(msg) => {
-                                        last_handled_hwnd = Some(hwnd_val);
-                                        let _ = auto_bl_handle.emit(
-                                            "auto-borderless-applied",
-                                            serde_json::json!({
-                                                "hwnd": hwnd_val,
-                                                "title": target.title,
-                                                "message": msg,
-                                            }),
-                                        );
-                                    }
-                                    Err(e) => {
-                                        log::warn!("Auto-borderless failed on hwnd {}: {}", hwnd_val, e);
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        last_handled_hwnd = None;
-                    }
-                }
-            });
+            daemons::auto_borderless(app.handle().clone());
 
             // Auto In-Game Overlay Daemon:
             // Shows overlay automatically when Valorant is the foreground window,
@@ -546,110 +467,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             static LAST_OVERLAY_DECISION: std::sync::atomic::AtomicU8 =
                 std::sync::atomic::AtomicU8::new(u8::MAX);
-            let auto_overlay_handle = app.handle().clone();
-            std::thread::spawn(move || {
-                loop {
-                    std::thread::sleep(std::time::Duration::from_millis(2000));
-                    // No HUD window: nothing to show, align, heal or hide.
-                    if !OVERLAY_AVAILABLE.load(Ordering::Relaxed) {
-                        continue;
-                    }
-                    if OVERLAY_EDIT_MODE.load(Ordering::Relaxed)
-                        || OVERLAY_WINDOWED.load(Ordering::Relaxed)
-                    {
-                        // ponytail: eprintln!, not log::debug! — like trn_trace!,
-                        // there is no logger backend so log:: would vanish in dev.
-                        #[cfg(debug_assertions)]
-                        {
-                            let reason = if OVERLAY_EDIT_MODE.load(Ordering::Relaxed) {
-                                "edit"
-                            } else {
-                                "windowed"
-                            };
-                            if LAST_OVERLAY_DECISION.swap(0, Ordering::Relaxed) != 0 {
-                                let ms = std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .map(|d| d.as_millis())
-                                    .unwrap_or(0);
-                                eprintln!("[OVERLAY {ms}] daemon decision=skip reason={reason}");
-                            }
-                        }
-                        continue;
-                    }
-                    let valorant_present = window_manager::find_valorant_game_window().is_some();
-                    // Same foreground reader as the TRN/perf pause gates
-                    // (GetForegroundWindow in window_manager::is_valorant_foreground).
-                    // Agent select / pregame runs with VALORANT foreground, so
-                    // foreground-gating preserves pre-pick — do not "fix" this
-                    // by showing while background.
-                    let valorant_foreground =
-                        valorant_present && window_manager::is_valorant_foreground();
-                    // Audit overlay#4: a visible full-screen alpha layer is
-                    // composited every frame. When the UI reports no content
-                    // (`set_overlay_present(false)`) only the Tab peek needs the
-                    // layer; the 100 ms guard thread owns that fast transition,
-                    // and this slow tick must not fight it by re-showing.
-                    let present =
-                        OVERLAY_PRESENT.load(Ordering::Relaxed) || window_manager::is_tab_down();
-                    let should_show = valorant_present && valorant_foreground && present;
-                    #[cfg(debug_assertions)]
-                    {
-                        let reason = if should_show {
-                            "foreground"
-                        } else if !valorant_present {
-                            "no-game"
-                        } else {
-                            "background"
-                        };
-                        let want = if should_show { 1 } else { 2 };
-                        if LAST_OVERLAY_DECISION.swap(want, Ordering::Relaxed) != want {
-                            let ms = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_millis())
-                                .unwrap_or(0);
-                            eprintln!(
-                                "[OVERLAY {ms}] daemon decision={} reason={reason}",
-                                if should_show { "show" } else { "hide" }
-                            );
-                        }
-                    }
-                    if let Some(overlay) = auto_overlay_handle.get_webview_window("overlay") {
-                        let is_vis = overlay.is_visible().unwrap_or(false);
-                        if should_show && !is_vis {
-                            if let Err(e) = show_overlay(auto_overlay_handle.clone()) {
-                                log::warn!("overlay daemon: show failed: {e}");
-                            }
-                        } else if !should_show && is_vis {
-                            if let Err(e) = hide_overlay(auto_overlay_handle.clone()) {
-                                log::warn!("overlay daemon: hide failed: {e}");
-                            }
-                        } else if should_show && is_vis {
-                            #[cfg(windows)]
-                            if let Ok(hwnd) = overlay.hwnd() {
-                                if let Err(e) =
-                                    window_manager::align_overlay_to_valorant(hwnd.0 as isize)
-                                {
-                                    log::warn!("overlay daemon: align failed: {e}");
-                                }
-                                // Self-heal: if something re-applied default styles
-                                // (opaque layer eating game input), reassert click-through.
-                                if window_manager::overlay_clickthrough_missing(hwnd.0 as isize) {
-                                    log::warn!("overlay daemon: click-through lost — reasserting");
-                                    let _ = overlay.set_ignore_cursor_events(true);
-                                    if let Err(e) = window_manager::toggle_overlay_clickthrough(
-                                        hwnd.0 as isize,
-                                        true,
-                                    ) {
-                                        log::warn!(
-                                            "overlay daemon: click-through reassert failed: {e}"
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            });
+            daemons::overlay_daemon(app.handle().clone());
 
             // Overlay fail-safe guard (audit overlay#1 + #4). One 100 ms thread:
             //   (a) Ctrl+Shift+H always leaves edit mode — no WebView focus, no
@@ -660,57 +478,7 @@ pub fn run() {
             //   (c) when the UI reports no content, the full-screen alpha layer
             //       is shown only while Tab is held, so it is not composited for
             //       the whole match (the audit's Tab-peek gate).
-            let guard_handle = app.handle().clone();
-            std::thread::spawn(move || {
-                let mut chord_was_down = false;
-                let mut tab_shown = false;
-                loop {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    // Edit mode and the Tab peek both need the window; with no
-                    // HUD there is nothing to guard, no chord to serve, and the
-                    // watchdog cannot be armed (edit mode needs the window).
-                    if !OVERLAY_AVAILABLE.load(Ordering::Relaxed) {
-                        continue;
-                    }
-                    let chord = window_manager::overlay_edit_exit_chord_down();
-                    if chord && !chord_was_down {
-                        force_overlay_edit_mode_off(&guard_handle, "Ctrl+Shift+H");
-                    }
-                    chord_was_down = chord;
-                    if OVERLAY_EDIT_MODE.load(Ordering::Relaxed)
-                        && window_manager::overlay_edit_idle_ms() > OVERLAY_EDIT_WATCHDOG_MS
-                    {
-                        force_overlay_edit_mode_off(&guard_handle, "no edit activity for 90s");
-                        continue;
-                    }
-                    // The fast path only runs when the UI says the layer has no
-                    // content of its own; otherwise the 2 s daemon owns it.
-                    let gated = !OVERLAY_EDIT_MODE.load(Ordering::Relaxed)
-                        && !OVERLAY_WINDOWED.load(Ordering::Relaxed)
-                        && !OVERLAY_PRESENT.load(Ordering::Relaxed)
-                        && window_manager::is_valorant_foreground();
-                    if !gated {
-                        tab_shown = false;
-                        continue;
-                    }
-                    let tab = window_manager::is_tab_down();
-                    if tab && !tab_shown {
-                        if let Err(e) = show_overlay(guard_handle.clone()) {
-                            log::warn!("overlay tab-peek: show failed: {e}");
-                        }
-                        tab_shown = true;
-                    } else if !tab && tab_shown {
-                        // ~200 ms grace: a quick double-tap must not flash.
-                        std::thread::sleep(std::time::Duration::from_millis(200));
-                        if !window_manager::is_tab_down() {
-                            if let Err(e) = hide_overlay(guard_handle.clone()) {
-                                log::warn!("overlay tab-peek: hide failed: {e}");
-                            }
-                            tab_shown = false;
-                        }
-                    }
-                }
-            });
+            daemons::overlay_guard(app.handle().clone());
 
             // Working-set trims happen on hide/unfocus events below — no timer:
             // EmptyWorkingSet every 12s was faulting hot pages back in and
