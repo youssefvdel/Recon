@@ -57,7 +57,7 @@ import { listen } from '@tauri-apps/api/event';
  * is ambiguous and must stay neutral ("no Tracker profile"). */
 const LIVE_FETCHING_TIP = 'Reading Tracker data…';
 const LIVE_UNAVAILABLE_TIP = 'Not available for this player';
-const LIVE_PRIVATE_TIP = "This player's profile is private";
+const LIVE_PRIVATE_TIP = 'Private profile — data is not public';
 const LIVE_MISSING_TIP = 'Tracker has no profile for this account';
 const LIVE_UNKNOWN_TIP = 'No Tracker data available';
 const TS_STATE_TIP = 'Tracker Score is retired (tracker.gg stopped serving it, Nov 2026). This cell shows the Tracker state: fetching, private, no Tracker profile, or ready.';
@@ -849,9 +849,7 @@ const PlayerRow: React.FC<{
             <span>profile</span>
           </span>
         ) : trnState === 'private' ? (
-          <span data-tip={LIVE_PRIVATE_TIP} className="text-micro font-mono text-m3-outline">
-            private
-          </span>
+          lockCell
         ) : trnState === 'ready' ? (
           p.trnScore != null ? (
             <span data-tip={`Tracker Score: ${p.trnScore} / 1000 — Tier ${scoreTier(p.trnScore).tier}`}>
@@ -914,8 +912,6 @@ const PlayerRow: React.FC<{
           <span className={p.acs >= 200 ? 'text-m3-primary' : p.acs >= 150 ? 'text-m3-on-surface' : 'text-m3-outline'}>
             {p.acs}
           </span>
-        ) : locked ? (
-          lockCell
         ) : (
           blankCell(trnBlankReason)
         )}
@@ -923,9 +919,7 @@ const PlayerRow: React.FC<{
 
       {/* 8. K/D */}
       <div className="text-right font-mono text-[10.5px] font-bold" data-tip="Act-wide K/D">
-        {locked ? (
-          lockCell
-        ) : !kdKnown ? (
+        {!kdKnown ? (
           blankCell(trnBlankReason)
         ) : (
           <span className={kdValue >= 1 ? 'text-m3-mint font-bold' : 'text-m3-coral font-bold'}>
@@ -940,8 +934,6 @@ const PlayerRow: React.FC<{
           <span className={p.winPct >= 50 ? 'text-m3-mint font-semibold' : 'text-rose-400'}>
             {formatPct(p.winPct, 0)}
           </span>
-        ) : locked ? (
-          lockCell
         ) : (
           blankCell(trnBlankReason)
         )}
@@ -958,9 +950,15 @@ const PlayerRow: React.FC<{
         )}
       </div>
 
-      {/* 11. Account level */}
+      {/* 11. Account level — Tracker-filled, so a private profile locks it. */}
       <div className="text-right font-mono text-[9.5px] text-m3-outline" data-tip="Account level">
-        {p.accountLevel > 0 ? p.accountLevel : <StatValue reason="Account level not available" />}
+        {p.accountLevel > 0 ? (
+          p.accountLevel
+        ) : locked ? (
+          lockCell
+        ) : (
+          <StatValue reason="Account level not available" />
+        )}
       </div>
     </div>
   );
