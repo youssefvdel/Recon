@@ -31,6 +31,11 @@ export interface RoundTimelineProps {
   weaponNames?: Record<string, string>;
 }
 
+/* The match-details mapper currently stores `roundNum` 0-based (18 rounds ->
+ * 0..17) while Riot's payload is 1-based. Display the human number; if the
+ * mapper ever stores the payload value directly, delete this +1. */
+const displayRound = (roundNum: number): number => roundNum + 1;
+
 const TEAM_TONE: Record<string, { box: string; text: string; label: string }> = {
   Blue: {
     box: 'bg-m3-mint/15 border-m3-mint/40',
@@ -231,7 +236,7 @@ export const RoundTimeline: React.FC<RoundTimelineProps> = ({
                 {rounds.map((r) => {
                   const tone = toneFor(r.winningTeam);
                   const isSelected = r.roundNum === (selected?.roundNum ?? rounds[0].roundNum);
-                  const label = `Round ${r.roundNum}: ${tone.label} won${
+                  const label = `Round ${displayRound(r.roundNum)}: ${tone.label} won${
                     r.roundResult ? ` (${r.roundResult})` : ''
                   }${r.bombPlanter ? ', bomb planted' : ''}${r.bombDefuser ? ', bomb defused' : ''}`;
                   return (
@@ -270,7 +275,7 @@ export const RoundTimeline: React.FC<RoundTimelineProps> = ({
                           isSelected ? 'text-m3-primary font-bold' : 'text-m3-outline'
                         }`}
                       >
-                        {r.roundNum}
+                        {displayRound(r.roundNum)}
                       </span>
                     </button>
                   );
@@ -298,7 +303,7 @@ export const RoundTimeline: React.FC<RoundTimelineProps> = ({
                 >
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="font-display font-bold text-sm text-m3-on-surface">
-                      Round {selected.roundNum}
+                      Round {displayRound(selected.roundNum)} of {rounds.length}
                     </span>
                     <span className={`text-xs font-bold ${toneFor(selected.winningTeam).text}`}>
                       {selected.winningTeam || 'Unknown team'} won
@@ -437,7 +442,7 @@ export const RoundTimeline: React.FC<RoundTimelineProps> = ({
                         key={r.roundNum}
                         type="button"
                         onClick={() => selectRound(r.roundNum)}
-                        aria-label={`Round ${r.roundNum} economy for ${selectedPlayerName}`}
+                        aria-label={`Round ${displayRound(r.roundNum)} economy for ${selectedPlayerName}`}
                         aria-current={isSelected ? 'true' : undefined}
                         className={`shrink-0 w-16 rounded-md border px-1.5 py-1 text-left cursor-pointer ${
                           isSelected
@@ -445,7 +450,7 @@ export const RoundTimeline: React.FC<RoundTimelineProps> = ({
                             : 'border-m3-outline-subtle bg-m3-surface-container'
                         }`}
                       >
-                        <span className="block text-micro font-mono text-m3-outline">R{r.roundNum}</span>
+                        <span className="block text-micro font-mono text-m3-outline">R{displayRound(r.roundNum)}</span>
                         {line ? (
                           <>
                             <span className="block text-micro font-mono font-bold text-m3-on-surface">
