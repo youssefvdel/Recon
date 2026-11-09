@@ -153,23 +153,91 @@ export async function restartApp(): Promise<void> {
 
 /* ---- Install safety: never install over a live match or a visible overlay ---- */
 
+/** The freshest install-safety facts the guard can read. */
+export type InstallSafetyFacts = {
+  /** A live match (pregame/coregame) is running, not a previous match. */
+  liveMatch: boolean;
+  /** 'unknown' = overlay IPC failed; automatic installs must not gamble. */
+  overlay: 'visible' | 'hidden' | 'unknown';
+};
+
+/** Pure install policy.
+ *
+ * Automatic installs hard-block on a live match, a visible overlay, or an
+ * unreadable state. A deliberate manual click gets a warning and may proceed
+ * once the user confirms (user rule, 2026-11-09).
+ *
+ * Assertions for the three cases live in `assertInstallGuardPolicy` below.
+ */
+export function resolveInstallGuard(
+  facts: InstallSafetyFacts,
+  opts?: { manual?: boolean }
+): { block: string | null; warning: string | null } {
+  const manual = opts?.manual === true;
+  const duringMatchWarning = 'Updating restarts Recon during your match — continue?';
+  if (facts.liveMatch) {
+    return manual
+      ? { block: null, warning: duringMatchWarning }
+      : { block: 'A match is live — finish the match or close the overlay to update.', warning: null };
+  }
+  if (facts.overlay === 'visible') {
+    return manual
+      ? { block: null, warning: duringMatchWarning }
+      : { block: 'The in-game overlay is up — close it to update.', warning: null };
+  }
+  if (facts.overlay === 'unknown') {
+    return manual
+      ? {
+          block: null,
+          warning: 'Could not verify the match/overlay state. Updating restarts Recon — continue?',
+        }
+      : { block: 'Could not verify the match/overlay state — try again in a moment.', warning: null };
+  }
+  return { block: null, warning: null };
+}
+
+/** Three-case policy assertion (dev only): manual+live warns, auto+live blocks,
+ *  auto+unreadable still blocks. Throws if the rule regresses. */
+function assertInstallGuardPolicy(): void {
+  const manualLive = resolveInstallGuard({ liveMatch: true, overlay: 'hidden' }, { manual: true });
+  const autoLive = resolveInstallGuard({ liveMatch: true, overlay: 'hidden' });
+  const autoUnreadable = resolveInstallGuard({ liveMatch: false, overlay: 'unknown' });
+  if (manualLive.block !== null || !manualLive.warning) {
+    throw new Error('install policy: manual + live match must warn, not block');
+  }
+  if (!autoLive.block) throw new Error('install policy: auto + live match must block');
+  if (!autoUnreadable.block) {
+    throw new Error('install policy: auto + unreadable state must block');
+  }
+}
+if (import.meta.env.DEV) assertInstallGuardPolicy();
+
 /** Human-readable reason an install is blocked right now, or null when safe.
- *  Reads the freshest live state the app has (in-memory poll result first,
- *  else the persisted cache, which applies LIVE_MATCH_CACHE_TTL_MS). */
-export async function getInstallBlocker(): Promise<string | null> {
+ *  No `manual` option = the automatic path: hard-block exactly as before.
+ *  `{ manual: true }` returns the block/warning pair for a deliberate click. */
+export async function getInstallBlocker(): Promise<string | null>;
+export async function getInstallBlocker(opts: {
+  manual: true;
+}): Promise<{ block: string | null; warning: string | null }>;
+export async function getInstallBlocker(
+  opts?: { manual?: boolean }
+): Promise<string | null | { block: string | null; warning: string | null }> {
   const live = peekLiveMatchState();
-  if (live && !live.isPreviousMatch && live.phase !== 'idle') {
-    return 'A match is live — finish the match or close the overlay to update.';
-  }
+  let overlay: InstallSafetyFacts['overlay'] = 'hidden';
   try {
-    if (await isOverlayVisible()) {
-      return 'The in-game overlay is up — close it to update.';
-    }
+    overlay = (await isOverlayVisible()) ? 'visible' : 'hidden';
   } catch {
-    // Cannot read the overlay state → do not gamble on an install that exits the app.
-    return 'Could not verify the match/overlay state — try again in a moment.';
+    // Cannot read the overlay state → automatic installs must not gamble.
+    overlay = 'unknown';
   }
-  return null;
+  const guard = resolveInstallGuard(
+    {
+      liveMatch: !!live && !live.isPreviousMatch && live.phase !== 'idle',
+      overlay,
+    },
+    opts
+  );
+  return opts?.manual === true ? guard : guard.block;
 }
 
 /** Single shared guard for every install path (auto and manual). */

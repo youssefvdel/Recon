@@ -3,7 +3,7 @@ import { emit } from '@tauri-apps/api/event';
 import type { LiveMatchPlayer, LiveMatchState, LocalRiotAccount, MatchRoundDetail, MatchRoundPlayer, TrackerDuel, TrackerMatchDetail, TrackerMmrPoint, TrackerPlayer, TrackerProfile } from '../types';
 import { isTauri } from './ipc';
 import { aggregateActStats, type ActAggregate, type ActMatchSample } from './actStats';
-import { setTrnMatchPhase, setTrnLobbyKey, getTrnMatchPhase, trnLog, trnProxyPaused, openTrnDrainJob, closeTrnDrainJob, isTrnPrivateError, trnNoteNegative, trnNegativeBlocked, markTrnFetching, clearTrnFetching } from './trn';
+import { setTrnMatchPhase, setTrnLobbyKey, getTrnMatchPhase, trnLog, trnProxyPaused, openTrnDrainJob, closeTrnDrainJob, isTrnPrivateError, trnNoteNegative, trnNegativeBlocked, markTrnFetching, clearTrnFetching, TRN_CACHE_PREFIX } from './trn';
 import { getDevMockMatch, isDevNoClient } from './devTools';
 import { extractGamePodId, parseGamePodId } from './matchServer';
 import { assignPartyColors } from './playerDisplay';
@@ -1744,6 +1744,10 @@ export function pruneSupersededCaches(): number {
     const doomed: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
+      // Never delete the live TRN generation, even if a future edit adds it to
+      // the list above: a cache that prunes itself every launch is worse than
+      // no cache at all (it shipped once as alpha16).
+      if (k && k.startsWith(TRN_CACHE_PREFIX)) continue;
       if (k && SUPERSEDED_PREFIXES.some((p) => k.startsWith(p))) doomed.push(k);
     }
     for (const k of doomed) {

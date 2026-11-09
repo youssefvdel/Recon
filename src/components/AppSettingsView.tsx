@@ -77,6 +77,9 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
   // Background auto-updater state, owned by utils/updater (module-level, so it
   // survives tab switches). Auto-downloaded updates install from here too.
   const [autoUpdate, setAutoUpdate] = useState<AutoUpdateState>(getAutoUpdateState);
+  /** Manual-only install warning (live match / overlay / unreadable): shown
+   *  in the button tooltip and confirmed on click; never disables the button. */
+  const [installWarning, setInstallWarning] = useState<string | null>(null);
   const [installBlocker, setInstallBlocker] = useState<string | null>(null);
 
   // System settings state
@@ -282,12 +285,20 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
     if (!updateInfo && autoUpdate.phase !== 'ready') return;
     let alive = true;
     const tick = () => {
-      getInstallBlocker()
-        .then((reason) => {
-          if (alive) setInstallBlocker(reason);
+      // Manual click policy: a live match/overlay is a confirm, not a block.
+      getInstallBlocker({ manual: true })
+        .then((guard) => {
+          if (!alive) return;
+          setInstallBlocker(guard.block);
+          setInstallWarning(guard.warning);
         })
         .catch(() => {
-          if (alive) setInstallBlocker('Could not verify the match/overlay state — try again in a moment.');
+          if (!alive) return;
+          // Still let the user click and confirm rather than silently disabling.
+          setInstallBlocker(null);
+          setInstallWarning(
+            'Could not verify the match/overlay state. Updating restarts Recon — continue?'
+          );
         });
     };
     tick();
@@ -414,14 +425,19 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
   };
 
   const handleInstallUpdate = async () => {
-    // Same guard as the auto path: installing exits the app on Windows, so a
-    // live match or a visible overlay must hard-block it, with a reason shown.
-    const blocker = await getInstallBlocker();
-    if (blocker) {
-      setError(blocker);
-      setInstallBlocker(blocker);
+    // A deliberate click may proceed mid-match; automatic installs stay blocked.
+    const guard = await getInstallBlocker({ manual: true });
+    if (guard.block) {
+      setError(guard.block);
+      setInstallBlocker(guard.block);
       return;
     }
+    setInstallBlocker(null);
+    if (guard.warning) {
+      const ok = window.confirm(`${guard.warning}\n\nRecon will close, install, then reopen.`);
+      if (!ok) return;
+    }
+    setInstallWarning(null);
 
     // Prefer the build the background updater already downloaded and verified.
     const readyAuto = autoUpdate.phase === 'ready' ? autoUpdate.update : null;
@@ -698,7 +714,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
                 <button
                   onClick={handleInstallUpdate}
                   disabled={installing || autoDownloadingSame || activeInstallBlocker !== null}
-                  data-tip={activeInstallBlocker ?? undefined}
+                  data-tip={activeInstallBlocker ?? installWarning ?? undefined}
                   className="px-4 py-1.5 rounded-xl bg-m3-primary hover:bg-m3-primary/90 text-m3-on-primary text-xs font-bold flex items-center gap-2 transition-all shadow-md cursor-pointer active:scale-95 disabled:opacity-50"
                 >
                   {installing ? (

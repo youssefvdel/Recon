@@ -1201,7 +1201,10 @@ export async function trnGet(
  * `trn_cache.rs` (see the file-cache note above) because localStorage cannot
  * hold them; these fit, and a synchronous read is what makes a repeat poll
  * free. */
-const TRN_CACHE_PREFIX = 'recon_trn_cache_v1';
+// The live generation. v1 is pruned at load by pruneSupersededCaches(), so
+// this must never equal a prefix in SUPERSEDED_PREFIXES or the app deletes
+// its own cache on every launch.
+export const TRN_CACHE_PREFIX = 'recon_trn_cache_v2';
 
 function readPersisted<T>(key: string, ttlMs: number): T | null {
   try {
