@@ -213,6 +213,37 @@ export function trnCooldownStepCount(): number {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+/* ------------------------------------------------------------------ *
+ * trn.ts owns its own cache generations
+ *
+ * These prefixes are OUR ballast, so the pruner lives here and the shared
+ * cache layer no longer knows a single TRN key. That closes the class-(b)
+ * smell: a module can only prune what it alone can name.
+ * ------------------------------------------------------------------ */
+const TRN_SUPERSEDED_PREFIXES = ['recon_trn_negative_v1', 'recon_trn_cache_v1'];
+
+/** Delete superseded TRN generations. Never touches the LIVE prefixes
+ *  (`recon_trn_negative_v2`, `recon_trn_cache_v2`) — they are not in the list,
+ *  so the old "skip the live one" guard is structural rather than a check. */
+export function pruneTrnCaches(): number {
+  if (typeof localStorage === 'undefined') return 0;
+  let removed = 0;
+  try {
+    const doomed: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && TRN_SUPERSEDED_PREFIXES.some((p) => k.startsWith(p))) doomed.push(k);
+    }
+    for (const k of doomed) {
+      try {
+        localStorage.removeItem(k);
+        removed++;
+      } catch {}
+    }
+  } catch {}
+  return removed;
+}
+
 /** ms left before tracker.gg will be tried again; 0 when ready. */
 export function trnCooldownRemainingMs(): number {
   let until = trnCooldownUntil;

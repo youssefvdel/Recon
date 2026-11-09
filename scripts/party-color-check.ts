@@ -126,7 +126,14 @@ check(
 // --- Sibling-cause regressions (source text) ---
 const tracker = await Bun.file('src/utils/tracker.ts').text();
 const live = await Bun.file('src/components/LiveMatchView.tsx').text();
-const overlay = await Bun.file('src/components/OverlayView.tsx').text();
+// The overlay is no longer one file: the HUD is being split into components/hud/.
+// Read the whole surface so a seam move cannot silently satisfy or break this
+// invariant by relocating the markup.
+const overlayFiles = [
+  'src/components/OverlayView.tsx',
+  ...(await Array.fromAsync(new Bun.Glob('src/components/hud/*.tsx').scan('.'))),
+];
+const overlay = (await Promise.all(overlayFiles.map((f) => Bun.file(f).text()))).join('\n');
 
 check('sequential counter gone', !tracker.includes('nextMatchPartyIndex'));
 check('per-match index latch gone', !tracker.includes('matchPartyIndexMap'));

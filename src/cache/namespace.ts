@@ -8,10 +8,8 @@
  * Ownership: this module owns `recon_live_rank_*` and the superseded-key list.
  * It prunes ONLY what it owns or what is provably dead. */
 
-// The pruner must not delete the LIVE TRN generation. That constant belongs to
-// trn.ts, so it is imported rather than duplicated — and this cross-module
-// knowledge is exactly what stage 2 removes when trn.ts prunes its own prefix.
-import { TRN_CACHE_PREFIX } from '../utils/trn';
+// No source-module keys here any more: trn.ts prunes its own generations
+// (pruneTrnCaches), so this layer only knows prefixes it owns.
 
 /* ------------------------------------------------------------------ *
  * Quota-safe local storage
@@ -28,8 +26,6 @@ const SUPERSEDED_PREFIXES = [
   'recon_match_v5_',
   'aspect_match_v5_',
   'recon_live_player_stats_v2',
-  'recon_trn_negative_v1',
-  'recon_trn_cache_v1',
 ];
 
 /** Delete every superseded generation. Idempotent, cheap, never throws. */
@@ -40,10 +36,6 @@ export function pruneSupersededCaches(): number {
     const doomed: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      // Never delete the live TRN generation, even if a future edit adds it to
-      // the list above: a cache that prunes itself every launch is worse than
-      // no cache at all (it shipped once as alpha16).
-      if (k && k.startsWith(TRN_CACHE_PREFIX)) continue;
       if (k && SUPERSEDED_PREFIXES.some((p) => k.startsWith(p))) doomed.push(k);
     }
     for (const k of doomed) {

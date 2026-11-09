@@ -4,7 +4,7 @@ import type { LiveMatchPlayer, LiveMatchState, LocalRiotAccount, MatchRoundDetai
 import { isTauri } from './ipc';
 import { initRiotSource } from '../sources/riot';
 import { aggregateActStats, type ActAggregate, type ActMatchSample } from './actStats';
-import { setTrnMatchPhase, setTrnLobbyKey, getTrnMatchPhase, trnLog, trnProxyPaused, openTrnDrainJob, closeTrnDrainJob, isTrnPrivateError, trnNoteNegative, trnNegativeBlocked, markTrnFetching, clearTrnFetching } from './trn';
+import { setTrnMatchPhase, setTrnLobbyKey, getTrnMatchPhase, trnLog, trnProxyPaused, openTrnDrainJob, closeTrnDrainJob, isTrnPrivateError, trnNoteNegative, trnNegativeBlocked, markTrnFetching, clearTrnFetching, pruneTrnCaches } from './trn';
 import { getDevMockMatch, isDevNoClient } from './devTools';
 import { extractGamePodId, parseGamePodId } from './matchServer';
 import { assignPartyColors } from './playerDisplay';
@@ -2500,6 +2500,8 @@ async function enqueueTrnSpread(
 if (typeof localStorage !== 'undefined') {
   try {
     pruneSupersededCaches();
+    // trn.ts prunes its own generations; same keys, different owner.
+    pruneTrnCaches();
   } catch {}
 }
 

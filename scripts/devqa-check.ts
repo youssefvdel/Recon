@@ -982,7 +982,13 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(new URL('../src/utils/trn.ts', import.meta.url), 'utf8');
   check('negatives are stored under v2', src.includes("'recon_trn_negative_v2'"), true);
-  check('no v1 key in the read/write path', src.includes('recon_trn_negative_v1'), false);
+  // The v1 name may appear in trn.ts's OWN prune list (it must, to delete it).
+  // The contract is that it is never used as a live storage key again.
+  check(
+    'no v1 key in the read/write path',
+    /localStorage\.(getItem|setItem)\(\s*'recon_trn_negative_v1'/.test(src),
+    false
+  );
 
   // Every consumer goes through trnGet, where the source param is forced.
   const getBody = src.slice(src.indexOf('export async function trnGet('));
