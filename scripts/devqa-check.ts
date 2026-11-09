@@ -38,6 +38,8 @@ const {
   trnNoteNegative,
   markTrnFetching,
   clearTrnFetching,
+  noteTrnPrivacy,
+  trnProfilePrivacy,
   QA_BURST_TARGETS,
   burstQaVerdict,
   TRN_PROXY_NOT_READY,
@@ -906,6 +908,32 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
     spreadSrc.includes('!trnNegativeBlocked(p.name, p.tag)'),
     true
   );
+}
+
+// --- privacy from the payload, and a byte-faithful name (task-58b) ---------
+{
+  // data.metadata.privacy is the REAL signal: verified live, resolving accounts
+  // carry 'public'. Anything else is terminal and outranks a 451 guess.
+  noteTrnPrivacy('PubUser', '1111', 'public');
+  check('privacy public -> ready', trnPlayerState('PubUser', '1111'), 'ready');
+  noteTrnPrivacy('PrivUser2', '2222', 'private');
+  check('privacy private -> private', trnPlayerState('PrivUser2', '2222'), 'private');
+  noteTrnPrivacy('LtdUser', '3333', 'limited');
+  check('privacy limited -> private', trnPlayerState('LtdUser', '3333'), 'private');
+  noteTrnPrivacy('PubUser', '1111', ' PUBLIC ');
+  check('privacy is normalised case/space only', trnProfilePrivacy('PubUser', '1111'), 'public');
+  noteTrnPrivacy('NoMeta', '4444', undefined);
+  check('absent metadata invents nothing', trnProfilePrivacy('NoMeta', '4444'), '');
+  check('absent metadata leaves state unknown', trnPlayerState('NoMeta', '4444'), 'unknown');
+
+  // The path must carry EXACTLY what Riot gave us. The user's account resolves
+  // as mazarowww#1375 and 404s as mazarooww#1375 — one letter apart — so any
+  // normalisation would silently turn a real profile into a "missing".
+  const three = trnProfilePath('mazarowww', '1375');
+  const two = trnProfilePath('mazarooww', '1375');
+  check('distinct names produce distinct paths', three !== two, true);
+  check('name is used verbatim', three, '/api/v2/valorant/standard/profile/riot/mazarowww%231375');
+  check('case is preserved in the path', trnProfilePath('AboHaMaDa', '6611').includes('AboHaMaDa'), true);
 }
 
 if (failures > 0) {

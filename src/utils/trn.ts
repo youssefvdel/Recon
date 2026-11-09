@@ -461,6 +461,11 @@ export type TrnPlayerState = 'unknown' | 'fetching' | 'ready' | 'missing' | 'pri
  *  using it would badge ordinary players as private. */
 export function trnPlayerState(name: string, tag: string): TrnPlayerState {
   const key = trnPlayerKey(name, tag);
+  // A payload that SAID what it is beats every inference. privacy is only ever
+  // recorded on a SUCCESSFUL profile fetch, so 'public' also proves data
+  // arrived — no extra memo check needed.
+  const privacy = profilePrivacy.get(key);
+  if (privacy) return privacy === 'public' ? 'ready' : 'private';
   const neg = trnNegativeKind(name, tag);
   if (neg === 'private') return 'private';
   if (neg === 'missing') return 'missing';
@@ -1305,6 +1310,27 @@ export interface TrnActStats {
   avatarUrl: string;
 }
 
+/* Real privacy signal from the payload itself: data.metadata.privacy. Verified
+ * live 2026-11-09 — resolving accounts carry 'public'. Any other value
+ * ('private', 'limited', …) is terminal evidence and outranks a 451 guess.
+ * Module state, keyed like every other player map. */
+const profilePrivacy = new Map<string, string>();
+
+/** Record the privacy a profile actually reported. Exported as a seam so the
+ *  check script can drive it without a network round trip. */
+export function noteTrnPrivacy(name: string, tag: string, privacy: unknown): void {
+  const value = String(privacy ?? '').trim().toLowerCase();
+  if (!value) return; // absent -> we learn nothing, so we store nothing
+  profilePrivacy.set(trnPlayerKey(name, tag), value);
+  // Anything that is not plainly public is terminal: never re-fire it.
+  if (value !== 'public') trnNoteNegative(name, tag, 'private');
+}
+
+/** The privacy a profile reported, or '' when we have never seen one. */
+export function trnProfilePrivacy(name: string, tag: string): string {
+  return profilePrivacy.get(trnPlayerKey(name, tag)) ?? '';
+}
+
 // Session memo for root profiles; the file cache (trn_cache.rs) is what
 // survives a restart.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1348,6 +1374,8 @@ async function getRootProfile(name: string, tag: string, drain = false, fill = f
       ttlMs: PROFILE_TTL_MS,
     });
     profileCache.set(key, { at: Date.now(), data: j });
+    // The payload's own verdict beats any inference from a status code.
+    noteTrnPrivacy(name, tag, j?.data?.metadata?.privacy);
     evictOldest(profileCache, PROFILE_CACHE_MAX, (v) => v.at);
     return j;
   })();
