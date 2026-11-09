@@ -1700,22 +1700,6 @@ export async function fetchMatchLoadouts(
  * So the lobby is never a victim, however far over cap we are.
  * ------------------------------------------------------------------ */
 
-/** Oldest-first eviction down to `cap`. Never evicts a protected key. */
-function evictOldest<K, V>(
-  map: Map<K, V>,
-  cap: number,
-  at: (v: V) => number,
-  protect?: (key: K) => boolean
-): void {
-  if (map.size <= cap) return;
-  const drop = [...map.entries()].sort((a, b) => at(a[1]) - at(b[1]));
-  for (const [k] of drop) {
-    if (map.size <= cap) break;
-    if (protect?.(k)) continue;
-    map.delete(k);
-  }
-}
-
 /** Puuids in the lobby as of the last completed poll (lower-cased). */
 let currentLobbyPuuids = new Set<string>();
 /** True for a key naming a player who is in the lobby right now. */
@@ -1738,7 +1722,7 @@ export {
 export type { PersistedRank } from '../cache/namespace';
 // Local binding for tracker's own call sites (the re-export above is for
 // external importers; a re-export does not bring the name into this scope).
-import { pruneSupersededCaches, persistLiveRank, readPersistedRank } from '../cache/namespace';
+import { evictOldest, pruneSupersededCaches, persistLiveRank, readPersistedRank } from '../cache/namespace';
 
 const liveMmrCache = new Map<
   string,

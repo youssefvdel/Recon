@@ -11,6 +11,24 @@
 // No source-module keys here any more: trn.ts prunes its own generations
 // (pruneTrnCaches), so this layer only knows prefixes it owns.
 
+/** Oldest-first eviction down to `cap`. Never evicts a protected key.
+ * Moved verbatim out of utils/tracker.ts: three caches use it, so it is a cache
+ * primitive, not one module's internal. */
+export function evictOldest<K, V>(
+  map: Map<K, V>,
+  cap: number,
+  at: (v: V) => number,
+  protect?: (key: K) => boolean
+): void {
+  if (map.size <= cap) return;
+  const drop = [...map.entries()].sort((a, b) => at(a[1]) - at(b[1]));
+  for (const [k] of drop) {
+    if (map.size <= cap) break;
+    if (protect?.(k)) continue;
+    map.delete(k);
+  }
+}
+
 /* ------------------------------------------------------------------ *
  * Quota-safe local storage
  *
