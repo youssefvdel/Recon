@@ -1,6 +1,6 @@
 [package]
 name = "recon"
-version = "0.5.0-alpha13"
+version = "0.5.0-alpha14"
 description = "Recon - Competitive Stretched Resolution & Utility"
 authors = ["Youssef Adel <contact@reconlab.app>"]
 license = "Proprietary"

@@ -40,6 +40,8 @@ const {
   clearTrnFetching,
   noteTrnPrivacy,
   trnProfilePrivacy,
+  canServeDirect,
+  setTrnHttpEnabled,
   QA_BURST_TARGETS,
   burstQaVerdict,
   TRN_PROXY_NOT_READY,
@@ -934,6 +936,40 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('distinct names produce distinct paths', three !== two, true);
   check('name is used verbatim', three, '/api/v2/valorant/standard/profile/riot/mazarowww%231375');
   check('case is preserved in the path', trnProfilePath('AboHaMaDa', '6611').includes('AboHaMaDa'), true);
+}
+
+// --- the fullscreen pause must not block the direct transport (task-60) -----
+{
+  const { readFileSync } = await import('node:fs');
+  const STD = '/api/v2/valorant/standard/profile/riot/X%23123?source=overwolf-2';
+  const OTHER = '/api/v2/valorant/other/thing';
+
+  setTrnHttpEnabled(true);
+  check('direct serves a standard path', canServeDirect(STD), true);
+  check('direct does not serve other paths', canServeDirect(OTHER), false);
+
+  // Direct available + paused -> the gate lets it through.
+  check('paused + direct available proceeds', canServeDirect(STD), true);
+
+  // Direct disabled -> edge only -> still paused.
+  setTrnHttpEnabled(false);
+  check('paused + direct disabled falls back to the edge gate', canServeDirect(STD), false);
+  setTrnHttpEnabled(true);
+
+  const src = readFileSync(new URL('../src/utils/trn.ts', import.meta.url), 'utf8');
+  const gate = src.slice(src.indexOf('if (opts?.drain !== true && (await trnProxyPaused()))'));
+  const gateBody = gate.slice(0, gate.indexOf('\n  }') + 4);
+  check('the pause gate consults the transport', /canServeDirect\(path\)/.test(gateBody), true);
+  check('the edge path still throws when paused', gateBody.includes('throw new Error(TRN_PROXY_PAUSED)'), true);
+  check('the drain exemption is intact', src.includes('opts?.drain !== true && (await trnProxyPaused())'), true);
+}
+
+// --- match-details cache key bumped for roundDetails -----------------------
+{
+  const { readFileSync } = await import('node:fs');
+  const trackerSrcV7 = readFileSync(new URL('../src/utils/tracker.ts', import.meta.url), 'utf8');
+  check('match-details cache is v7', trackerSrcV7.includes('recon_match_v7_'), true);
+  check('no v6 key remains', trackerSrcV7.includes('recon_match_v6_'), false);
 }
 
 if (failures > 0) {

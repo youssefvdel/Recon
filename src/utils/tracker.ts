@@ -1240,7 +1240,9 @@ export function parseRoundDetails(roundsSrc: unknown[]): MatchRoundDetail[] {
 }
 
 export async function fetchMatchDetailDirect(region: string, matchId: string): Promise<TrackerMatchDetail> {
-  const cacheKey = `recon_match_v6_${matchId}`;
+  // v7: roundDetails was added to the payload. A v6 entry has no round data and
+  // would render "no round data" forever, so the key bump forces one refetch.
+  const cacheKey = `recon_match_v7_${matchId}`;
   try {
     const raw = localStorage.getItem(cacheKey);
     if (raw) return JSON.parse(raw) as TrackerMatchDetail;

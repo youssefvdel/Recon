@@ -194,6 +194,13 @@ function isDirectPath(path: string): boolean {
   return path.startsWith('/api/v2/valorant/standard/');
 }
 
+/** Can this request be served without the webview? Enabled AND on a path the
+ *  direct transport covers. The fullscreen pause only applies when this is
+ *  false. Pure. */
+export function canServeDirect(path: string): boolean {
+  return isDirectPath(path) && isTrnHttpEnabled();
+}
+
 /** Test seam: drop the in-memory cache so the next read re-hits storage. */
 export function resetTrackerEnabledCache(): void {
   trnEnabled = null;
@@ -277,7 +284,7 @@ async function httpGet(path: string): Promise<string> {
  * ladder owns) is returned as-is — we only fall back on transport failure.
  */
 async function transportGet(path: string, drain: boolean): Promise<string> {
-  if (isDirectPath(path) && isTrnHttpEnabled()) {
+  if (canServeDirect(path)) {
     try {
       return await httpGet(path);
     } catch (e) {
@@ -1008,10 +1015,19 @@ export async function trnGet(
   // so it must cost nothing — no wait, no budget. (The in-fetch Rust check
   // stays as backstop for races; stragglers refund their slot below.)
   // drain exempts an already-budgeted fill running to completion.
+  // TRANSPORT-AWARE. The pause exists because the EDGE transport evaluates JS in
+  // a webview window, which must not run while VALORANT owns the screen. The
+  // DIRECT transport is reqwest inside Rust — no webview, no frames stolen — so
+  // a fullscreen match is exactly when it SHOULD still fetch. Refusing here was
+  // why the live board sat empty for the whole match.
   if (opts?.drain !== true && (await trnProxyPaused())) {
-    if (import.meta.env.DEV) trnLog('pause fail-fast', 'in-match fullscreen (no wait)');
-    report('EDGE');
-    throw new Error(TRN_PROXY_PAUSED);
+    if (canServeDirect(path)) {
+      if (import.meta.env.DEV) trnLog('pause bypassed', `direct transport path=${path.slice(0, 60)}`);
+    } else {
+      if (import.meta.env.DEV) trnLog('pause fail-fast', 'in-match fullscreen (edge only)');
+      report('EDGE');
+      throw new Error(TRN_PROXY_PAUSED);
+    }
   }
 
   const cooling = trnCooldownRemainingMs();
