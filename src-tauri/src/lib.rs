@@ -102,33 +102,6 @@ fn open_dev_window(app: tauri::AppHandle) -> Result<(), String> {
     }
 }
 
-#[tauri::command]
-fn get_windows() -> Result<Vec<window_manager::WindowInfo>, String> {
-    Ok(window_manager::list_visible_windows())
-}
-
-#[tauri::command]
-fn set_auto_borderless(enabled: bool) -> Result<(), String> {
-    AUTO_BORDERLESS_ENABLED.store(enabled, Ordering::Relaxed);
-    crate::settings::set_auto_borderless(enabled);
-    Ok(())
-}
-
-#[tauri::command]
-fn get_auto_borderless() -> Result<bool, String> {
-    Ok(AUTO_BORDERLESS_ENABLED.load(Ordering::Relaxed))
-}
-
-#[tauri::command]
-fn make_window_borderless(hwnd: isize) -> Result<String, String> {
-    window_manager::make_borderless(hwnd)
-}
-
-#[tauri::command]
-fn restore_window_framed(hwnd: isize) -> Result<String, String> {
-    window_manager::restore_window(hwnd)
-}
-
 #[cfg(target_os = "windows")]
 #[repr(C)]
 struct PROCESSENTRY32W {
@@ -837,11 +810,11 @@ pub fn run() {
             commands::gpu::set_gpu_setting,
             commands::gpu::open_gpu_panel,
             commands::gpu::auto_configure_gpu_scaling,
-            get_windows,
-            set_auto_borderless,
-            get_auto_borderless,
-            make_window_borderless,
-            restore_window_framed,
+            commands::borderless::get_windows,
+            commands::borderless::set_auto_borderless,
+            commands::borderless::get_auto_borderless,
+            commands::borderless::make_window_borderless,
+            commands::borderless::restore_window_framed,
             win::overlay::show_overlay,
             win::overlay::hide_overlay,
             win::overlay::set_overlay_clickthrough,
