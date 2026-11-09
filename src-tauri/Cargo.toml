@@ -1,6 +1,6 @@
 [package]
 name = "recon"
-version = "0.5.0-alpha14"
+version = "0.5.0-alpha15"
 description = "Recon - Competitive Stretched Resolution & Utility"
 authors = ["Youssef Adel <contact@reconlab.app>"]
 license = "Proprietary"
@@ -21,6 +21,8 @@ tauri-build = { version = "2.6.3", features = [] }
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+# Updater version ordering (alpha9 < alpha10); see src/updater.rs.
+semver = "1"
 log = "0.4"
 winreg = "0.52"
 tauri = { version = "2.11.3", features = ["tray-icon"] }
