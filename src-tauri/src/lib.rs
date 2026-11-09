@@ -27,6 +27,7 @@ pub(crate) use state::{
     AppState, DisplayInfo, AUTO_BORDERLESS_ENABLED, MAIN_WINDOW_SIZE_LOGICAL, OVERLAY_AVAILABLE,
     OVERLAY_EDIT_WATCHDOG_MS, OVERLAY_PRESENT, OVERLAY_WINDOWED,
 };
+pub(crate) use win::tray::build_tray;
 pub(crate) use win::overlay::{
     build_overlay_window, force_overlay_edit_mode_off, get_overlay_edit_mode, get_overlay_monitor,
     hide_overlay, is_overlay_visible, is_tab_down, set_overlay_clickthrough, set_overlay_edit_mode,
@@ -792,7 +793,7 @@ fn overlay_unavailable_message(detail: &str) -> String {
     )
 }
 
-fn notify_overlay_unavailable(detail: &str) {
+pub(crate) fn notify_overlay_unavailable(detail: &str) {
     log::warn!("[overlay] unavailable: {detail}");
     show_message_box(
         "Recon - HUD unavailable",
@@ -1215,55 +1216,7 @@ pub fn run() {
                 }
             }
 
-            // Create System Tray Menu
-            let show_i = MenuItem::with_id(app, "show", "Show Recon", true, None::<&str>)?;
-            let hud_i = MenuItem::with_id(app, "hud", "Show HUD", true, None::<&str>)?;
-            let quit_i = MenuItem::with_id(app, "quit", "Quit Recon", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &hud_i, &quit_i])?;
-
-            if let Some(icon) = app.default_window_icon() {
-                let _tray = TrayIconBuilder::new()
-                    .icon(icon.clone())
-                    .menu(&menu)
-                    .show_menu_on_left_click(false)
-                    .tooltip("Recon • Valorant Companion")
-                    .on_menu_event(|app, event| match event.id.as_ref() {
-                        "quit" => {
-                            app.exit(0);
-                        }
-                        "show" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.unminimize();
-                                let _ = window.set_focus();
-                            }
-                        }
-                        // An unavailable HUD used to fail silently here. The
-                        // player gets the reason instead, once per click.
-                        "hud" => {
-                            if let Err(e) = show_overlay(app.clone()) {
-                                notify_overlay_unavailable(&e);
-                            }
-                        }
-                        _ => {}
-                    })
-                    .on_tray_icon_event(|tray, event| {
-                        if let TrayIconEvent::Click {
-                            button: MouseButton::Left,
-                            button_state: MouseButtonState::Up,
-                            ..
-                        } = event
-                        {
-                            let app = tray.app_handle();
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.unminimize();
-                                let _ = window.set_focus();
-                            }
-                        }
-                    })
-                    .build(app)?;
-            }
+            build_tray(app)?;
 
             Ok(())
         })
