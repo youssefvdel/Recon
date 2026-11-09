@@ -110,6 +110,8 @@ check('acs alone counts as fetched', playerNeedsTrnStats(acsOnly) === false);
 
 // --- Wiring (source text): concurrent fill on top of the untouched gate ---
 const tracker = await Bun.file('src/utils/tracker.ts').text();
+// The fill moved to live/fill.ts (seam 4, stage 4).
+const fillSrc = await Bun.file('src/live/fill.ts').text();
 // The persisted live-stats self-heal moved to live/playerStats.ts (step 2b).
 const playerStats = await Bun.file('src/live/playerStats.ts').text();
 const trn = await Bun.file('src/utils/trn.ts').text();
@@ -118,48 +120,70 @@ const cacheRs = (await Promise.all(
     .map((f) => Bun.file(f).text()),
 )).join('\n');
 
-check('concurrent fill fans out per player', tracker.includes('}, trnFillJitterMs());'), true);
+check('concurrent fill fans out per player', fillSrc.includes('}, trnFillJitterMs());'), true);
 check('no 6s serialization left', !tracker.includes('TRN_SPREAD_MS') && !tracker.includes('TRN_SPREAD_FIRST_MS') && !tracker.includes('pumpTrnSpread'), true);
 check('no setInterval overlap in tracker', !tracker.includes('setInterval'));
-check('fill keyed per lobby (match survives the flip)', tracker.includes('const key = matchId;'), true);
+check('fill keyed per lobby (match survives the flip)', fillSrc.includes('const key = matchId;'), true);
 check('no per-phase key (budget is per lobby ≤10)', !tracker.includes('`${matchId}:${phase}`'), true);
-check('stale firing never fetches old lobby', tracker.includes('stale firings must never fetch for the old lobby'), true);
-check('fill stops when polls go stale', tracker.includes('TRN_SPREAD_STALE_MS'), true);
+check('stale firing never fetches old lobby', fillSrc.includes('stale firings must never fetch for the old lobby'), true);
+check('fill stops when polls go stale', fillSrc.includes('TRN_SPREAD_STALE_MS'), true);
 check('heal skips flagged deliberate negatives', playerStats.includes('!entry.negative &&'), true);
 // Contract changed after the live-match incident: a hidden window must not stop
 // a live match's fill (the overlay is the surface showing it). Only idle work
 // parks while hidden.
-check('hidden window pauses idle fills only',
-  tracker.includes('function skipHiddenWork()') && tracker.includes("return getTrnMatchPhase() === 'idle';"),
-  true);
-check('cooldown fail-fast touches no network', tracker.includes('touch no network during cooldown'), true);
+// Contract changed after the live-match incident: a hidden window must not stop
+// a live match's fill, because the overlay is the surface showing that data.
+// Driven behaviourally rather than by grep — this rule has a story, so the
+// check states it in words: idle work parks, a live match does not.
+{
+  const { skipHiddenWork } = await import('../src/live/fillPolicy.ts');
+  const { setTrnMatchPhase } = await import('../src/utils/trn.ts');
+  const g = globalThis as unknown as { document?: { hidden: boolean } };
+  const hadDoc = 'document' in g;
+  const prevDoc = g.document;
+  try {
+    g.document = { hidden: true };
+    setTrnMatchPhase('idle');
+    check('a hidden window parks idle work', skipHiddenWork(), true);
+    setTrnMatchPhase('coregame');
+    check('a minimised window does NOT stop a live match fill', skipHiddenWork() === false, { phase: 'coregame' });
+    g.document = { hidden: false };
+    check('a visible window never parks, whatever the phase', skipHiddenWork() === false, { hidden: false });
+  } finally {
+    if (hadDoc) g.document = prevDoc;
+    else delete g.document;
+    setTrnMatchPhase('idle');
+  }
+}
+check('cooldown fail-fast touches no network', fillSrc.includes('touch no network during cooldown'), true);
 // The manual path calls fetchTrnStatsNow directly (not through the fill) and
 // never marks it as a drain: a user refresh is a NEW request, not a budgeted
 // carry-over. Asserted on the argument OBJECT, so the call shape can evolve.
 const manualCall = /fetchTrnStatsNow\(p\.puuid, realName, realTag,\s*\{([^}]*)\}\)/.exec(tracker);
 check('manual refresh bypasses the fill', !!manualCall && !manualCall[1].includes('drain'), true);
-check('manual immediate respects the mode budget', tracker.includes('forceRefresh && trnSpreadSpent < trnSpreadBudget(isDeathmatch)'), true);
-check('budget spent counted on fire', tracker.includes('trnSpreadSpent++'), true);
-check('budget resets on match change (per-lobby budget)', tracker.includes('trnSpreadSpent = 0'), true);
-check('budget caps the fill (own-team-first drops enemies)', tracker.includes('budget - trnSpreadSpent'), true);
-check('fill re-checks need at fire time', tracker.includes('!playerNeedsTrnStats(puuid)'), true);
-check('dedup floor still guards immediate path', tracker.includes('trnInFlightLive.has(inFlightKey)'), true);
-check('fill skips in-flight players without spending', tracker.includes('trnInFlightLive.has(puuid.toLowerCase())'), true);
+// The CALL is in tracker (the poll), the decision itself lives in fill.ts.
+check('manual immediate respects the mode budget', tracker.includes('trySpendManualRefresh(isDeathmatch)'), true);
+check('budget spent counted on fire', fillSrc.includes('trnSpreadSpent++'), true);
+check('budget resets on match change (per-lobby budget)', fillSrc.includes('trnSpreadSpent = 0'), true);
+check('budget caps the fill (own-team-first drops enemies)', fillSrc.includes('budget - trnSpreadSpent'), true);
+check('fill re-checks need at fire time', fillSrc.includes('!playerNeedsTrnStats(puuid)'), true);
+check('dedup floor still guards immediate path', fillSrc.includes('trnInFlightLive.has(inFlightKey)'), true);
+check('fill skips in-flight players without spending', fillSrc.includes('trnInFlightLive.has(puuid.toLowerCase())'), true);
 
 // --- Drain split: dispatched fill finishes across the flip, new fills gate ---
-check('new fills gate at enqueue while paused', tracker.includes('if (await trnProxyPaused())'), true);
-check('dispatched firings skip the pause check by design', tracker.includes('No paused check by'), true);
+check('new fills gate at enqueue while paused', fillSrc.includes('if (await trnProxyPaused())'), true);
+check('dispatched firings skip the pause check by design', fillSrc.includes('No paused check by'), true);
 // The fill's firing must actually reach the transport as a drain — proven on
 // the argument object, not on a positional boolean.
-const fillCall = /fetchTrnStatsNow\(puuid, name, tag,\s*\{([^}]*)\}\)/.exec(tracker);
+const fillCall = /fetchTrnStatsNow\(puuid, name, tag,\s*\{([^}]*)\}\)/.exec(fillSrc);
 check('dispatched firings carry drain', !!fillCall && fillCall[1].includes('drain: true'), true);
 check('drain reaches act stats', trn.includes('trnDrainFor(name, tag, drain) ? { drain: true } : {}'), true);
 check('drain skips only the pause pre-check', trn.includes('opts?.drain !== true && (await trnProxyPaused())'), true);
 
 // --- Atomic job: descendants inherit drain until settle, then re-gate ---
-check('dispatching fill opens one job', tracker.includes('openTrnDrainJob(players.map'), true);
-check('quiesced lobby settles its job', tracker.includes('closeTrnDrainJob(trnDrainGen)'), true);
-check('settle is owner- and match-scoped', tracker.includes('matchId === trnDrainMatchId'), true);
+check('dispatching fill opens one job', fillSrc.includes('openTrnDrainJob(players.map'), true);
+check('quiesced lobby settles its job', fillSrc.includes('closeTrnDrainJob(trnDrainGen)'), true);
+check('settle is owner- and match-scoped', fillSrc.includes('matchId !== trnDrainMatchId'), true);
 check('agents inherit the job token', trn.includes('trnDrainFor(name, tag, opts?.drain === true)'), true);
 
 // --- Phase warming: Riot-local presences correct the hint before dispatch ---
@@ -173,11 +197,14 @@ check('loop trims whitespace', presenceLoopToPhase('  INGAME ') === 'coregame', 
 check('menus warms nothing', presenceLoopToPhase('MENUS') === null, { got: presenceLoopToPhase('MENUS') });
 check('empty warms nothing', presenceLoopToPhase('') === null, { got: presenceLoopToPhase('') });
 check('garbage warms nothing', presenceLoopToPhase('bogus') === null, { got: presenceLoopToPhase('bogus') });
-check('warm helper exists', tracker.includes('async function warmTrnPhaseFromPresence'), true);
-check('warm reads Riot-local presences', tracker.includes("invoke<string>('local_presences')"), true);
-check('first fill awaits the warm before dispatch', tracker.includes('await warmTrnPhaseFromPresence()'), true);
-check('warm stamps positive signals only', tracker.includes('if (warmed)'), true);
-check('enqueue awaits the warm (async fill)', tracker.includes('async function enqueueTrnSpread'), true);
+// The warm helper moved to sources/presence.ts (sources split). Read it
+// there; the fill still awaits it, which the next assertions pin on tracker.
+const presenceSrc = await Bun.file('src/sources/presence.ts').text();
+check('warm helper exists', presenceSrc.includes('export async function warmTrnPhaseFromPresence'), true);
+check('warm reads Riot-local presences', presenceSrc.includes("invoke<string>('local_presences')"), true);
+check('first fill awaits the warm before dispatch', fillSrc.includes('await warmTrnPhaseFromPresence()'), true);
+check('warm stamps positive signals only', presenceSrc.includes('if (warmed)'), true);
+check('enqueue awaits the warm (async fill)', fillSrc.includes('async function enqueueTrnSpread'), true);
 
 // --- Untouched floors: serial gate, cooldown ladder, caches ---
 check('TRN gap floor still 6000ms', trn.includes('TRN_GAP_MIN_MS = 6000'), true);
@@ -267,7 +294,6 @@ check('memo only caches 2xx', proxyRs.includes('if let Ok(body) = &out'), true);
 {
   const { readFileSync } = await import('node:fs');
   const trnSrc = readFileSync(new URL('../src/utils/trn.ts', import.meta.url), 'utf8');
-  const trackerSrc = readFileSync(new URL('../src/utils/tracker.ts', import.meta.url), 'utf8');
 
   check('trnGet accepts a fill option', trnSrc.includes('fill?: boolean'), true);
   check(
@@ -296,8 +322,8 @@ check('memo only caches 2xx', proxyRs.includes('if let Ok(body) = &out'), true);
   );
   // Only the lobby fill opts in.
   // Exactly two: the fill dispatch, and the TRN fallback forwarding ctx.fill.
-  check('fill: true appears only at the fill call and its forward', (trackerSrc.match(/fill: true/g) ?? []).length === 2, true);
-  check('the fill dispatch sets it', trackerSrc.includes('{ ...ctx, drain: true, fill: true }'), true);
+  check('fill: true appears only at the fill call and its forward', (fillSrc.match(/fill: true/g) ?? []).length === 2, true);
+  check('the fill dispatch sets it', fillSrc.includes('{ ...ctx, drain: true, fill: true }'), true);
 }
 
 // --- Two visible waves: own squad first, theirs second ---
@@ -332,6 +358,59 @@ check('memo only caches 2xx', proxyRs.includes('if let Ok(body) = &out'), true);
   // A split we cannot resolve is treated as own-team (never dropped).
   const unknown = [{ puuid: 'u', name: 'u', tag: 'x', mine: true }];
   check('unknown team lands in wave 1', splitFillWaves(unknown)[0].length === 1, true);
+}
+
+// --- the fill's three named decisions (seam 4) -----------------------------
+// These encode timing, so they are driven with plain state rather than grepped.
+{
+  const fillMod = await import('../src/live/fill.ts');
+  const {
+    trySpendManualRefresh,
+    settleDrainIfQuiesced,
+    noteLivePollAt,
+    isLivePollStale,
+    __resetFillStateForCheck,
+    __seedDrainForCheck,
+  } = fillMod;
+
+  // 1. check-and-increment is ONE answer: 10 firings, then refusals that do
+  //    not quietly spend.
+  __resetFillStateForCheck();
+  let granted = 0;
+  for (let i = 0; i < 12; i++) if (trySpendManualRefresh(false)) granted++;
+  check('manual refresh spends exactly the lobby budget', granted === 10, { granted });
+  check('a spent budget refuses the next refresh', trySpendManualRefresh(false) === false, true);
+  check('a refusal does not increment the budget', trySpendManualRefresh(false) === false, true);
+
+  // 2. settle only when we own the job AND the lobby matches.
+  __resetFillStateForCheck();
+  check('a lobby with no open job settles nothing', settleDrainIfQuiesced('m1') === false, true);
+  __seedDrainForCheck(7, 'm1');
+  check('a stale poll for another match settles nothing', settleDrainIfQuiesced('m2') === false, true);
+  check('the owning lobby settles its job', settleDrainIfQuiesced('m1') === true, true);
+  check('settling resets the owner', settleDrainIfQuiesced('m1') === false, true);
+
+  // 3. the poll stamp the fill reads back (a stale one makes it skip the lobby).
+  __resetFillStateForCheck();
+  check('no poll yet reads as stale', isLivePollStale() === true, true);
+  noteLivePollAt();
+  check('a fresh poll reads as live', isLivePollStale() === false, true);
+}
+
+// --- two visible waves, in words (the incident this rule exists for) -------
+{
+  const { splitFillWaves } = await import('../src/live/merge.ts');
+  const ten = [
+    ...Array.from({ length: 5 }, (_, i) => ({ puuid: `own${i}`, name: `own${i}`, tag: 'x', mine: true })),
+    ...Array.from({ length: 5 }, (_, i) => ({ puuid: `enemy${i}`, name: `enemy${i}`, tag: 'x', mine: false })),
+  ];
+  const [wave1, wave2] = splitFillWaves(ten);
+  check('ten players produce exactly two waves of five', wave1.length === 5 && wave2.length === 5, {
+    wave1: wave1.length,
+    wave2: wave2.length,
+  });
+  check('wave 1 is own team only', wave1.every((p: { mine: boolean }) => p.mine), true);
+  check('the enemy never fires before our own team', wave2.every((p: { mine: boolean }) => !p.mine), true);
 }
 
 if (failures > 0) {

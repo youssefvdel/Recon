@@ -335,6 +335,8 @@ setTrnMatchPhase('idle');
 check('phase hint round-trips idle', getTrnMatchPhase(), 'idle');
 setTrnMatchPhase('');
 const trackerSrc = await Bun.file('src/utils/tracker.ts').text();
+// The fill moved to live/fill.ts (seam 4, stage 4).
+const fillSrc = await Bun.file('src/live/fill.ts').text();
 check('edgeGet sends the phase hint', trnSrc.includes('phase: trnMatchPhase,'), true);
 check('poll loop stamps live phase', trackerSrc.includes('setTrnMatchPhase(phase)'), true);
 check('idle path stamps idle (no stale coregame pause)', trackerSrc.includes("setTrnMatchPhase('idle')"), true);
@@ -404,14 +406,14 @@ check('gate wait logged (ms)', trnSrc.includes("trnLog('gate waited'"), true);
 check('cooldown fail-fast logged', trnSrc.includes("trnLog('cooldown fail-fast'"), true);
 check('transport + outcome logged', trnSrc.includes('transport=EDGE status=ok elapsed='), true);
 check('fallback reason logged', trnSrc.includes("trnLog('fallback'"), true);
-check('fill start logged (count, budget)', trackerSrc.includes("if (import.meta.env.DEV) trnLog('fill start'"), true);
+check('fill start logged (count, budget)', fillSrc.includes("if (import.meta.env.DEV) trnLog('fill start'"), true);
 // The dispatch line now reports the two waves AND the budget; pin both facts
 // rather than the old single-line literal.
 check(
   'fill dispatched logged (waves + budget)',
-  trackerSrc.includes("'fill dispatched'") &&
-    trackerSrc.includes('wave1=${wave1.length} wave2=${wave2.length}') &&
-    trackerSrc.includes('budget=${trnSpreadSpent}/${budget}'),
+  fillSrc.includes("'fill dispatched'") &&
+    fillSrc.includes('wave1=${wave1.length} wave2=${wave2.length}') &&
+    fillSrc.includes('budget=${trnSpreadSpent}/${budget}'),
   true
 );
 check('rust trace macro exists', proxySrc.includes('macro_rules! trn_trace'), true);
@@ -486,11 +488,11 @@ check('rust fetch takes the drain token', proxySrc.includes('drain: Option<bool>
 check('rust skips pause on drain', proxySrc.includes('if drain {'), true);
 check(
   'new fills gate at enqueue (nothing fresh while paused)',
-  trackerSrc.indexOf('if (await trnProxyPaused())') !== -1 &&
-    trackerSrc.indexOf('if (await trnProxyPaused())') < trackerSrc.indexOf('const budgeted = orderSpreadQueue'),
+  fillSrc.indexOf('if (await trnProxyPaused())') !== -1 &&
+    fillSrc.indexOf('if (await trnProxyPaused())') < fillSrc.indexOf('const budgeted = orderSpreadQueue'),
   true
 );
-const devqaFillCall = /fetchTrnStatsNow\(puuid, name, tag,\s*\{([^}]*)\}\)/.exec(trackerSrc);
+const devqaFillCall = /fetchTrnStatsNow\(puuid, name, tag,\s*\{([^}]*)\}\)/.exec(fillSrc);
 check('dispatched firings carry drain', !!devqaFillCall && devqaFillCall[1].includes('drain: true'), true);
 
 // --- atomic fill job: descendants inherit drain until settle, then re-gate ---
@@ -516,9 +518,9 @@ check(
   true
 );
 check('the fill-capable helper forwards fill', trnSrc.includes('opts?.fill === true'), true);
-check('fill opens one job per dispatching lobby', trackerSrc.includes('openTrnDrainJob(players.map'), true);
-check('quiesced lobby settles its own job', trackerSrc.includes('closeTrnDrainJob(trnDrainGen)'), true);
-check('stale polls settle nothing', trackerSrc.includes('matchId === trnDrainMatchId'), true);
+check('fill opens one job per dispatching lobby', fillSrc.includes('openTrnDrainJob(players.map'), true);
+check('quiesced lobby settles its own job', fillSrc.includes('closeTrnDrainJob(trnDrainGen)'), true);
+check('stale polls settle nothing', fillSrc.includes('matchId !== trnDrainMatchId'), true);
 
 // --- dead-network breaker: consecutive status-0 deaths go quiet ---
 // Live proof: every proxy fetch died pre-status ("in-page fetch failed",
@@ -540,7 +542,7 @@ check(
 );
 check('success resets the streak', trnSrc.includes('An answered request proves the path is alive — reset the dead breaker.'), true);
 check('streak engages quiet', trnSrc.includes('trnDeadQuietUntil = Date.now() + TRN_DEAD_QUIET_MS'), true);
-check('fill spends no budget while quiet', trackerSrc.includes('trnCooldownRemainingMs() > 0 || isTrnDeadQuiet()'), true);
+check('fill spends no budget while quiet', fillSrc.includes('trnCooldownRemainingMs() > 0 || isTrnDeadQuiet()'), true);
 
 // --- both 451 flavors count as private (root + segments) ---
 // Live proof: CollectorResultStatus (profile) was swallowed by `.catch(() => null)`
@@ -577,8 +579,8 @@ check(
   trnSrc.split('trnNegativeBlocked(name, tag)').length - 1 >= 6,
   true
 );
-check('fill writer notes privates centrally', trackerSrc.includes("trnNoteNegative(realName, realTag, 'private')"), true);
-check('fill writer notes missing centrally', trackerSrc.includes("trnNoteNegative(realName, realTag, 'missing')"), true);
+check('fill writer notes privates centrally', fillSrc.includes("trnNoteNegative(realName, realTag, 'private')"), true);
+check('fill writer notes missing centrally', fillSrc.includes("trnNoteNegative(realName, realTag, 'missing')"), true);
 
 // --- central writer: any path's outcome records, parsed from the path ---
 // Live proof: 451s kept arriving minutes apart because only the fill catch
@@ -887,7 +889,6 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
 
 // --- a 404 is "no profile", never "still fetching" (task-58) ----------------
 {
-  const { readFileSync } = await import('node:fs');
   const P = '/api/v2/valorant/standard/profile/riot/TestUser%231234?source=overwolf-2';
 
   // The direct transport reports 404 as TRN_NO_DATA, not "HTTP 404". Matching
@@ -920,10 +921,9 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('budget-relevant terminal states are blocked', trnNegativeBlocked('Done', '0002'), true);
 
   // The fill must not spend budget on a terminal negative.
-  const spreadSrc = readFileSync(new URL('../src/utils/tracker.ts', import.meta.url), 'utf8');
   check(
     'fill skips negative-cached players',
-    spreadSrc.includes('!trnNegativeBlocked(p.name, p.tag)'),
+    fillSrc.includes('!trnNegativeBlocked(p.name, p.tag)'),
     true
   );
 }
