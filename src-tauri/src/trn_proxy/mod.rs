@@ -82,7 +82,7 @@ mod result;
 mod readiness;
 
 pub use constants::{PROXY_LABEL, VERIFY_LABEL};
-pub use trace::{TRACE_RING_CAP, TraceLine, TrnTraceLog};
+pub use trace::{TraceLine, TrnTraceLog};
 
 
 
