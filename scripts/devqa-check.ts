@@ -32,6 +32,12 @@ const {
   TRN_UA_MAJOR,
   trnGet,
   trnProfilePath,
+  noteNegativeFromPath,
+  trnNegativeBlocked,
+  trnPlayerState,
+  trnNoteNegative,
+  markTrnFetching,
+  clearTrnFetching,
   QA_BURST_TARGETS,
   burstQaVerdict,
   TRN_PROXY_NOT_READY,
@@ -46,11 +52,8 @@ const {
   trnDrainFor,
   isTrnNetDead,
   isTrnPrivateError,
-  trnNoteNegative,
-  trnNegativeBlocked,
   trnNegativeKind,
   trnPlayerFromPath,
-  noteNegativeFromPath,
   noteTrnPathFailed,
   trnPathCooling,
   trnPlayerKey,
@@ -860,6 +863,49 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('unknown rejections fall through to edge', src.includes("trnLog('falling back to edge'"), true);
   // The old denylist must be gone: no literal 'not found' match.
   check('no brittle not-found string match', src.includes("msg.includes('not found')"), false);
+}
+
+// --- a 404 is "no profile", never "still fetching" (task-58) ----------------
+{
+  const { readFileSync } = await import('node:fs');
+  const P = '/api/v2/valorant/standard/profile/riot/TestUser%231234?source=overwolf-2';
+
+  // The direct transport reports 404 as TRN_NO_DATA, not "HTTP 404". Matching
+  // only the old shape is why 8 of 10 real players were re-fired every poll.
+  check('edge 404 lands as missing', noteNegativeFromPath(P, 'HTTP 404: CollectorResultStatus::NotFound'), 'missing');
+  check('direct TRN_NO_DATA lands as missing', noteNegativeFromPath(P, 'TRN_NO_DATA'), 'missing');
+  check('missing is cached', trnNegativeBlocked('TestUser', '1234'), true);
+  check('a cached miss reads as missing', trnPlayerState('TestUser', '1234'), 'missing');
+  // A 404 is NEVER upgraded to private: Tracker cannot tell an unindexed
+  // account from a private one, and Incognito is about the NAME, not the data.
+  check('404 stays missing, never private', trnPlayerState('TestUser', '1234'), 'missing');
+
+  // 451 / TRN_PRIVATE is terminal and distinct.
+  const PR = '/api/v2/valorant/standard/profile/riot/PrivUser%239999';
+  check('TRN_PRIVATE lands as private', noteNegativeFromPath(PR, 'TRN_PRIVATE profile is private on tracker.gg'), 'private');
+  check('private reads as private', trnPlayerState('PrivUser', '9999'), 'private');
+  // The selector body must not consult local Riot at all (the comment above it
+  // explains WHY incognito is rejected, so only the function body is scanned).
+  const sel = trnSrc.slice(trnSrc.indexOf('export function trnPlayerState'));
+  const selBody = sel.slice(0, sel.indexOf('\n}') + 2);
+  check('selector body has no incognito tie-break', /Incognito|hasRank|lobbyLocalSignals|local\?/.test(selBody), false);
+
+  // The other two states.
+  check('nothing known -> unknown', trnPlayerState('Nobody', '0000'), 'unknown');
+  markTrnFetching('Fly', '0001');
+  check('in flight -> fetching', trnPlayerState('Fly', '0001'), 'fetching');
+  clearTrnFetching('Fly', '0001');
+  check('cleared -> back to unknown', trnPlayerState('Fly', '0001'), 'unknown');
+  trnNoteNegative('Done', '0002', 'missing');
+  check('budget-relevant terminal states are blocked', trnNegativeBlocked('Done', '0002'), true);
+
+  // The fill must not spend budget on a terminal negative.
+  const spreadSrc = readFileSync(new URL('../src/utils/tracker.ts', import.meta.url), 'utf8');
+  check(
+    'fill skips negative-cached players',
+    spreadSrc.includes('!trnNegativeBlocked(p.name, p.tag)'),
+    true
+  );
 }
 
 if (failures > 0) {

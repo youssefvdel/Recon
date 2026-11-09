@@ -3,7 +3,7 @@ import { emit } from '@tauri-apps/api/event';
 import type { LiveMatchPlayer, LiveMatchState, LocalRiotAccount, MatchRoundDetail, MatchRoundPlayer, TrackerDuel, TrackerMatchDetail, TrackerMmrPoint, TrackerPlayer, TrackerProfile } from '../types';
 import { isTauri } from './ipc';
 import { aggregateActStats, type ActAggregate, type ActMatchSample } from './actStats';
-import { setTrnMatchPhase, setTrnLobbyKey, getTrnMatchPhase, trnLog, trnProxyPaused, openTrnDrainJob, closeTrnDrainJob, isTrnPrivateError, trnNoteNegative } from './trn';
+import { setTrnMatchPhase, setTrnLobbyKey, getTrnMatchPhase, trnLog, trnProxyPaused, openTrnDrainJob, closeTrnDrainJob, isTrnPrivateError, trnNoteNegative, trnNegativeBlocked, markTrnFetching, clearTrnFetching } from './trn';
 import { getDevMockMatch, isDevNoClient } from './devTools';
 import { extractGamePodId, parseGamePodId } from './matchServer';
 import { assignPartyColors } from './playerDisplay';
@@ -2378,7 +2378,14 @@ async function enqueueTrnSpread(
   // below still pace the wire; budget is spent only on fire.
   if (import.meta.env.DEV) trnLog('fill start', `phase=${phase} candidates=${players.length} budget=${trnSpreadSpent}/${budget}`);
   const budgeted = orderSpreadQueue(players)
-    .filter((p) => !trnInFlightLive.has(p.puuid.toLowerCase()) && playerNeedsTrnStats(p.puuid))
+    .filter(
+      (p) =>
+        !trnInFlightLive.has(p.puuid.toLowerCase()) &&
+        playerNeedsTrnStats(p.puuid) &&
+        // A proven terminal negative (404 missing / 451 private) must never
+        // spend budget: that is what kept the board reading "fetching".
+        !trnNegativeBlocked(p.name, p.tag)
+    )
     .slice(0, Math.max(0, budget - trnSpreadSpent));
   // Atomic job: everything dispatched here — plus descendant detail calls
   // those players fan out with no explicit token — inherits drain until the
@@ -2704,6 +2711,8 @@ function fetchTrnStatsNow(
   const inFlightKey = puuid.toLowerCase();
   if (trnInFlightLive.has(inFlightKey)) return;
   trnInFlightLive.add(inFlightKey);
+  // Same fact for the UI: trn.trnPlayerState reads this set to say "fetching".
+  markTrnFetching(realName, realTag);
 
   // 1. LOCAL FIRST. Rank/RR always; act K/D + ACS + win% when the act is
   //    small enough to be covered completely. Every field written is one Riot
@@ -2841,6 +2850,7 @@ function fetchTrnStatsNow(
     })
     .finally(() => {
       trnInFlightLive.delete(inFlightKey);
+      clearTrnFetching(realName, realTag);
     });
 }
 

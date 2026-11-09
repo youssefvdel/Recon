@@ -423,6 +423,53 @@ export function trnNegativeKind(name: string, tag: string): 'private' | 'missing
   }
 }
 
+/** Players with a request genuinely in flight right now, keyed like every
+ *  other player map. Populated by tracker.ts at the one dispatch site; read
+ *  only by `trnPlayerState`. */
+const trnFetching = new Set<string>();
+
+/** Mark a player's fetch as started. */
+export function markTrnFetching(name: string, tag: string): void {
+  trnFetching.add(trnPlayerKey(name, tag));
+}
+
+/** Clear it, whatever the outcome. */
+export function clearTrnFetching(name: string, tag: string): void {
+  trnFetching.delete(trnPlayerKey(name, tag));
+}
+
+/** What the UI can honestly say about one player's Tracker Network data.
+ *  PURE — reads the negative registry, the in-flight set and the profile memo;
+ *  no network, no timers, safe to call per row per render. */
+export type TrnPlayerState = 'unknown' | 'fetching' | 'ready' | 'missing' | 'private';
+
+/** What the UI can honestly say about one player's Tracker Network data.
+ *  PURE — reads the negative registry, the in-flight set and the profile memo.
+ *  No network, no timers, no writes.
+ *
+ *  DECISION TABLE — Tracker is the only witness:
+ *    451 / TRN_PRIVATE / explicit privacy code   -> private  (terminal)
+ *    plain 404 / TRN_NO_DATA                     -> missing  (terminal, neutral:
+ *        an unindexed account and a private one look identical from here, so we
+ *        never guess — the UI copy is "no Tracker profile")
+ *    profile memo fresh                          -> ready
+ *    request in flight                           -> fetching
+ *    otherwise                                   -> unknown
+ *
+ *  Deliberately NO local-Riot tie-break: PlayerIdentity.Incognito is Riot
+ *  hiding a NAME in game (streamer mode) and says nothing about Tracker, so
+ *  using it would badge ordinary players as private. */
+export function trnPlayerState(name: string, tag: string): TrnPlayerState {
+  const key = trnPlayerKey(name, tag);
+  const neg = trnNegativeKind(name, tag);
+  if (neg === 'private') return 'private';
+  if (neg === 'missing') return 'missing';
+  if (trnFetching.has(key)) return 'fetching';
+  const hit = profileCache.get(key);
+  if (hit && Date.now() - hit.at < PROFILE_TTL_MS) return 'ready';
+  return 'unknown';
+}
+
 /** True while a negative backoff covers this player (lazy-evicts expired). */
 export function trnNegativeBlocked(name: string, tag: string): boolean {
   return trnNegativeKind(name, tag) !== null;
@@ -449,7 +496,15 @@ export function trnPlayerFromPath(path: string): { name: string; tag: string } |
  *  the kind noted (for tests/logs), null when nothing provable. */
 export function noteNegativeFromPath(path: string, msg: unknown): 'private' | 'missing' | null {
   const s = typeof msg === 'string' ? msg : msg instanceof Error ? msg.message : String(msg ?? '');
-  const kind = isTrnPrivateError(s) ? 'private' : s.includes('HTTP 404') ? 'missing' : null;
+  // A 404 reaches us in TWO shapes now: `HTTP 404` from the edge transport, and
+  // `TRN_NO_DATA` from the direct one. Matching only the first is why 8 of 10
+  // players were re-fired every poll instead of being marked missing.
+  const kind =
+    isTrnPrivateError(s) || s.includes(TRN_PRIVATE)
+      ? 'private'
+      : s.includes('HTTP 404') || /\bTRN_NO_DATA\b/.test(s)
+        ? 'missing'
+        : null;
   if (!kind) return null;
   const who = trnPlayerFromPath(path);
   if (!who) return null;

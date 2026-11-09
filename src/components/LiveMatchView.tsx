@@ -37,6 +37,7 @@ import { ScoreBadge, scoreTier } from './ScoreBadge';
 import { ServerChip } from './ServerChip';
 import { StatValue } from './StatValue';
 import { formatKd, formatPct } from '../utils/format';
+import { trnPlayerState, type TrnPlayerState } from '../utils/trn';
 import {
   getFlagUrl,
   getCountryName,
@@ -50,13 +51,16 @@ import {
 import { isTauri, openExternalUrl } from '../utils/ipc';
 import { listen } from '@tauri-apps/api/event';
 
-/* Dash / pending cell wording for the LOCAL-Riot path. The shared TRN_*
- * constants still promise tracker.gg, which stopped serving data on
- * 2026-11-02; these say what actually happened to the cell. */
-const LIVE_PENDING_TIP = 'Reading from the local Riot client…';
-const LIVE_UNAVAILABLE_TIP = 'Not read yet — the local Riot client has no value for this cell';
-const LIVE_PRIVATE_TIP = 'This player hides their profile from Riot';
-const TS_RETIRED_TIP = 'Tracker Score is retired — tracker.gg stopped serving it (Nov 2026). Rank, ACS, K/D and Win% still fill from the local Riot client.';
+/* Per-row Tracker state copy. A dash means "not available", never "still
+ * loading"; only a genuinely in-flight request may show a pulse, and only in
+ * the state cell. `private` comes exclusively from Tracker's own 451 — a 404
+ * is ambiguous and must stay neutral ("no Tracker profile"). */
+const LIVE_FETCHING_TIP = 'Reading Tracker data…';
+const LIVE_UNAVAILABLE_TIP = 'Not available for this player';
+const LIVE_PRIVATE_TIP = "This player's profile is private";
+const LIVE_MISSING_TIP = 'Tracker has no profile for this account';
+const LIVE_UNKNOWN_TIP = 'No Tracker data available';
+const TS_STATE_TIP = 'Tracker Score is retired (tracker.gg stopped serving it, Nov 2026). This cell shows the Tracker state: fetching, private, no Tracker profile, or ready.';
 
 /* In-app Live Match page.
 
@@ -516,7 +520,7 @@ const MatchStatusStrip: React.FC<{
 /* Player table — mirrors the Agent Select widget's columns            */
 /* ------------------------------------------------------------------ */
 
-const GRID = 'grid grid-cols-[1fr_52px_64px_28px_70px_68px_42px_38px_42px_38px_34px] items-center gap-x-1.5';
+const GRID = 'grid grid-cols-[1fr_52px_64px_56px_70px_68px_42px_38px_42px_38px_34px] items-center gap-x-1.5';
 
 const ACCENTS: Record<string, { tag: string; border: string }> = {
   primary: { tag: 'bg-m3-primary/15 text-m3-primary border-m3-primary/30', border: 'border-m3-primary/25' },
@@ -561,18 +565,19 @@ const PlayerTable: React.FC<{
         <span>Player</span>
         <span className="text-center" data-tip="External tracker pages for this player">Links</span>
         <span className="text-center" data-tip="Equipped weapon skins & cosmetics">Skins</span>
-        <span className="text-center" data-tip={TS_RETIRED_TIP}>TS</span>
+        <span className="text-center" data-tip={TS_STATE_TIP}>TS</span>
         <span className="text-left pl-1">Rank</span>
         <span className="text-left pl-1" data-tip="Peak rank — the act it was earned in is shown under the emblem">Peak</span>
         <span className="text-right" data-tip="Act-wide average combat score — the column this board is sorted by">ACS</span>
         <span className="text-right" data-tip="Act-wide K/D (Riot exposes no live kill data)">K/D</span>
         <span className="text-right" data-tip="Act-wide win rate">Win%</span>
-        <span className="text-right" data-tip="Act-wide headshot % — not available from the local Riot client yet">HS%</span>
+        <span className="text-right" data-tip="Act-wide headshot % from Tracker when the player has a profile">HS%</span>
         <span className="text-right">Lvl</span>
       </div>
-      {/* One-line legend: the dash and the dot must never be a mystery. */}
-      <div className="px-2 pb-0.5 text-[8.5px] font-mono text-m3-outline/80 uppercase tracking-wider">
-        — not fetched yet · ● fetching
+      {/* Plain key. Per-row labels carry the state; a dash only ever means
+          "not available", never "still loading". */}
+      <div className="px-2 pb-0.5 text-micro font-mono text-m3-outline/80 uppercase tracking-wider">
+        — not available
       </div>
 
       <div className="flex flex-col gap-1.5 overflow-hidden shrink-0">
@@ -610,27 +615,27 @@ const PlayerRow: React.FC<{
   // one-decimal formatter. 0/blank keeps the old "unknown" meaning.
   const kdValue = typeof p.kd === 'number' ? p.kd : Number(p.kd);
   const kdKnown = p.kd != null && Number.isFinite(kdValue) && kdValue > 0;
-  // Private profiles: every TRN-fed cell shows a lock instead of a dash so
-  // users read "locked", not "broken". Rank/peak/level are Riot-local and stay.
-  const locked = p.isTrnPrivate === true;
+  /* One honest state per row. `trnPlayerState` is pure and cheap (no network).
+     No local signals are passed on purpose: a 404 is ambiguous, so we never
+     infer "private" from it — only Tracker's own 451/TRN_PRIVATE says private. */
+  const trnState: TrnPlayerState = trnPlayerState(p.name, p.tag);
+  // Private rows keep the lock in data cells; missing rows use a plain dash.
+  const locked = p.isTrnPrivate === true || trnState === 'private';
   const lockCell = (
     <span data-tip={LIVE_PRIVATE_TIP} className="inline-flex items-center justify-center text-zinc-500">
       <Lock className="w-2.5 h-2.5" />
     </span>
   );
-  // "Still filling" vs "nothing there": a faint dot while the TRN fill is
-  // queued or in flight, the plain dash once we have a verdict. Kept as quiet
-  // as possible — this is a dense table and both states are already the
-  // majority of cells in a fresh lobby.
-  const statBlank = (state: LiveMatchPlayer['trnState'], reason = LIVE_UNAVAILABLE_TIP) =>
-    state === 'pending' ? (
-      <span data-tip={LIVE_PENDING_TIP} className="inline-flex items-center justify-center">
-        <span className="sr-only">{LIVE_PENDING_TIP}</span>
-        <span aria-hidden="true" className="block h-[3px] w-[3px] rounded-full bg-m3-outline/60" />
-      </span>
-    ) : (
-      <StatValue reason={reason} />
-    );
+  const blankCell = (reason = LIVE_UNAVAILABLE_TIP) => <StatValue reason={reason} />;
+  /* Non-TS cells never pulse: only the TS cell may look busy while fetching. */
+  const trnBlankReason =
+    trnState === 'fetching'
+      ? LIVE_FETCHING_TIP
+      : trnState === 'missing'
+        ? LIVE_MISSING_TIP
+        : trnState === 'unknown'
+          ? LIVE_UNKNOWN_TIP
+          : LIVE_UNAVAILABLE_TIP;
   const party = getPartyStyle(p.partyIndex);
   const flagUrl = getFlagUrl(p.country);
   const countryName = getCountryName(p.country);
@@ -821,23 +826,42 @@ const PlayerRow: React.FC<{
         )}
       </div>
 
-      {/* 4. Tracker Score badge — unified 20px size, right next to Rank */}
-      <div
-        className="flex items-center justify-center"
-        data-tip={
-          p.trnScore != null
-            ? `Tracker Score: ${p.trnScore} / 1000 — Tier ${scoreTier(p.trnScore).tier}`
-            : p.trnState === 'pending'
-            ? LIVE_PENDING_TIP
-            : TS_RETIRED_TIP
-        }
-      >
-        {p.trnScore != null ? (
-          <ScoreBadge tier={scoreTier(p.trnScore).tier} size={20} />
-        ) : locked ? (
-          lockCell
+      {/* 4. Tracker profile state. TS is retired, so this cell says what
+          Tracker actually knows about the row instead of showing a permanent
+          dash that reads as "still loading". A pulse appears here ONLY while
+          a real request is in flight; missing/private are terminal labels. */}
+      <div className="flex items-center justify-center min-w-0">
+        {trnState === 'fetching' ? (
+          <span data-tip={LIVE_FETCHING_TIP} className="inline-flex items-center justify-center">
+            <span className="sr-only">{LIVE_FETCHING_TIP}</span>
+            <span
+              aria-hidden="true"
+              className="block h-1 w-1 rounded-full bg-m3-primary/80 animate-pulse"
+            />
+          </span>
+        ) : trnState === 'missing' ? (
+          <span
+            data-tip={LIVE_MISSING_TIP}
+            className="flex flex-col items-center text-micro font-mono leading-[10px] text-m3-outline"
+          >
+            <span>no</span>
+            <span>Tracker</span>
+            <span>profile</span>
+          </span>
+        ) : trnState === 'private' ? (
+          <span data-tip={LIVE_PRIVATE_TIP} className="text-micro font-mono text-m3-outline">
+            private
+          </span>
+        ) : trnState === 'ready' ? (
+          p.trnScore != null ? (
+            <span data-tip={`Tracker Score: ${p.trnScore} / 1000 — Tier ${scoreTier(p.trnScore).tier}`}>
+              <ScoreBadge tier={scoreTier(p.trnScore).tier} size={20} />
+            </span>
+          ) : (
+            <StatValue reason={TS_STATE_TIP} />
+          )
         ) : (
-          statBlank(p.trnState)
+          <StatValue reason={LIVE_UNKNOWN_TIP} />
         )}
       </div>
 
@@ -893,7 +917,7 @@ const PlayerRow: React.FC<{
         ) : locked ? (
           lockCell
         ) : (
-          statBlank(p.trnState)
+          blankCell(trnBlankReason)
         )}
       </div>
 
@@ -902,7 +926,7 @@ const PlayerRow: React.FC<{
         {locked ? (
           lockCell
         ) : !kdKnown ? (
-          statBlank(p.trnState)
+          blankCell(trnBlankReason)
         ) : (
           <span className={kdValue >= 1 ? 'text-m3-mint font-bold' : 'text-m3-coral font-bold'}>
             {formatKd(kdValue)}
@@ -919,7 +943,7 @@ const PlayerRow: React.FC<{
         ) : locked ? (
           lockCell
         ) : (
-          statBlank(p.trnState)
+          blankCell(trnBlankReason)
         )}
       </div>
 
@@ -930,13 +954,13 @@ const PlayerRow: React.FC<{
         ) : locked ? (
           lockCell
         ) : (
-          statBlank(p.trnState)
+          blankCell(trnBlankReason)
         )}
       </div>
 
       {/* 11. Account level */}
       <div className="text-right font-mono text-[9.5px] text-m3-outline" data-tip="Account level">
-        {p.accountLevel > 0 ? p.accountLevel : <StatValue reason="Account level not read yet" />}
+        {p.accountLevel > 0 ? p.accountLevel : <StatValue reason="Account level not available" />}
       </div>
     </div>
   );
