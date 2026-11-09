@@ -25,25 +25,19 @@ mod commands;
 // caller: `crate::OVERLAY_EDIT_MODE` and friends still resolve.
 pub use state::OVERLAY_EDIT_MODE;
 pub(crate) use state::{
-    AppState, DisplayInfo, AUTO_BORDERLESS_ENABLED, MAIN_WINDOW_SIZE_LOGICAL, OVERLAY_AVAILABLE,
+    AppState, AUTO_BORDERLESS_ENABLED, MAIN_WINDOW_SIZE_LOGICAL, OVERLAY_AVAILABLE,
     OVERLAY_EDIT_WATCHDOG_MS, OVERLAY_PRESENT, OVERLAY_WINDOWED,
 };
 pub(crate) use commands::display::build_display_info;
 pub(crate) use win::tray::build_tray;
 pub(crate) use win::overlay::{
-    build_overlay_window, force_overlay_edit_mode_off, get_overlay_edit_mode, get_overlay_monitor,
-    hide_overlay, is_overlay_visible, is_tab_down, set_overlay_clickthrough, set_overlay_edit_mode,
-    set_overlay_monitor, set_overlay_present, set_overlay_windowed, show_overlay,
+    build_overlay_window, force_overlay_edit_mode_off, hide_overlay, show_overlay,
 };
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 
-use tauri::{
-    menu::{Menu, MenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, State,
-};
+use tauri::{Emitter, Manager};
 
 
 /// Build the dev-dashboard window at runtime instead of declaring it in
