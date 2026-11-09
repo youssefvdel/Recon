@@ -651,11 +651,6 @@ async function fetchPresenceIdentity(
 }
 
 /** Base64 → UTF-8 string. `atob` alone mangles non-ASCII (player names). */
-function decodeBase64Utf8(b64: string): string {
-  const bin = atob(b64);
-  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
-  return new TextDecoder().decode(bytes);
-}
 
 export async function fetchIdentityDirect(_region: string): Promise<PlayerIdentity> {
   const ent = await getEntitlements();
@@ -1142,6 +1137,8 @@ export type { PersistedRank } from '../cache/namespace';
 // external importers; a re-export does not bring the name into this scope).
 import { evictOldest, pruneSupersededCaches, persistLiveRank, readPersistedRank } from '../cache/namespace';
 import { inCurrentLobby, setCurrentLobbyPuuids } from '../live/lobbyScope';
+import { decodeBase64Utf8, warmTrnPhaseFromPresence } from '../sources/presence';
+export { presenceLoopToPhase } from '../sources/presence';
 import { fetchLocalActStats, actStateFor } from '../live/actStats';
 export { fetchLocalActStats, actStateFor, LOCAL_ACT_MAX_MATCHES, LOCAL_ACT_BUDGET_MS } from '../live/actStats';
 export type { LocalActCtx } from '../live/actStats';
@@ -1155,6 +1152,28 @@ export type { LocalRankRow, LocalRiotCtx } from '../sources/riot';
 import { gameData, mapIndexMem } from '../sources/gameData';
 export { gameData } from '../sources/gameData';
 import { getCachedLivePlayerStats, setCachedLivePlayerStats, setLiveSnapshotMatch } from '../live/playerStats';
+import {
+  trnFillJitterMs,
+  trnSpreadBudget,
+  TRN_SPREAD_STALE_MS,
+  TRN_SPREAD_REFILL_MS,
+  playerNeedsTrnStats,
+  skipHiddenWork,
+} from '../live/fillPolicy';
+export {
+  TRN_FILL_JITTER_MIN_MS,
+  TRN_FILL_JITTER_MAX_MS,
+  trnFillJitterMs,
+  TRN_SPREAD_MAX_PLAYERS,
+  TRN_SPREAD_MAX_PLAYERS_DM,
+  trnSpreadBudget,
+  TRN_SPREAD_REFILL_MS,
+  playerNeedsTrnStats,
+} from '../live/fillPolicy';
+import { mergeMmrRow, orderSpreadQueue, splitFillWaves, TRN_FILL_WAVE_GAP_MS } from '../live/merge';
+import type { SpreadPlayer } from '../live/merge';
+export { mergeLiveMatchStateNonRegressing, mergeMmrRow, orderSpreadQueue, splitFillWaves, TRN_FILL_WAVE_SIZE, TRN_FILL_WAVE_GAP_MS } from '../live/merge';
+export type { SpreadPlayer, MmrRow } from '../live/merge';
 import type { LivePlayerStatsEntry } from '../live/playerStats';
 /* Live-player stats moved to src/live/playerStats.ts (stage 2b, step 2).
  * Re-exported so every existing importer keeps working. */
@@ -1412,35 +1431,6 @@ export function isMatchStateEqual(a: LiveMatchState | null, b: LiveMatchState | 
  *  independently, matched by PUUID; all other top-level fields come from
  *  `incoming`. Pure — checked by scripts/live-poll-check.ts.
  */
-export function mergeLiveMatchStateNonRegressing(
-  prev: LiveMatchState | null,
-  incoming: LiveMatchState
-): LiveMatchState {
-  if (!prev) return incoming;
-  const byPuuid = new Map<string, LiveMatchPlayer>();
-  for (const p of [...prev.blueTeam, ...prev.redTeam]) byPuuid.set(p.puuid.toLowerCase(), p);
-  const mergeTeam = (team: LiveMatchPlayer[]): LiveMatchPlayer[] =>
-    team.map((p) => {
-      const was = byPuuid.get(p.puuid.toLowerCase());
-      if (!was) return p;
-      return {
-        ...p,
-        kd: p.kd ?? was.kd,
-        acs: p.acs ?? was.acs,
-        hsPct: p.hsPct ?? was.hsPct,
-        winPct: p.winPct ?? was.winPct,
-        trnScore: p.trnScore ?? was.trnScore,
-        // Sticky-true, NOT a `??` latch: the row build resolves isTrnPrivate as
-        // `?? false`, so a nullish latch here can never fire — and a realm that
-        // has not fetched the player yet emits that `false`, clobbering a correct
-        // `true` from the realm that has. A `false` with no `kd` is a `?? false`
-        // default, not a verdict, so keep the lock. Real incoming data still
-        // wins: a public profile (kd present, isTrnPrivate false) un-latches.
-        isTrnPrivate: was.isTrnPrivate === true && p.kd == null ? true : p.isTrnPrivate,
-      };
-    });
-  return { ...incoming, blueTeam: mergeTeam(incoming.blueTeam), redTeam: mergeTeam(incoming.redTeam) };
-}
 
 /**
  * Sticky party latch: fill this poll's solo gaps from the same-match latch
@@ -1600,70 +1590,8 @@ const trnInFlightLive = new Set<string>();
  * still uncached. An explicit manual refresh (forceRefresh) fires
  * immediately while the budget lasts; overflow joins the fill. */
 
-/** De-sync per firing so a concurrent lobby fill isn't lockstep (NOT 6s). */
-export const TRN_FILL_JITTER_MIN_MS = 200;
-export const TRN_FILL_JITTER_MAX_MS = 400;
-/** Uniform 200-400ms jitter. Pure — checked by scripts/trn-spread-check.ts. */
-export function trnFillJitterMs(): number {
-  return TRN_FILL_JITTER_MIN_MS + Math.random() * (TRN_FILL_JITTER_MAX_MS - TRN_FILL_JITTER_MIN_MS);
-}
-/** Hard per-lobby budget: at most 10 players per match drain through
- *  TRN (own-team-first order means enemies drop first when spent). Bounds the
- *  worst case to 10 fetchTrnStatsNow; overflow waits for the next match
- *  or a manual refresh instead of extending the firing window mid-game. */
-export const TRN_SPREAD_MAX_PLAYERS = 10;
-/** Deathmatch lobbies run 12 players — same one-fill rule, roomier cap. */
-export const TRN_SPREAD_MAX_PLAYERS_DM = 12;
-/** Budget for this lobby: 12 in deathmatch, 10 everywhere else. Pure. */
-export function trnSpreadBudget(isDeathmatch: boolean): number {
-  return isDeathmatch ? TRN_SPREAD_MAX_PLAYERS_DM : TRN_SPREAD_MAX_PLAYERS;
-}
-/** Views poll every 2.5–3s; no live poll for this long = phase went idle
- *  or the views unmounted → skip the firing, never fetch for a dead lobby. */
-const TRN_SPREAD_STALE_MS = 10_000;
 
-export interface SpreadPlayer {
-  puuid: string;
-  name: string;
-  tag: string;
-  /** True for own-team players — they fire before enemies. */
-  mine: boolean;
-}
 
-/** Own-team-first ordering. Pure — checked by scripts/trn-spread-check.ts. */
-export function orderSpreadQueue(players: SpreadPlayer[]): SpreadPlayer[] {
-  return players.slice().sort((a, b) => Number(b.mine) - Number(a.mine));
-}
-
-/** Split a budgeted fill into its two visible waves: OUR squad first, then
- *  theirs. `mine` is the flag the live roster already carries (the same one
- *  `orderSpreadQueue` sorts on) — no new source is invented. A player whose
- *  flag says own-team but lands past the wave-1 slot goes to the FRONT of
- *  wave 2, so nobody is dropped and own-team still all precedes enemies.
- *  Pure — asserted by scripts/trn-spread-check.ts. */
-export const TRN_FILL_WAVE_SIZE = 5;
-export function splitFillWaves(players: SpreadPlayer[]): [SpreadPlayer[], SpreadPlayer[]] {
-  const own = players.filter((p) => p.mine);
-  const theirs = players.filter((p) => !p.mine);
-  const wave1 = own.slice(0, TRN_FILL_WAVE_SIZE);
-  const wave2 = [...own.slice(TRN_FILL_WAVE_SIZE), ...theirs];
-  return [wave1, wave2];
-}
-
-/** Bounded gap between the two fill waves. The fill is fire-and-forget, so
- *  there is no settle event to await; this is long enough for wave 1 to be in
- *  flight (and visible in the UI) without holding back the enemy batch. */
-export const TRN_FILL_WAVE_GAP_MS = 700;
-
-/** True when the lobby fill may fetch for this player now. Reads the
- *  same caches the poll loop reads, so enqueue and firing always agree. */
-export function playerNeedsTrnStats(puuid: string): boolean {
-  const cached = getCachedLivePlayerStats(puuid);
-  return (
-    !cached ||
-    (cached.kd == null && cached.acs == null && Date.now() > (cached.retryAfter ?? 0))
-  );
-}
 
 let trnSpreadKey = '';
 let trnSpreadLastPollAt = 0;
@@ -1677,9 +1605,6 @@ let trnSpreadSpent = 0;
  *  dot forever. It now refills on a timer instead; the real ceiling is the
  *  Rust per-lobby request cap, which this does not touch. */
 let trnSpreadRefilledAt = 0;
-/** One refill window per lobby: long enough that a wall cannot be hammered,
- *  short enough that a 35-minute match gets several honest attempts. */
-export const TRN_SPREAD_REFILL_MS = 5 * 60 * 1000;
 /** Owning generation of the open drain job for this lobby (0 = none). Only
  *  the owner settles it, so a stale settle can never kill a newer job. */
 let trnDrainGen = 0;
@@ -1687,16 +1612,6 @@ let trnDrainGen = 0;
 let trnDrainMatchId = '';
 
 /** MMR row shape shared by the live map, the previous row, and the merge below. */
-export interface MmrRow {
-  tier: number;
-  rr: number;
-  peakTier: number;
-  peakSeasonId?: string;
-  actWins?: number;
-  actGames?: number;
-  leaderboardRank?: number;
-  isRankHidden?: boolean;
-}
 
 /** Monotonic MMR merge: a present-but-empty fresh entry (unrevealed teammate,
  *  degraded payload, failed refetch) must NEVER erase a rank we already show
@@ -1705,36 +1620,7 @@ export interface MmrRow {
  *  keep the previous row. RR is static within a lobby, and a new match
  *  rebuilds rows from a fresh result object, so cross-match staleness can't
  *  stick. Pure — checked by scripts/live-poll-check.ts. */
-export function mergeMmrRow(
-  fresh: MmrRow | null | undefined,
-  prev: MmrRow | null | undefined
-): MmrRow {
-  const takeNum = (f?: number, p?: number): number | undefined =>
-    f != null && f > 0 ? f : p;
-  return {
-    tier: takeNum(fresh?.tier, prev?.tier) ?? 0,
-    rr: takeNum(fresh?.rr, prev?.rr) ?? 0,
-    peakTier: takeNum(fresh?.peakTier, prev?.peakTier) ?? 0,
-    peakSeasonId:
-      (fresh && fresh.peakTier > 0 ? fresh.peakSeasonId : undefined) ??
-      prev?.peakSeasonId,
-    actWins: takeNum(fresh?.actWins, prev?.actWins),
-    actGames: takeNum(fresh?.actGames, prev?.actGames),
-    leaderboardRank: takeNum(fresh?.leaderboardRank, prev?.leaderboardRank),
-    isRankHidden:
-      fresh?.isRankHidden === true || prev?.isRankHidden === true
-        ? true
-        : (fresh?.isRankHidden ?? prev?.isRankHidden),
-  };
-}
 
-/** A hidden window must not stop a live match's fill: mid-game the main window
- *  is minimised and the overlay is the surface showing this data. Idle work
- *  still parks when hidden - that is the case this guard was written for. */
-function skipHiddenWork(): boolean {
-  if (typeof document === 'undefined' || !document.hidden) return false;
-  return getTrnMatchPhase() === 'idle';
-}
 
 async function enqueueTrnSpread(
   matchId: string,
@@ -2044,52 +1930,8 @@ function fetchTrnStatsNow(
  * payload, so the payload alone cannot scope the stats correctly. Ignored while
  * in menus, where the blob keeps the queue id of the last match played.
  */
-/** Presence loop → proxy hint. Positive signals only — anything else yields
- *  null so the caller leaves the hint alone (never downgrade on missing
- *  data). Pure — checked by scripts/trn-spread-check.ts. */
-export function presenceLoopToPhase(loop: string): 'pregame' | 'coregame' | null {
-  const l = loop.trim().toUpperCase();
-  if (l === 'PREGAME') return 'pregame';
-  if (l === 'INGAME') return 'coregame';
-  return null;
-}
 
-/** Fast Riot-local loop state (free loopback read, no TRN). Null when
- *  unreadable — callers keep the previous hint. */
-async function fetchLocalLoopState(): Promise<string | null> {
-  try {
-    if (!isTauri()) return null;
-    const ent = await getEntitlements();
-    const raw = await invoke<string>('local_presences');
-    const presences: { puuid?: string; private?: string }[] = JSON.parse(raw)?.presences ?? [];
-    const me = presences.find(
-      (p) => String(p?.puuid ?? '').toLowerCase() === ent.puuid.toLowerCase()
-    );
-    if (!me?.private) return null;
-    const blob = JSON.parse(decodeBase64Utf8(String(me.private)));
-    const loop = String(blob?.matchPresenceData?.sessionLoopState ?? blob?.sessionLoopState ?? '');
-    return loop || null;
-  } catch {
-    return null;
-  }
-}
 
-/** Warm the proxy pause hint from Riot-local presences before the first fill
- *  of a lobby. The full poll is slow (MMR + names per player) and can arrive
- *  already in coregame; presences answer in ms, so pregame wins the race and
- *  fetches start at lobby formation. Positive signals only — true
- *  coregame-fullscreen still pauses. Never throws. */
-async function warmTrnPhaseFromPresence(): Promise<void> {
-  try {
-    const warmed = presenceLoopToPhase((await fetchLocalLoopState()) ?? '');
-    if (warmed) {
-      setTrnMatchPhase(warmed);
-      if (import.meta.env.DEV) trnLog('phase warmed', warmed);
-    }
-  } catch {
-    /* stale hint stands */
-  }
-}
 
 export async function fetchLiveQueueId(): Promise<string> {
   try {

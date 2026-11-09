@@ -129,9 +129,30 @@ check('heal skips flagged deliberate negatives', playerStats.includes('!entry.ne
 // Contract changed after the live-match incident: a hidden window must not stop
 // a live match's fill (the overlay is the surface showing it). Only idle work
 // parks while hidden.
-check('hidden window pauses idle fills only',
-  tracker.includes('function skipHiddenWork()') && tracker.includes("return getTrnMatchPhase() === 'idle';"),
-  true);
+// Contract changed after the live-match incident: a hidden window must not stop
+// a live match's fill, because the overlay is the surface showing that data.
+// Driven behaviourally rather than by grep — this rule has a story, so the
+// check states it in words: idle work parks, a live match does not.
+{
+  const { skipHiddenWork } = await import('../src/live/fillPolicy.ts');
+  const { setTrnMatchPhase } = await import('../src/utils/trn.ts');
+  const g = globalThis as unknown as { document?: { hidden: boolean } };
+  const hadDoc = 'document' in g;
+  const prevDoc = g.document;
+  try {
+    g.document = { hidden: true };
+    setTrnMatchPhase('idle');
+    check('a hidden window parks idle work', skipHiddenWork(), true);
+    setTrnMatchPhase('coregame');
+    check('a minimised window does NOT stop a live match fill', skipHiddenWork() === false, { phase: 'coregame' });
+    g.document = { hidden: false };
+    check('a visible window never parks, whatever the phase', skipHiddenWork() === false, { hidden: false });
+  } finally {
+    if (hadDoc) g.document = prevDoc;
+    else delete g.document;
+    setTrnMatchPhase('idle');
+  }
+}
 check('cooldown fail-fast touches no network', tracker.includes('touch no network during cooldown'), true);
 // The manual path calls fetchTrnStatsNow directly (not through the fill) and
 // never marks it as a drain: a user refresh is a NEW request, not a budgeted
@@ -173,10 +194,13 @@ check('loop trims whitespace', presenceLoopToPhase('  INGAME ') === 'coregame', 
 check('menus warms nothing', presenceLoopToPhase('MENUS') === null, { got: presenceLoopToPhase('MENUS') });
 check('empty warms nothing', presenceLoopToPhase('') === null, { got: presenceLoopToPhase('') });
 check('garbage warms nothing', presenceLoopToPhase('bogus') === null, { got: presenceLoopToPhase('bogus') });
-check('warm helper exists', tracker.includes('async function warmTrnPhaseFromPresence'), true);
-check('warm reads Riot-local presences', tracker.includes("invoke<string>('local_presences')"), true);
+// The warm helper moved to sources/presence.ts (sources split). Read it
+// there; the fill still awaits it, which the next assertions pin on tracker.
+const presenceSrc = await Bun.file('src/sources/presence.ts').text();
+check('warm helper exists', presenceSrc.includes('export async function warmTrnPhaseFromPresence'), true);
+check('warm reads Riot-local presences', presenceSrc.includes("invoke<string>('local_presences')"), true);
 check('first fill awaits the warm before dispatch', tracker.includes('await warmTrnPhaseFromPresence()'), true);
-check('warm stamps positive signals only', tracker.includes('if (warmed)'), true);
+check('warm stamps positive signals only', presenceSrc.includes('if (warmed)'), true);
 check('enqueue awaits the warm (async fill)', tracker.includes('async function enqueueTrnSpread'), true);
 
 // --- Untouched floors: serial gate, cooldown ladder, caches ---
