@@ -1107,6 +1107,51 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('consumers no longer import riotGet', /riotGet/.test(outside), false);
 }
 
+// --- the validated rank boundary (upstream audit finding) ------------------
+{
+  const { readFileSync } = await import('node:fs');
+  const riotSrc = readFileSync(new URL('../src/sources/riot.ts', import.meta.url), 'utf8');
+  const { rankFromPayload } = await import('../src/sources/riot.ts');
+
+  const good = {
+    LatestCompetitiveUpdate: { TierAfterUpdate: 18 },
+    QueueSkills: { competitive: { SeasonalInfoBySeasonID: {} } },
+  };
+  check('a good /mmr payload parses', rankFromPayload(good, []).tier, 18);
+
+  let threw = false;
+  try {
+    rankFromPayload({ httpStatus: 403, errorCode: 'SCHEDULED_DOWNTIME' }, []);
+  } catch {
+    threw = true;
+  }
+  check('a Riot error payload throws instead of becoming tier 0', threw, true);
+
+  check('fetchLocalRank validates before parsing', /assertRiotOk\(j, 'mmr'\)/.test(riotSrc), true);
+  check(
+    'fetchLocalRank returns a branded value',
+    /fetchLocalRank\([\s\S]{0,160}Promise<Validated<LocalRankRow>>/.test(riotSrc),
+    true
+  );
+}
+
+// --- the source header must not overclaim (upstream audit finding) ---------
+{
+  const { readFileSync } = await import('node:fs');
+  const riotSrc = readFileSync(new URL('../src/sources/riot.ts', import.meta.url), 'utf8');
+  const trackerSrc = readFileSync(new URL('../src/utils/tracker.ts', import.meta.url), 'utf8');
+  const rawSites = (trackerSrc.match(/await riotGet\(/g) ?? []).length;
+  // While tracker still has its own raw transport, the header may not say it is
+  // the only place a payload exists. When that count reaches zero the header
+  // must be upgraded in the same commit — this check fails either way.
+  const claimsExclusive = riotSrc.includes('the ONLY place a raw');
+  check(
+    'the source header matches the code',
+    rawSites > 0 ? !claimsExclusive : claimsExclusive,
+    { rawSites, claimsExclusive }
+  );
+}
+
 if (failures > 0) {
   console.error(`${failures} failure(s)`);
   process.exit(1);

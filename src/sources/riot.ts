@@ -1,12 +1,17 @@
-/* Riot local client — the authoritative source, and the ONLY place a raw
- * `riot_direct_get` payload exists.
+/* Riot local client — the authoritative source.
  *
  * Design: docs/architecture/design-data-layer.md §2, step 1. The rule this file
- * enforces is the fix for bug class (a): the raw transport is private, so no
- * caller can obtain an unvalidated response, and every parser only accepts
- * `Validated<T>`, a branded type nothing outside this module can mint.
+ * enforces is the fix for bug class (a): its raw transport is private, so no
+ * caller can obtain an unvalidated response from HERE, and every parser it owns
+ * accepts `Validated<T>`, a branded type nothing outside this module can mint.
  *
- * A read either returns validated data or throws. Never junk. */
+ * HONEST SCOPE, because a header that overclaims is worse than none:
+ * `utils/tracker.ts` still holds its own private raw transport with 14 call
+ * sites not yet migrated (match history, act samples, storefront, wallet,
+ * crosshair prefs). So this module is the validated boundary for the reads it
+ * owns — it is NOT, today, the only place a raw payload exists. The assertion
+ * in scripts/devqa-check.ts ties this paragraph to the actual call-site count,
+ * so the claim cannot drift from the code again. */
 
 import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '../utils/ipc';
@@ -172,9 +177,12 @@ export class RiotError extends Error {
 /** True when the payload is a Riot error object rather than data. */
 function assertRiotOk(j: unknown, what: string): void {
   const o = j as { httpStatus?: number; errorCode?: string; message?: string };
+  // A SUCCESSFUL Riot payload carries no httpStatus, so `status === 0` is the
+  // normal case, not an error. Only an explicit errorCode or a 4xx/5xx status
+  // marks a failure — treating 0 as an error made every validated read throw.
   const status = Number(o?.httpStatus ?? 0);
   const code = String(o?.errorCode ?? '');
-  if (code || status >= 400 || status === 0) {
+  if (code || status >= 400) {
     const detail = code || `HTTP ${status}`;
     throw new RiotError(detail, `Riot ${what} failed: ${detail} ${String(o?.message ?? '').slice(0, 120)}`);
   }
@@ -402,11 +410,25 @@ export function parseLocalRank(
   };
 }
 
-/** Rank + RR for ANY puuid through the local client. Throws when unreadable. */
-export async function fetchLocalRank(puuid: string, region: string): Promise<LocalRankRow> {
-  if (!puuid) throw new Error('LOCAL_NO_PUUID');
+/** Validate then parse one /mmr payload. PURE, so the check script can drive it
+ *  with a good payload and with a Riot error payload. This is the guard that
+ *  was missing here: without it a 403 parsed into tier 0 — the "Unrated"
+ *  fabrication that emptied the board. */
+export function rankFromPayload(j: unknown, seasonOrder: string[]): Validated<LocalRankRow> {
+  assertRiotOk(j, 'mmr');
+  return validated(parseLocalRank(validated(j), seasonOrder));
+}
+
+/** Rank + RR for ANY puuid through the local client. Validated: a Riot error
+ *  payload throws, it never returns tier 0. */
+export async function fetchLocalRank(
+  puuid: string,
+  region: string
+): Promise<Validated<LocalRankRow>> {
+  if (!puuid) throw new RiotError('NO_PUUID', 'fetchLocalRank: puuid is required');
   const { seasonOrder } = await gameData();
-  return parseLocalRank(await riotGet(shardFor(region), `/mmr/v1/players/${puuid}`), seasonOrder || []);
+  const j = await riotGet(shardFor(region), `/mmr/v1/players/${puuid}`);
+  return rankFromPayload(j, seasonOrder || []);
 }
 
 export interface LocalRiotCtx {
