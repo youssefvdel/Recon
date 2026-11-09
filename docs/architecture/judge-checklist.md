@@ -40,6 +40,7 @@ Cite the command output or screenshot path next to each line. Derived from `regr
 | 20 | `grep -rn "TRN_NO_DATA\|HTTP 404" src/ \| grep -v "src/sources/trn.ts"` | Only the TRN source maps these words; views consume `TrnError` kinds, never substring-match. |
 | 21 | `grep -rn "trnState" src/components/` and `grep -rn "Validated<" src/` | No `trnState` in views; `Validated<…>` is the only parser input type. |
 | 22 | `grep -rn "FieldView" src/components/` | Stats render only through `FieldView`; no per-view `toFixed`/hide logic. |
+| 23 | **Guard call sites.** For every exported state guard/setter (e.g. `setLiveSnapshotMatch`): `grep -rn "setLiveSnapshotMatch(" src/ scripts/ \| grep -v "\.test\."` | At least one production call site outside the definition; a unit test that calls the setter itself is not evidence of wiring. |
 
 *Checks 16–22 encode the target design. On a build that predates the rewrite they legitimately read FAIL — record the FAIL; do not waive it.*
 
@@ -52,4 +53,4 @@ Cite the command output or screenshot path next to each line. Derived from `regr
 5. After the match: ranks persist across the next launch; live keys are `recon_live_player_stats_v3` and `recon_live_rank_v1`; opening one match detail creates `recon_match_v7_<id>`; no `…_v2`/`…_v5`/`…_v6` keys remain.
 6. Record: PASS/FAIL per line above, plus one screenshot of the filled board and one of the 15 s post-open state.
 
-**Verdict line:** every one of 1–22 and D3–D5 marked PASS or FAIL with evidence; the build passes only if all are PASS.
+**Verdict line:** every one of 1–23 and D3–D5 marked PASS or FAIL with evidence; the build passes only if all are PASS.

@@ -1,4 +1,4 @@
-# Regression catalogue — the ten bugs of 2026-11-09
+# Regression catalogue — the eleven bugs of 2026-11-09
 
 Written after the alpha9→alpha16 marathon. Each entry is the user-visible symptom, the one-sentence root cause, where it lived, why our tests did not catch it, and the check that must exist from now on. Keep this file ahead of the next refactor.
 
@@ -72,6 +72,14 @@ Written after the alpha9→alpha16 marathon. Each entry is the user-visible symp
 **Why missed.** The overlay was always valid in dev; no failure injection existed.
 **Check.** Fault-inject overlay creation (bad URL/config) and assert the main window, commands and tray still work, overlays report unavailable, and the app starts normally.
 
+## 11. A state guard that nothing called
+
+**Symptom.** The board can still settle on the previous match's rows after a new match starts; the live snapshot is never re-stamped.
+**Root cause.** `setLiveSnapshotMatch` was defined, exported and unit-tested, but no production code called it, so the match-id guard it feeds never fired.
+**Where.** `setLiveSnapshotMatch(` — the call-site grep must find it outside its definition and outside tests; fixed in alpha20.
+**Why missed.** The test invoked the setter itself, so it proved the callee worked, not that the application wired it in. The bug surfaced when the code was moved, not when it was tested.
+**Check.** For every exported state guard/setter, grep a production call site (exclude `*.test.*`, `scripts/`, and the definition). A guard with zero call sites is a build failure; the error message names the missing wiring.
+
 ## Rules that follow
 
 1. **One validated parse per external payload.** `assertRiotOk` (or equivalent) runs before any field is read; an error is never allowed to look like a zero/unranked/empty value.
@@ -84,3 +92,4 @@ Written after the alpha9→alpha16 marathon. Each entry is the user-visible symp
 8. **Release artifacts are asserted structurally and launched once.** File set, minimum sizes, signatures, and a clean-machine smoke test that sees a window and a webview child.
 9. **Privileged listeners are proven loopback.** A release launch asserts the bind address and an off-box probe must fail.
 10. **Tests must include error shapes and boundary data.** A suite that only feeds valid payloads is a demo, not a test; every parser/transport test carries at least one real failure payload.
+11. **A test asserts the call site, not the callee.** A state guard is not shipped until production code calls it; the check greps for the call, and a missing wiring fails with the function name.
