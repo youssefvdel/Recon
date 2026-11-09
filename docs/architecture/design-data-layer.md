@@ -7,21 +7,17 @@ parse), `tracker.ts:1740` (cross-module prune), `trn.ts:1028` (gate before trans
 ## 1. File layout
 
 ```
-src/model/types.ts        Player, Round, MatchDetail, Rank, TrnProfile, Validated<T>
-src/cache/namespace.ts    createNamespace, writeLocalSafe, pruneAll, registry
-src/cache/live.ts         const liveCache = createNamespace<LiveEntry>('live_player_stats', 3)
-src/cache/rank.ts         const rankCache = createNamespace<Rank>('live_rank', 1)
-src/cache/matches.ts      const matchCache = createNamespace<MatchDetail>('match', 7)
-src/sources/riot.ts       readMmr, readMatchDetails, readLiveMatch, readPlayer24h
-src/sources/trn.ts        readTrnProfile, readTrnMatches, trnPlayerState
-src/transport.ts          chooseTransport, runGates
-src/live/fill.ts          splitFillWaves, enqueueFill (absorbed from tracker.ts:2407)
-src/live/poll.ts          pollLiveMatch (absorbed from tracker.ts:3700-4100)
+src/model/types.ts      Player, Round, MatchDetail, Rank, TrnProfile, Validated<T>
+src/cache/namespace.ts  createNamespace, writeLocalSafe, pruneAll, registry
+src/cache/{live,rank,matches}.ts   one namespace const each, generation declared there
+src/sources/riot.ts     readMmr, readMatchDetails, readLiveMatch, readPlayer24h
+src/sources/trn.ts      readTrnProfile, readTrnMatches, trnPlayerState
+src/transport.ts        chooseTransport, runGates
+src/live/{poll,fill}.ts pollLiveMatch, splitFillWaves, enqueueFill (from tracker.ts:3700+, :2407)
 ```
 
-Absorbed, not rewritten: `tracker.ts` keeps `parseLocalRank`, `parseRoundDetails`,
-`mergeMmrRow` (pure) and loses every `localStorage` call to `cache/` and every
-transport call to `sources/`.
+Absorbed, not rewritten: `tracker.ts` keeps only pure parsers (`parseLocalRank`,
+`parseRoundDetails`, `mergeMmrRow`) and loses every storage call to `cache/`.
 
 ## 2. Interfaces
 
@@ -30,9 +26,8 @@ transport call to `sources/`.
 declare const VALIDATED: unique symbol;
 export type Validated<T> = T & { readonly [VALIDATED]: true };
 
-export type Rank = { tier: number; rr: number; peakTier: number; peakSeasonId?: string;
-                     at: number; stale: boolean };
-export type TrnPrivacy = 'public' | 'private';
+export type Rank = { tier: number; rr: number; peakTier: number;
+                     peakSeasonId?: string; at: number; stale: boolean };
 
 // sources/riot.ts — the raw transport is NOT exported. This is the whole point.
 export function readMmr(puuid: string): Promise<Rank>;              // throws RiotError
@@ -51,7 +46,7 @@ export function trnPlayerState(name: string, tag: string): TrnPlayerState; // sy
 // transport.ts — the transport is a VALUE with its gates attached.
 export type Transport =
   | { kind: 'direct'; gates: readonly [] }
-  | { kind: 'edge';   gates: readonly ['pause'] }
+  | { kind: 'edge';   gates: readonly ['pause'] }   // pause belongs ONLY here
   | { kind: 'none';   reason: 'disabled' | 'no-route' };
 export function chooseTransport(path: string): Transport;
 export async function runGates(t: Transport): Promise<void>; // exhaustive switch
@@ -97,20 +92,17 @@ classDiagram
 | `recon_trn_negative_v2` | `sources/trn.ts` | same file |
 | `recon_trn_cooldown_until_v1` | `sources/trn.ts` | same file |
 
-**The rule, encoded:** a prefix is never a string literal outside its owner.
-`createNamespace(name, generation)` derives the prefix and registers it in a
-module-private registry; `pruneAll()` walks that registry. A module cannot prune a
-key it did not construct, because it has no way to name it. Deleting a generation
-means editing the constant in its owner file — the bump and the cleanup are the
-same edit.
+**Rule:** a prefix is never a string literal outside its owner.
+`createNamespace(name, generation)` derives the prefix and registers it; `pruneAll()`
+walks that registry. A module cannot prune a key it cannot name, and a generation
+bump and its cleanup are the same edit in the same file.
 
 ## 4. The three bug classes, made unrepresentable
 
-**(a) guard skipped at one call site.** `riotGet` stops being exported
-(today: `tracker.ts:694` guards, `:3794` forgot). `readMmr` is the only way to
-obtain a rank payload, and it validates before returning; the parser's parameter is
-`Validated<RiotMmrPayload>`, which nothing else can construct. A caller cannot skip
-a check it cannot reach.
+**(a) guard skipped at one call site.** `riotGet` stops being exported (today
+`tracker.ts:694` guards, `:3794` forgot). `readMmr` is the only way to obtain a rank
+payload and it validates before returning; the parser takes `Validated<RiotMmrPayload>`,
+which nothing else can construct. A caller cannot skip a check it cannot reach.
 
 **(b) a cache generation that deletes itself.** Pruning is `Namespace.prune()`, an
 instance method over a derived prefix. `pruneAll()` only sees registered namespaces.
@@ -123,7 +115,6 @@ not in that variant's type — not because someone remembered to check first.
 
 ## 5. Migration order and acceptance
 
-Each step ships alone and is green before the next starts.
 
 1. **Boundaries.** Add `sources/riot.ts` with `readMmr`/`readMatchDetails`; stop
    exporting `riotGet`; port the two call sites. Accept: `bun run build:ui` +
@@ -131,17 +122,15 @@ Each step ships alone and is green before the next starts.
    inside `sources/riot.ts`.
 2. **Cache ownership.** Add `cache/namespace.ts`, move the three live keys and both
    TRN keys behind namespaces, delete the prune list at `tracker.ts:1740`.
-   Accept: assert `recon_` literals exist only in `src/cache/*` and
-   `src/sources/trn.ts`; a simulated quota write returns `false` and never throws.
+   Accept: `recon_` literals only in `src/cache/*` + `sources/trn.ts`; a simulated
+   quota write returns `false` and never throws.
 3. **Transport-first.** Add `transport.ts`, replace both `canServeDirect` sites
    (`trn.ts:287`, `:1028`). Accept: an assertion that `chooseTransport` is called
    before any gate; a paused+direct test proceeds.
 4. **Split `tracker.ts`.** Move `pollLiveMatch` → `live/poll.ts`, fill → `live/fill.ts`,
-   parsers → `model/parse.ts`. Pure moves. Accept: no behaviour diff in
-   `scripts/live-poll-check.ts`, and `tracker.ts` under 800 lines.
+   parsers → `model/parse.ts`. Accept: `live-poll-check` unchanged; `tracker.ts` < 800 lines.
 5. **UI pass.** Views read only `model/` types. Accept: no component imports
-   `sources/*` (grep assertion), and the four TS states render value / `no profile`
-   / `private` / dash.
+   `sources/*`; the four TS states render value / `no profile` / `private` / dash.
 
 ## 6. Deliberately NOT changed
 
@@ -149,7 +138,5 @@ Each step ships alone and is green before the next starts.
 - No rewrite of pure helpers (`parseLocalRank`, `parseRoundDetails`, `mergeMmrRow`,
   `splitFillWaves`) — they move file and keep their bodies.
 - No UI redesign beyond the four-state TS column.
-- No change to the Rust commands, the direct transport's `source=overwolf-2`, or the
-  negative TTLs.
-- No test framework change: the acceptance checks are assertions in the existing
-  `scripts/*-check.ts` files.
+- No change to the Rust commands, `source=overwolf-2`, or the negative TTLs.
+- No test framework change: acceptance lives in the existing `scripts/*-check.ts`.

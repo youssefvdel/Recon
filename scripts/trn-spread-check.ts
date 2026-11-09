@@ -121,7 +121,12 @@ check('no per-phase key (budget is per lobby ≤10)', !tracker.includes('`${matc
 check('stale firing never fetches old lobby', tracker.includes('stale firings must never fetch for the old lobby'), true);
 check('fill stops when polls go stale', tracker.includes('TRN_SPREAD_STALE_MS'), true);
 check('heal skips flagged deliberate negatives', tracker.includes('!entry.negative &&'), true);
-check('hidden tab pauses enqueue', tracker.includes("document.hidden) return;"), true);
+// Contract changed after the live-match incident: a hidden window must not stop
+// a live match's fill (the overlay is the surface showing it). Only idle work
+// parks while hidden.
+check('hidden window pauses idle fills only',
+  tracker.includes('function skipHiddenWork()') && tracker.includes("return getTrnMatchPhase() === 'idle';"),
+  true);
 check('cooldown fail-fast touches no network', tracker.includes('touch no network during cooldown'), true);
 // The manual path calls fetchTrnStatsNow directly (not through the fill) and
 // never marks it as a drain: a user refresh is a NEW request, not a budgeted
