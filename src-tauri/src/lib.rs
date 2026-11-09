@@ -904,6 +904,93 @@ fn list_supported_modes() -> Result<Vec<display::DisplayMode>, String> {
     Ok(display::get_all_supported_modes())
 }
 
+/// Directory `tauri-plugin-log` writes to: `%LOCALAPPDATA%\<identifier>\logs` —
+/// the same path the plugin resolves through `app_log_dir()`. Duplicated here so
+/// failures that happen BEFORE the logger attaches (WebView2 guard, startup)
+/// still reach disk instead of vanishing.
+fn app_log_dir(identifier: &str) -> std::path::PathBuf {
+    std::env::var("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join(identifier)
+        .join("logs")
+}
+
+/// Append one line to `recon-startup.log`. Pre-logger paths only; never panics,
+/// never blocks startup, silently gives up if the disk is unwritable.
+fn append_startup_log(identifier: &str, level: log::Level, msg: &str) {
+    let dir = app_log_dir(identifier);
+    let _ = std::fs::create_dir_all(&dir);
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("recon-startup.log"))
+    else {
+        return;
+    };
+    use std::io::Write;
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let _ = writeln!(file, "[{ms}] {level} {msg}");
+}
+
+/// Through the plugin when it is attached, straight to the file when it is not.
+/// `tauri-plugin-log` is now registered, but its setup runs late: the guard and
+/// a failed `Builder::run` both execute before it, and those are exactly the
+/// lines worth having.
+pub(crate) fn log_line(identifier: &str, level: log::Level, msg: &str) {
+    if log::max_level() == log::LevelFilter::Off {
+        append_startup_log(identifier, level, msg);
+    } else {
+        log::log!(level, "{msg}");
+    }
+}
+
+/// `tauri-plugin-log` registration policy — the plugin was a dependency but was
+/// never registered, so every `log::` call in this app was a no-op.
+///
+/// File target in the app log dir, warn+ everywhere, info from our own crate,
+/// 4 MB rotation keeping one backup, stderr in debug builds. Writability is
+/// probed FIRST: the plugin's setup returns Err when it cannot create the
+/// directory, and a plugin setup error aborts the whole app. A broken log path
+/// must never be a startup failure — it degrades to stderr.
+fn build_log_plugin<R: tauri::Runtime>(identifier: &str) -> tauri::plugin::TauriPlugin<R> {
+    use tauri_plugin_log::{Builder, RotationStrategy, Target, TargetKind, TimezoneStrategy};
+
+    let mut builder = Builder::new()
+        .level(log::LevelFilter::Warn)
+        .level_for("app_lib", log::LevelFilter::Info)
+        .max_file_size(4 * 1024 * 1024)
+        .rotation_strategy(RotationStrategy::KeepOne)
+        .timezone_strategy(TimezoneStrategy::UseLocal);
+
+    let dir = app_log_dir(identifier);
+    let writable = std::fs::create_dir_all(&dir).is_ok()
+        && std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("recon-startup.log"))
+            .is_ok();
+
+    if writable {
+        // Debug: file + stderr, replacing the plugin's default stdout target so
+        // a dev console does not get every line twice.
+        #[cfg(debug_assertions)]
+        {
+            builder = builder.targets(vec![
+                Target::new(TargetKind::LogDir { file_name: None }),
+                Target::new(TargetKind::Stderr),
+            ]);
+        }
+    } else {
+        builder = builder.targets(vec![Target::new(TargetKind::Stderr)]);
+    }
+
+    builder.build()
+}
+
 /// Last-resort surface for a fatal startup error.
 ///
 /// Release builds run with `windows_subsystem = "windows"` (`main.rs`), so the
@@ -937,8 +1024,12 @@ fn show_message_box(title: &str, body: &str) {
     eprintln!("{title}: {body}");
 }
 
-fn fatal_startup_error(detail: &str) {
-    log::error!("[startup] fatal: {detail}");
+fn fatal_startup_error(identifier: &str, detail: &str) {
+    log_line(
+        identifier,
+        log::Level::Error,
+        &format!("[startup] fatal: {detail}"),
+    );
     show_message_box(
         "Recon - startup failed",
         &format!(
@@ -986,9 +1077,14 @@ fn build_overlay_window(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, 
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Context is built once and reused: it carries the bundle identifier that
+    // both the log plugin and the pre-logger startup log resolve their path from.
+    let context = tauri::generate_context!();
+    let log_id = context.config().identifier.clone();
+
     // Debloated Windows images often ship without WebView2. Fail with a
     // repair dialog instead of the cryptic webview-creation error.
-    webview_guard::ensure_webview2_or_exit();
+    webview_guard::ensure_webview2_or_exit(&log_id);
 
     // Copy any pre-rename data out of %LOCALAPPDATA%\TrueStretchStudio before
     // the first read below; copy-only, per file, idempotent, failures logged.
@@ -1029,6 +1125,8 @@ pub fn run() {
     // Single-instance: re-running the exe/shortcut while Aspect sits in the
     // tray focuses the existing window instead of spawning a second copy.
     let builder = tauri::Builder::default()
+        // Registered FIRST: every other plugin's warnings should reach the file.
+        .plugin(build_log_plugin(&log_id))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         // Our own remote-control surface for testing the running app. It can
@@ -1048,6 +1146,7 @@ pub fn run() {
             }
         }));
 
+    let setup_log_id = log_id.clone();
     let run_result = builder
         .manage(app_state)
         .setup(move |app| {
@@ -1074,7 +1173,11 @@ pub fn run() {
             match build_overlay_window(app.handle()) {
                 Ok(_) => OVERLAY_AVAILABLE.store(true, Ordering::Relaxed),
                 Err(e) => {
-                    log::error!("[overlay] HUD window creation failed; running without overlays: {e}");
+                    log_line(
+                        &setup_log_id,
+                        log::Level::Error,
+                        &format!("[overlay] HUD window creation failed; running without overlays: {e}"),
+                    );
                 }
             }
             space_spam::start(app.handle());
@@ -1572,13 +1675,13 @@ pub fn run() {
             window_start_dragging,
             window_is_maximized,
         ])
-        .run(tauri::generate_context!());
+        .run(context);
 
     // No `.expect()` here: this process has no console, so a panic on a failed
     // run (window/webview creation is the usual cause) exits silently with zero
     // windows. Surface it in a dialog instead.
     if let Err(error) = run_result {
-        fatal_startup_error(&error.to_string());
+        fatal_startup_error(&log_id, &error.to_string());
     }
 }
 

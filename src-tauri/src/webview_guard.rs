@@ -106,14 +106,20 @@ fn show_missing_runtime_dialog() {
 /// runtime is present; otherwise shows the dialog, opens the installer page,
 /// and terminates the process so Tauri never hits the cryptic webview error.
 #[cfg(windows)]
-pub fn ensure_webview2_or_exit() {
+pub fn ensure_webview2_or_exit(identifier: &str) {
     if registry_has_webview2() || disk_has_webview2() {
         return;
     }
-    log::warn!("[webview-guard] WebView2 runtime not detected; showing repair dialog");
+    // This runs before `Builder::run`, so the log plugin is not attached yet:
+    // `crate::log_line` falls back to appending recon-startup.log directly.
+    crate::log_line(
+        identifier,
+        log::Level::Warn,
+        "[webview-guard] WebView2 runtime not detected; showing repair dialog",
+    );
     show_missing_runtime_dialog();
     std::process::exit(3);
 }
 
 #[cfg(not(windows))]
-pub fn ensure_webview2_or_exit() {}
+pub fn ensure_webview2_or_exit(_identifier: &str) {}
