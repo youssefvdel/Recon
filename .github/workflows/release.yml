@@ -66,6 +66,13 @@ jobs:
         # 310 MB. The download costs ~7 s; the cache cost a step and storage.
         run: bun scripts/fetch-webview2.mjs
 
+      - name: Run Rust unit tests
+        # A release must not ship a tree whose test target does not compile:
+        # cargo check/build exclude #[cfg(test)] code (alpha22 shipped that way).
+        # Runs after the runtime fetch because tauri-build validates
+        # bundle.resources at compile time, even in the test profile.
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
       - name: Build signed bundle
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

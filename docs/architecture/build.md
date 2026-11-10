@@ -23,6 +23,10 @@ Release steps (alpha17 ~13 min total; alpha9 ~15 min):
 | refresh updater `.sig` | 1 s | 1 s | re-minisign after Authenticode changed the bytes |
 | latest.json + publish | 17 s | 15 s | `gh release create --latest` |
 
+The release path also runs `cargo test --lib` after the runtime fetch and before
+the bundle. It costs one test-profile build per release (tag-scoped rust-cache means
+it is not free on every tag); the timings above predate it.
+
 `build-windows.yml` stops at the bare exe. It fetches the runtime first, because
 tauri-build validates `bundle.resources` even for tests and `--no-bundle`, then
 runs frontend, `cargo test --lib`, the build, Authenticode, and uploads one
@@ -33,6 +37,12 @@ Two lessons from the 2026-11-10 red run:
   `cargo check` and `--no-bundle` all need `webview2-runtime/` on disk.
 - A workflow simplification is proven only by a dispatched run on its branch.
   The 10-step branch CI read correctly and could not compile the crate.
+- `cargo check`/`cargo build` never compile `#[cfg(test)]` code: a module split is
+  not verified until `cargo test --lib` (or `--tests`) is green. The lib check is
+  not the test check.
+- Run that check in the **debug** profile. A `--release` check skips every
+  `#[cfg(debug_assertions)]` block, and on 2026-11-10 all 59 compile errors lived
+  exactly there (perf sampler statics, the trn trace rings).
 
 ## 2. Artifacts
 
@@ -105,6 +115,9 @@ flowchart LR
   release breaks `/releases/latest` for everyone still on an older build.
 - **Failed release, user side**: the job fails before publish, so users see no new
   version. A partial publish makes the check fail; the app keeps the working build.
+- **Release path and tests**: until 2026-11-10 `release.yml` never ran `cargo test`,
+  so alpha22 shipped with 69 test-target compile errors that only branch CI would
+  have shown. Release now runs `cargo test --lib` before bundling; keep it there.
 - **Self-signed Authenticode**: machines without the certificate still see
   SmartScreen on a manual download; the updater path does not surface it.
 
