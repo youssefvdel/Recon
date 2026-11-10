@@ -64,6 +64,11 @@ decision I did not want to make for you at 3am.
   is one attribute, which is why choosing in the morning is cheap.
 - **A shell spec** (`docs/v2/shell-b-spec.md`) with the IA: three destinations
   (Now / Matches / Prep), no sidebar, `⌘K` palette, `⋯` for tools.
+- **`bun run verify` — the whole tree in one command, 11.7 s**: build, lint, all
+  21 script checks, the 37 pure-Rust tests and the 16 bun tests, failing fast with
+  the stage name. Proven red: a deliberately broken assertion exits 1 at the check
+  stage and never reaches the Rust stage. Both CI workflows now call it, so the
+  list cannot drift.
 - **`bun test tests/` — 16 tests** on the write path (payload builder, deflate
   round-trip and canonical compare, storefront gate, write response contract).
   Those are the functions where a bug writes garbage into your config.
