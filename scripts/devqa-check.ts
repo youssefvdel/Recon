@@ -1490,6 +1490,34 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('the player panel is a drawer, not a dialog', /aria-modal=["'{]?true/.test(drawer), false);
 }
 
+// --- step 4: Prep is one route, and no fallback value is invented ---------
+{
+  const { existsSync, readFileSync } = await import('node:fs');
+  const prep = readFileSync(new URL('../src/components/Prep.tsx', import.meta.url), 'utf8');
+  const hook = readFileSync(new URL('../src/components/prep/usePrepData.ts', import.meta.url), 'utf8');
+  const agentsT = readFileSync(new URL('../src/components/prep/AgentTable.tsx', import.meta.url), 'utf8');
+  const mapsT = readFileSync(new URL('../src/components/prep/MapTable.tsx', import.meta.url), 'utf8');
+
+  check('no inner tabs on Prep', /role="tab/.test(prep + agentsT + mapsT), false);
+  check('exactly one act selector', (prep.match(/<CustomDropdown/g) ?? []).length, 1);
+  check('the tables own no selector', /CustomDropdown/.test(agentsT + mapsT), false);
+  check('no card tokens in Prep', /rounded-2xl|rounded-3xl|shadow-m3-1|motion/.test(prep + agentsT + mapsT), false);
+  check('no dash placeholder', /'—'/.test(prep + agentsT + mapsT + hook), false);
+
+  /* The eleven named fabrications, pinned so they cannot return: the five the
+   * spec listed plus the six the fallback invented (side K/D multipliers,
+   * 48/52 kill splits, 0.28/0.22 round splits, 1.8 plants, 0.5 defuses). */
+  const invented = /\|\| 30|\|\| 0\.58|\|\| 2\.09|kast: 72|\* 1\.05|\* 0\.95|\* 0\.48|\* 0\.52|\* 0\.28|\* 0\.22|\* 0\.26|\* 0\.24|defusesPerMatch: 0\.5|plantsPerMatch: 1\.8/;
+  check('no invented fallback value survives', invented.test(hook + agentsT + mapsT), false);
+  check('the side splits are zeroed', /defenseKd: 0/.test(hook) && /attackKd: 0/.test(hook) && /plantsPerMatch: 0/.test(hook), true);
+
+  check('the old surfaces are deleted', existsSync(new URL('../src/components/TrackerAgents.tsx', import.meta.url)), false);
+  check('maps surface deleted too', existsSync(new URL('../src/components/TrackerMaps.tsx', import.meta.url)), false);
+  const tv = readFileSync(new URL('../src/components/TrackerView.tsx', import.meta.url), 'utf8');
+  check('the route is prep', /TrackerSubTab = 'overview' \| 'matches' \| 'prep'/.test(tv), true);
+  check('no agents/maps subtab remains', /'agents'|'maps'/.test(tv), false);
+}
+
 // --- step 3: the live lobby is a section, and its states are honest -------
 {
   const { readFileSync, existsSync } = await import('node:fs');
@@ -2066,8 +2094,9 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
 // --- No fabricated tracker-table defaults --------------------------------
 {
   const { readFileSync } = await import('node:fs');
-  const agents = readFileSync(new URL('../src/components/TrackerAgents.tsx', import.meta.url), 'utf8');
-  const maps = readFileSync(new URL('../src/components/TrackerMaps.tsx', import.meta.url), 'utf8');
+  /* The tables moved into components/prep in step 4; the rule follows them. */
+  const agents = readFileSync(new URL('../src/components/prep/usePrepData.ts', import.meta.url), 'utf8');
+  const maps = readFileSync(new URL('../src/components/prep/MapTable.tsx', import.meta.url), 'utf8');
   check('no invented best-kills default', /\|\|\s*30\b/.test(agents), false);
   check('no invented defuses-per-match default', /\|\|\s*0\.58\b/.test(agents), false);
   check('no invented plants-per-match default', /\|\|\s*2\.09\b/.test(agents), false);
