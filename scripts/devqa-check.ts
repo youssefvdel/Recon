@@ -1120,7 +1120,10 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   }
   check('readMmr returns Validated', /readMmr[\s\S]{0,400}Validated<LocalRank>/.test(src), true);
   check('readMatchDetails returns Validated', /readMatchDetails<T>[\s\S]{0,300}Validated<T>/.test(src), true);
-  check('readLiveMatch returns Validated', /readLiveMatch<T>[\s\S]{0,400}Validated<T>/.test(src), true);
+  // Live-match readers return NoMatch<T> (Validated<T> | null): 404 is control
+  // flow there, so null is a legal answer while every other error throws.
+  check('readLiveMatch returns NoMatch', /readLiveMatch<T>[\s\S]{0,400}NoMatch<T>/.test(src), true);
+  check('readLiveMatchById returns NoMatch', /readLiveMatchById[\s\S]{0,400}NoMatch<unknown>/.test(src), true);
   check('readPlayer24h returns Validated', /readPlayer24h[\s\S]{0,400}Validated</.test(src), true);
   // The raw call cannot be reached from outside the two transport modules.
   const outside = readFileSync(new URL('../src/utils/crosshair.ts', import.meta.url), 'utf8')
