@@ -133,8 +133,19 @@ PASS prep     900/900px  0 container(s)
 why: 20 rows at ~90 px inside 21 rounded bordered boxes. The page was never
 scrolled because it was full — it was full because every row was a card.
 
-Remaining: the Tools sheet (store / crosshair / prep-picker / resolution / chat /
-accounts) and Settings, then the `?v2` flip and the old shell deleted in one commit.
+**The six tools and Settings are one sheet now** — anchored sections reached from
+the menu or ⌘K, mounted on first visit and kept.
+
+**One number that looks like a regression and is not:** the resolution section
+reports **18 containers on the sheet** against **9 on the legacy route**. I
+measured the section directly: the 18 are 18 distinct elements, not a double
+render. The old route showed **one tab** of the four resolution children; the sheet
+stacks all four because the design has no inner tabs. Different measurements, not
+a worse surface.
+
+Remaining honest gap: prep-picker is still **14 containers** — nobody de-carded it.
+The live strip still does not paint headless (the Tauri path is unreachable
+without Windows).
 
 ## The rebuild has a pass/fail command now
 
