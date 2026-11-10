@@ -1467,6 +1467,62 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('readSnapshot no longer discards a stale snapshot', /return null;\s*\}\s*\n\}/.test(parseBody) && !/SNAPSHOT_TTL/.test(parseBody), true);
 }
 
+// --- a signed-out detail read describes the situation, not a fault --------
+{
+  const { readFileSync } = await import('node:fs');
+  const riotSrc4 = readFileSync(new URL('../src/sources/riot.ts', import.meta.url), 'utf8');
+  check(
+    'the signed-out case says what it is',
+    /\[tracker\] detail unavailable \(signed out\)/.test(riotSrc4),
+    true
+  );
+  check(
+    'and is gated on entitlements being known-unavailable',
+    /now < entUnavailableUntil && shape\.startsWith\('\/match-details\/'\)/.test(riotSrc4),
+    true
+  );
+  check('the real transport error still reports as an error', /\[riot\] read failed/.test(riotSrc4), true);
+}
+
+// --- one line means one line ----------------------------------------------
+{
+  const { logger, getRecentLogs } = await import('../src/utils/logger.ts');
+  const before = getRecentLogs(500).length;
+  const msg = `duplicate probe ${Math.random()}`;
+  logger.warn('[probe] same event', msg);
+  logger.warn('[probe] same event', msg);
+  const after = getRecentLogs(500);
+  check('an identical line in the same moment is written once', after.length - before, 1);
+  check('the surviving line is the real one', after[after.length - 1].includes(msg), true);
+  // A different message is not swallowed.
+  logger.warn('[probe] other event', msg);
+  check('a different line still lands', getRecentLogs(500).length - before, 2);
+}
+
+// --- one round rail, and selection drives BOTH panes -----------------------
+{
+  const { readFileSync } = await import('node:fs');
+  const rail = readFileSync(new URL('../src/components/RoundRail.tsx', import.meta.url), 'utf8');
+  const tl = readFileSync(new URL('../src/components/RoundTimeline.tsx', import.meta.url), 'utf8');
+  const mdm2 = readFileSync(new URL('../src/components/MatchDetailModal.tsx', import.meta.url), 'utf8');
+
+  // One selector: the rail. RoundTimeline must not render a second tablist.
+  check('RoundTimeline no longer renders a round tablist', /role="tablist"/.test(tl), false);
+  check('the rail owns the tablist', /role="tablist"/.test(rail), true);
+  check('the modal renders the rail exactly once', (mdm2.match(/<RoundRail/g) ?? []).length, 1);
+  check('and pins it', /sticky top-0 z-20[^"]*"\s*>\s*<RoundRail/.test(mdm2), true);
+
+  // Selection is state: the rail reports it, the timeline reads it for both panes.
+  check('the rail reports selection upward', /onSelect\(roundNum\)/.test(rail) && /onClick=\{\(\) => select\(r\.roundNum\)\}/.test(rail), true);
+  check(
+    'the timeline takes a controlled selection',
+    /selectedRound\?: number \| null;/.test(tl) && /onSelectRound\?: \(roundNum: number\) => void;/.test(tl),
+    true
+  );
+  check('the modal owns the one selection value', /const \[selectedRound, setSelectedRound\] = useState<number \| null>\(null\);/.test(mdm2), true);
+  check('both panes read the same value', (tl.match(/selected\b/g) ?? []).length > 1, true);
+}
+
 // --- match modal: verdict hero, no duplicate rail, sticky header -----------
 {
   const { readFileSync } = await import('node:fs');
