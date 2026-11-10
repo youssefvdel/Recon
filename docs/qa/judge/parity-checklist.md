@@ -7,6 +7,11 @@ looked fine once.
 Run everything: `bun run verify` (build · lint · 22 script checks · pure-Rust tests
 · bun tests) and `bun run uicheck` (every route, rendered in Chromium).
 
+Current result: **`verify` PASS** and **`uicheck` 10/10 shipped routes pass**.
+The legacy shell is still measured — `legacy fallback (?legacy=1): 9/10 — measured,
+not shipped` — because it ships for one release as an escape hatch, and its known
+Matches page is information rather than a regression in the app people run.
+
 ## Destinations (uicheck route → landmark)
 
 | Surface | Reached by | Landmark asserted |
@@ -39,6 +44,8 @@ except where a written reason allows otherwise.
 | Updater ordering (`alpha9 < alpha10`) | same suite |
 | One destination registry | `tests/nav.test.ts` — six anchors in sheet order, settings separate, unique ids, unmatched query → empty |
 | One act selection shared by Now and Prep | `devqa-check.ts` |
+| Rank-point movement over the recent games | `tests/rr-trend.test.ts` — net, W/L, best/worst, newest-20 cut, unpriceable games skipped, nothing priced ⇒ no strip at all |
+| One destination registry | `tests/nav.test.ts` |
 
 ## Not proven, and why — do not read these as green
 
@@ -49,6 +56,25 @@ except where a written reason allows otherwise.
 | Overlay HUD after the v2 flip | The overlay window loads `index.html#overlay` and is routed to the old tree (checked in `tauri.conf.json`), but no Windows run has exercised it since the flip. |
 | Display facts (native resolution, refresh) | Marked UNVERIFIED in the UI when the read fails — by design, not a test. |
 | Resolution section container count | 18 on the sheet vs 9 on the legacy route: the legacy route showed one tab of four, the sheet stacks all four. Different measurement, not a regression. |
+
+## Player features added from the evidence pack
+
+The research (`docs/v2/player-features.md`) ranked what players actually ask for
+against what our read-only data can support. Both items at the top of that list
+that were cheap and honest are in:
+
+- **Advanced scoreboard** — KAST (corrected to four-way), ADR, traded deaths,
+  first bloods, average loadout, each naming its derivation and each absent when
+  the payload cannot support it (`tests/advanced-stats.test.ts`).
+- **Rank-point movement** — net RR, W/L, best and worst over the last 20 ranked
+  games, from the competitive-updates rows the app already fetched
+  (`tests/rr-trend.test.ts`, rendered on Now).
+
+Deliberately **not** added, with the reason: hidden MMR (no source), a "smurf
+score" (a heuristic dressed as a verdict), a 0–1000 tracker score (someone else's
+population formula), win probability (no validated model — a number would be
+invented), minimaps/heatmaps (the payload carries kill coordinates in Unreal world
+units, but our parser drops them and each map needs a transform).
 
 ## The two numbers that justify the rebuild
 
