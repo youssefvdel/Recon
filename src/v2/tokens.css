@@ -1,0 +1,142 @@
+/* Recon v2 — the token contract.
+ *
+ * This is the ONLY file allowed to contain raw colour literals. Every component
+ * consumes these custom properties; a raw hex/rgb in a component is a bug.
+ * Graphite is the default theme. Nocturne is the same roles with different values.
+ *
+ * Roles are semantic, not decorative: one role, one meaning.
+ * surface-0 page · surface-1 raised working plane · surface-2 control/inset
+ * accent = the one interactive/selected thing · live = an in-progress match
+ * positive = resolved win · negative = resolved loss/error · attention = stale/pending/needs action
+ */
+
+:root,
+[data-theme='graphite'] {
+  color-scheme: dark;
+
+  /* Colour roles */
+  --surface-0: #0a0d0b;
+  --surface-1: #111512;
+  --surface-2: #181e19;
+  --on-surface: #e9f1ea;
+  --on-surface-muted: #8a998d;
+  --outline: #2a342c;
+  --outline-strong: #455247;
+  --accent: #c9f25c;
+  --on-accent: #101506;
+  --positive: #63d69a;
+  --negative: #ff6658;
+  --attention: #e7b84d;
+  --live: #ff7a45;
+  --focus: #c9f25c;
+
+  /* Families: roles choose from these; no component picks a new face */
+  --font-display: 'Space Grotesk', 'Arial Narrow', Arial, sans-serif;
+  --font-body: 'Space Grotesk', 'Segoe UI', Arial, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+
+  /* Type scale — size / line / weight. No arbitrary sizes. */
+  --text-display-hero-size: 64px;
+  --text-display-hero-line: 66px;
+  --text-display-hero-weight: 700;
+  --text-display-size: 48px;
+  --text-display-line: 52px;
+  --text-display-weight: 700;
+  --text-headline-size: 28px;
+  --text-headline-line: 34px;
+  --text-headline-weight: 700;
+  --text-title-size: 20px;
+  --text-title-line: 26px;
+  --text-title-weight: 600;
+  --text-body-size: 14px;
+  --text-body-line: 20px;
+  --text-body-weight: 400;
+  --text-body-strong-weight: 600;
+  --text-label-size: 11px;
+  --text-label-line: 14px;
+  --text-label-weight: 600;
+  --text-label-tracking: 0.12em;
+  --text-data-size: 12px;
+  --text-data-line: 16px;
+  --text-data-weight: 500;
+  --text-data-large-size: 16px;
+  --text-data-large-line: 20px;
+  --text-data-large-weight: 600;
+
+  /* Space scale — every margin/padding/gap comes from here */
+  --space-2: 2px;
+  --space-4: 4px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --space-48: 48px;
+  --space-64: 64px;
+
+  /* Layout */
+  --layout-max: 1280px;
+  --layout-gutter: 24px;
+  --page-padding: 24px;
+  --reading-column: 760px;
+  --row-height: 36px;
+
+  /* Radius scale: shell / controls / cards / pills. No ad-hoc radius. */
+  --radius-shell: 0;
+  --radius-control: 2px;
+  --radius-card: 2px;
+  --radius-pill: 999px;
+
+  /* Elevation: one emphasis channel. Cards use fill + hairline; overlays use fill + shadow. */
+  --elevation-none: none;
+  --elevation-overlay: 0 18px 60px rgba(0, 0, 0, 0.55);
+  --hairline: 1px solid var(--outline);
+  --hairline-strong: 1px solid var(--outline-strong);
+
+  /* Motion — durations never delay data */
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 240ms;
+  --motion-large: 320ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+}
+
+[data-theme='nocturne'] {
+  color-scheme: dark;
+
+  --surface-0: #0b0811;
+  --surface-1: #151020;
+  --surface-2: #1e172b;
+  --on-surface: #f4eefb;
+  --on-surface-muted: #a99bb9;
+  --outline: #352b45;
+  --outline-strong: #544468;
+  --accent: #c9b8ff;
+  --on-accent: #1b1030;
+  --positive: #a8e8c5;
+  --negative: #ff9d90;
+  --attention: #e5bd6b;
+  --live: #ff7a86;
+  --focus: #c9b8ff;
+
+  --font-display: 'Fraunces', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  --font-body: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+
+  --radius-control: 6px;
+  --radius-card: 14px;
+  --page-padding: 32px;
+  --elevation-overlay: 0 20px 70px rgba(0, 0, 0, 0.6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root,
+  [data-theme='graphite'],
+  [data-theme='nocturne'] {
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+    --motion-slow: 0ms;
+    --motion-large: 0ms;
+  }
+}

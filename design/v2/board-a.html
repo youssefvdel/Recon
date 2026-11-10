@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Recon v2 — Theme A · Nocturne</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500&family=Inter:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --surface-0:#0b0811; --surface-1:#151020; --surface-2:#1e172b;
+  --on-surface:#f4eefb; --on-surface-muted:#a99bb9; --outline:#352b45; --outline-strong:#544468;
+  --accent:#c9b8ff; --on-accent:#1b1030; --positive:#a8e8c5; --negative:#ff9d90; --attention:#e5bd6b; --live:#ff7a86; --focus:#c9b8ff;
+  --font-display:"Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --font-body:"Inter", "Segoe UI", system-ui, sans-serif;
+  --font-mono:"JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  --radius-card:14px; --radius-control:6px; --pad:32px; --gap:16px; --row:36px;
+}
+html{scrollbar-color:var(--outline) var(--surface-0);scrollbar-width:thin}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:var(--surface-0)}
+::-webkit-scrollbar-thumb{background:var(--outline);border:2px solid var(--surface-0);border-radius:8px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--surface-0);color:var(--on-surface);font-family:var(--font-body);font-size:14px;line-height:20px;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(1200px 600px at 18% -8%,rgba(201,184,255,.10),transparent 60%),linear-gradient(90deg,rgba(255,255,255,.02) 1px,transparent 1px);background-size:auto,96px 100%}
+.board{max-width:1280px;margin:0 auto;min-height:100vh;background:transparent;position:relative}
+.appbar{height:64px;display:flex;align-items:center;gap:28px;padding:0 var(--pad);border-bottom:1px solid var(--outline);position:relative;z-index:2}
+.brand{display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none}
+.brand-mark{width:30px;height:30px;border:1px solid var(--outline-strong);border-radius:50%;display:grid;place-items:center;font-family:var(--font-display);font-size:17px;color:var(--on-surface)}
+.brand-name{font-family:var(--font-display);font-size:21px;letter-spacing:-.01em}
+.brand-ver{font-family:var(--font-mono);font-size:11px;color:var(--on-surface-muted);border:1px solid var(--outline);border-radius:999px;padding:1px 6px}
+.nav{display:flex;gap:24px;margin-left:14px;height:100%}
+.nav a{display:flex;align-items:center;color:var(--on-surface-muted);text-decoration:none;font-size:12px;letter-spacing:.02em;border-bottom:1px solid transparent}
+.nav a.active{color:var(--on-surface);border-bottom-color:var(--accent)}
+.appbar-tools{margin-left:auto;display:flex;align-items:center;gap:14px}
+.live-chip{display:flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;color:var(--live)}
+.live-chip i,.live-state i{width:5px;height:5px;border-radius:50%;background:currentColor}
+.sync{font-family:var(--font-mono);font-size:11px;color:var(--on-surface-muted)}
+.cmd,.iconbtn{background:var(--surface-2);border:1px solid var(--outline);border-radius:var(--radius-control);color:var(--on-surface-muted);height:30px;min-width:30px;padding:0 9px;cursor:pointer;font-family:var(--font-mono);font-size:11px}
+.cmd:hover,.iconbtn:hover{border-color:var(--outline-strong);color:var(--on-surface)}
+.iconbtn{font-family:var(--font-body);font-size:16px;padding:0 8px}
+.window-dots{display:flex;gap:6px;margin-left:4px}
+.window-dots i{width:9px;height:9px;border-radius:50%;border:1px solid var(--outline)}
+.live-strip{height:44px;display:flex;align-items:center;gap:16px;padding:0 var(--pad);border-bottom:1px solid var(--outline);background:var(--surface-1);font-family:var(--font-mono);font-size:11px;position:sticky;top:0;z-index:3}
+.live-state{display:flex;align-items:center;gap:6px;color:var(--live);letter-spacing:.14em;font-weight:600}
+.live-map{font-family:var(--font-display);font-size:15px;color:var(--on-surface)}
+.live-score{font-size:15px;color:var(--on-surface);font-variant-numeric:tabular-nums}
+.live-meta,.live-phase{color:var(--on-surface-muted)}
+.ghost{margin-left:auto;background:transparent;border:1px solid var(--outline);border-radius:999px;color:var(--on-surface-muted);font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;padding:6px 12px;cursor:pointer}
+.ghost:hover{border-color:var(--accent);color:var(--accent)}
+.page{padding:var(--pad) var(--pad) 48px}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;border-bottom:1px solid var(--outline);padding-bottom:20px}
+.eyebrow{font-family:var(--font-mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--on-surface-muted)}
+h1{font-family:var(--font-display);font-weight:400;font-size:24px;line-height:30px;margin:8px 0 0;letter-spacing:-.01em}
+.btn{background:var(--accent);color:var(--on-accent);border:1px solid var(--accent);border-radius:var(--radius-control);height:36px;padding:0 16px;font-family:var(--font-body);font-weight:600;font-size:12px;cursor:pointer}
+.btn:hover{filter:brightness(1.06)}
+.btn.wide{width:100%;margin-top:14px}
+.record{display:flex;align-items:baseline;gap:20px;padding:28px 0 24px;border-bottom:1px solid var(--outline)}
+.record-number{font-family:var(--font-display);font-size:64px;line-height:66px;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.record-side{display:flex;flex-direction:column;gap:6px}
+.pct{font-family:var(--font-mono);font-size:20px;color:var(--on-surface-muted)}
+.record-sub{font-family:var(--font-mono);font-size:11px;letter-spacing:.02em;color:var(--on-surface-muted)}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:var(--gap);margin-top:24px;align-items:start}
+.section-head{display:flex;align-items:baseline;justify-content:space-between;padding:16px 0 10px;border-bottom:1px solid var(--outline);font-family:var(--font-mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--on-surface-muted)}
+.matches-head{margin-top:24px}
+.count{color:var(--on-surface-muted);letter-spacing:.08em}
+.table-wrap{border-bottom:1px solid var(--outline)}
+table.stats{width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:11px}
+.stats th{text-align:left;font-weight:500;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--on-surface-muted);padding:10px 8px 8px;border-bottom:1px solid var(--outline)}
+.stats td{padding:9px 8px;border-bottom:1px solid rgba(53,43,69,.55);height:var(--row);font-variant-numeric:tabular-nums}
+.stats tr:last-child td{border-bottom:0}
+.stats .num{text-align:right}
+.stats .me td{color:var(--on-surface);background:rgba(201,184,255,.06)}
+.stats em{font-style:normal;color:var(--on-surface-muted)}
+.agent{display:inline-block;width:6px;height:6px;border:1px solid var(--outline-strong);border-radius:50%;margin-right:8px;vertical-align:1px}
+.match{display:grid;grid-template-columns:44px minmax(0,1fr) minmax(0,1.1fr) 150px 14px;align-items:center;gap:12px;height:44px;border-bottom:1px solid var(--outline);font-family:var(--font-mono);font-size:11px}
+.match:hover{background:rgba(201,184,255,.04);cursor:pointer}
+.age{color:var(--on-surface-muted)}
+.match-main{display:flex;align-items:baseline;gap:10px;min-width:0}
+.match-main strong{font-family:var(--font-display);font-size:15px;font-weight:500;color:var(--on-surface)}
+.verdict{font-size:11px;letter-spacing:.14em}
+.verdict.win{color:var(--positive)}
+.verdict.loss{color:var(--negative)}
+.score{color:var(--on-surface);font-size:13px;font-variant-numeric:tabular-nums}
+.match-sub{color:var(--on-surface-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.match-sub b{color:var(--on-surface);font-weight:500}
+.spark{display:flex;align-items:flex-end;gap:2px;height:16px}
+.spark i{display:block;width:3px;height:12px;background:var(--on-surface-muted);opacity:.55}
+.spark i.w{background:var(--positive);opacity:.85}
+.spark i.l{background:var(--negative);opacity:.65}
+.chev{color:var(--outline-strong);font-family:var(--font-body);font-size:18px;text-align:right}
+.field{display:flex;align-items:center;gap:10px;margin-top:24px;border-bottom:1px solid var(--outline);padding-bottom:10px}
+.field-label{font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--on-surface-muted)}
+.field input{flex:1;background:transparent;border:0;outline:0;color:var(--on-surface);font-family:var(--font-body);font-size:13px;padding:2px 0}
+.field input::placeholder{color:var(--outline-strong)}
+.field kbd{font-family:var(--font-mono);font-size:11px;color:var(--on-surface-muted);border:1px solid var(--outline);border-radius:3px;padding:2px 5px}
+.empty{display:flex;align-items:center;gap:14px;margin-top:24px;padding:18px 0;border-bottom:1px solid var(--outline)}
+.empty-mark{font-family:var(--font-display);font-size:26px;color:var(--outline-strong);width:28px;text-align:center}
+.empty-copy{flex:1;min-width:0}
+.empty-copy strong{display:block;font-family:var(--font-display);font-size:16px;font-weight:500}
+.empty-copy p{margin:4px 0 0;color:var(--on-surface-muted);font-size:12px}
+.empty .ghost{margin-left:0}
+.card{background:var(--surface-1);border:1px solid var(--outline);border-radius:var(--radius-card);padding:16px}
+.card-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:12px}
+.kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--on-surface-muted)}
+.timer{font-family:var(--font-mono);font-size:11px;color:var(--attention);letter-spacing:.04em}
+.bundle-art{height:122px;border-radius:calc(var(--radius-card) - 4px);background:linear-gradient(135deg,#241a35,#0e0a15 58%,#3a2450);position:relative;overflow:hidden;border:1px solid rgba(201,184,255,.14)}
+.blade{position:absolute;width:150px;height:22px;background:linear-gradient(90deg,transparent,#c9b8ff,#7d6aa8);transform:rotate(-34deg);left:-20px;top:55px;opacity:.75}
+.blade.two{width:120px;left:110px;top:82px;opacity:.35}
+.stamp{position:absolute;right:10px;bottom:8px;font-family:var(--font-display);font-size:38px;color:rgba(244,238,251,.16);letter-spacing:-.04em}
+.card h2{font-family:var(--font-display);font-size:19px;font-weight:500;margin:12px 0 2px}
+.meta{font-family:var(--font-mono);font-size:11px;color:var(--on-surface-muted);margin:0}
+.rail-note{margin-top:16px;padding-top:14px;border-top:1px solid var(--outline)}
+.rail-note p{margin:6px 0 0;color:var(--on-surface-muted);font-size:11px;line-height:17px}
+.board-foot{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:16px var(--pad);border-top:1px solid var(--outline);font-family:var(--font-mono);font-size:11px;color:var(--on-surface-muted)}
+.theme-name{color:var(--accent);letter-spacing:.1em;text-transform:uppercase}
+.theme-desc{letter-spacing:.01em}
+.swatches{display:flex;gap:5px;margin-left:auto}
+.swatches i{width:12px;height:12px;border-radius:3px;background:var(--s);border:1px solid rgba(255,255,255,.16)}
+@media (max-width:900px){
+  :root{--pad:20px;--gap:14px}
+  .appbar{height:56px;gap:14px}
+  .brand-ver,.sync,.window-dots{display:none}
+  .nav{gap:16px;margin-left:2px}
+  .nav a{font-size:11px}
+  .appbar-tools{gap:8px}
+  .live-chip{display:none}
+  .live-strip{gap:10px;height:42px;font-size:11px}
+  .live-meta,.live-phase{display:none}
+  .page-head{display:block}
+  .page-head .btn{margin-top:16px;white-space:nowrap}
+  .record-number{font-size:48px;line-height:50px}
+  .record{display:block}
+  .record-side{margin-top:10px}
+  .record-sub{font-size:11px}
+  .layout{grid-template-columns:1fr}
+  .match{grid-template-columns:36px minmax(0,1fr) 14px;height:auto;padding:10px 0;gap:8px}
+  .match-sub{display:none}
+  .spark{display:none}
+  .stats th:nth-child(2),.stats td:nth-child(2){display:none}
+  .empty{flex-wrap:wrap}
+  .empty .ghost{margin-left:42px}
+  .board-foot{align-items:flex-start}
+  .swatches{margin-left:0}
+}
+</style>
+</head>
+<body>
+
+  <div class="board">
+    <header class="appbar">
+      <a class="brand" href="#" aria-label="Recon">
+        <span class="brand-mark">R</span>
+        <span class="brand-name">Recon</span>
+        <span class="brand-ver">v2</span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a class="active" href="#">Now</a>
+        <a href="#">Matches</a>
+        <a href="#">Prep</a>
+      </nav>
+      <div class="appbar-tools">
+        <span class="live-chip"><i aria-hidden="true"></i>LIVE</span>
+        <span class="sync">synced 2m</span>
+        <button class="cmd" type="button"><span>⌘K</span></button>
+        <button class="iconbtn" type="button" aria-label="Tools">⋯</button>
+        <span class="window-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+      </div>
+    </header>
+
+    <div class="live-strip" role="status" aria-label="Live match">
+      <span class="live-state"><i aria-hidden="true"></i>LIVE</span>
+      <span class="live-map">Ascent</span>
+      <span class="live-score">6–4</span>
+      <span class="live-meta">10 players</span>
+      <span class="live-phase">Live</span>
+      <button class="ghost" type="button">View lobby</button>
+    </div>
+
+    <main class="page">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Episode 9 · Act 3 · Competitive</div>
+          <h1>Now</h1>
+        </div>
+        <button class="btn" type="button">Open HUD</button>
+      </div>
+
+      <section class="record" aria-label="Act record">
+        <div class="record-number">34–29</div>
+        <div class="record-side">
+          <span class="pct">54%</span>
+          <span class="record-sub">Diamond 2 · 47 RR · 218 ACS · 1.24 K/D · 27% HS · 63 games</span>
+        </div>
+      </section>
+
+      <div class="layout">
+        <section class="main-col">
+          <div class="section-head"><span>Live lobby</span><span class="count">10 players</span></div>
+          <div class="table-wrap">
+            <table class="stats">
+              <thead><tr><th>Player</th><th>Rank</th><th class="num">ACS</th><th class="num">K/D</th><th class="num">HS</th></tr></thead>
+              <tbody>
+                <tr class="me"><td><span class="agent"></span>Youssef <em>#EGY</em></td><td>Diamond 2</td><td class="num">241</td><td class="num">1.24</td><td class="num">31%</td></tr>
+                <tr><td><span class="agent"></span>Shadow <em>#EUW</em></td><td>Diamond 1</td><td class="num">198</td><td class="num">1.06</td><td class="num">24%</td></tr>
+                <tr><td><span class="agent"></span>ViperX <em>#NA1</em></td><td>Platinum 3</td><td class="num">176</td><td class="num">0.94</td><td class="num">22%</td></tr>
+                <tr><td><span class="agent"></span>Clutch <em>#EUW</em></td><td>Ascendant 1</td><td class="num">164</td><td class="num">0.88</td><td class="num">19%</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="section-head matches-head"><span>Matches</span><span class="count">63</span></div>
+          <div class="match" role="button" tabindex="0">
+            <span class="age">2h</span>
+            <span class="match-main"><strong>Ascent</strong><span class="verdict win">WIN</span><span class="score">13–9</span></span>
+            <span class="match-sub">Jett <b>24/14/6</b> · 241 ACS</span>
+            <span class="spark" aria-hidden="true"><i class="w"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="w"></i><i class="l"></i><i class="l"></i><i class="l"></i><i class="w"></i></span>
+            <span class="chev" aria-hidden="true">›</span>
+          </div>
+          <div class="match" role="button" tabindex="0">
+            <span class="age">1d</span>
+            <span class="match-main"><strong>Haven</strong><span class="verdict loss">LOSS</span><span class="score">11–13</span></span>
+            <span class="match-sub">Omen <b>18/17/9</b> · 196 ACS</span>
+            <span class="spark" aria-hidden="true"><i class="w"></i><i class="l"></i><i class="l"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="l"></i><i class="l"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="l"></i><i class="l"></i><i class="w"></i><i class="l"></i><i class="w"></i></span>
+            <span class="chev" aria-hidden="true">›</span>
+          </div>
+
+          <label class="field">
+            <span class="field-label">Search</span>
+            <input type="text" placeholder="Match, map, or player" />
+            <kbd>⌘K</kbd>
+          </label>
+
+          <div class="empty">
+            <span class="empty-mark" aria-hidden="true">∅</span>
+            <div class="empty-copy">
+              <strong>No cached details yet</strong>
+              <p>Open Riot Client, then refresh. Nothing is guessed while it is closed.</p>
+            </div>
+            <button class="ghost" type="button">Retry</button>
+          </div>
+        </section>
+
+        <aside class="rail">
+          <article class="card" aria-label="Featured store bundle">
+            <div class="card-top"><span class="kicker">Featured bundle</span><span class="timer">2d 14h</span></div>
+            <div class="bundle-art" aria-hidden="true"><span class="blade"></span><span class="blade two"></span><span class="stamp">P//2</span></div>
+            <h2>Prime//2.0</h2>
+            <p class="meta">12 items · 5,900 VP</p>
+            <button class="btn wide" type="button">View bundle</button>
+          </article>
+
+          <div class="rail-note">
+            <span class="kicker">Card test</span>
+            <p>One object, one decision. Delete this border and the bundle still reads as one thing — the border marks the decision, it does not decorate a list.</p>
+          </div>
+        </aside>
+      </div>
+    </main>
+
+    <footer class="board-foot">
+      <span class="theme-name">A — Nocturne</span>
+      <span class="theme-desc">editorial dark · serif display · violet action · cards earn their border</span>
+      <span class="swatches" aria-label="Palette"><i style="--s:var(--surface-0)"></i><i style="--s:var(--surface-1)"></i><i style="--s:var(--accent)"></i><i style="--s:var(--positive)"></i><i style="--s:var(--negative)"></i><i style="--s:var(--attention)"></i></span>
+    </footer>
+  </div>
+</body>
+</html>
