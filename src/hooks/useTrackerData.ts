@@ -870,7 +870,7 @@ export function useTrackerData(): TrackerData {
 }
 
 /* Scoped season-names subscription for views that need nothing else from the
- *  tracker store (e.g. LiveMatchView's peak-act captions). Subscribing to the
+ *  tracker store (e.g. the live lobby's peak-act captions). Subscribing to the
  *  whole store re-renders on EVERY background enrichment (trn, trnAgents,
  *  trnMaps, trnPrev, details...) even when none of it is displayed. The
  *  `seasonNames` object identity only changes when gameData actually reloads,

@@ -19,7 +19,15 @@ function check(name: string, actual: unknown, expected: unknown): void {
   }
 }
 
-const live = await Bun.file('src/components/LiveMatchView.tsx').text();
+/* The live surface is a section now, not a page: read the whole folder so a
+ * seam move inside it cannot break these invariants. */
+const live = (
+  await Promise.all(
+    (await Array.fromAsync(new Bun.Glob('src/components/live/*.{ts,tsx}').scan('.'))).map((f) =>
+      Bun.file(f).text()
+    )
+  )
+).join('\n');
 // The overlay is no longer one file: the HUD is split into components/hud/.
 // Read the whole surface so a seam move cannot break the invariant by
 // relocating the polling code.

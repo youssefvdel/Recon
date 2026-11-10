@@ -125,7 +125,15 @@ check(
 
 // --- Sibling-cause regressions (source text) ---
 const tracker = await Bun.file('src/utils/tracker.ts').text();
-const live = await Bun.file('src/components/LiveMatchView.tsx').text();
+/* The live surface is a section now, not a page: read the whole folder so a
+ * seam move inside it cannot break these invariants. */
+const live = (
+  await Promise.all(
+    (await Array.fromAsync(new Bun.Glob('src/components/live/*.{ts,tsx}').scan('.'))).map((f) =>
+      Bun.file(f).text()
+    )
+  )
+).join('\n');
 // The overlay is no longer one file: the HUD is being split into components/hud/.
 // Read the whole surface so a seam move cannot silently satisfy or break this
 // invariant by relocating the markup.

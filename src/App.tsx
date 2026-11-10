@@ -162,13 +162,11 @@ export const App: React.FC = () => {
     } catch {}
   }, [currentTab]);
   // Jump-to-live requests from the TopBar LIVE pill.
-  const [liveNonce, setLiveNonce] = useState(0);
   const [pendingMatchId, setPendingMatchId] = useState<string | null>(null);
   useEffect(() => {
-    const onGotoLive = () => {
-      setCurrentTab('overview');
-      setLiveNonce((n) => n + 1);
-    };
+    /* The LIVE pill now routes to Overview, where the live strip lives: there
+     * is no Live tab to jump to. */
+    const onGotoLive = () => setCurrentTab('overview');
     window.addEventListener('recon:goto-live', onGotoLive);
     /* The Overview feed no longer opens a dialog: it asks the Matches ledger to
      * expand that match. */
@@ -391,7 +389,7 @@ export const App: React.FC = () => {
       clearInterval(tabTimer);
       tabTimer = null;
     };
-    // Immediate tick on return (OverlayView/LiveMatchView pattern) so a
+    // Immediate tick on return (OverlayView / live-lobby pattern) so a
     // request filed while hidden never waits a full interval.
     const onTabVis = () => {
       checkRequestedTab().then(applyTabRequest).catch(() => {});
@@ -591,7 +589,6 @@ export const App: React.FC = () => {
                 {(currentTab === 'overview' || currentTab === 'matches') && (
                   <TrackerView
                     initialSubTab={currentTab === 'matches' ? 'matches' : 'overview'}
-                    liveRequest={liveNonce}
                     initialMatchId={pendingMatchId}
                     onMatchConsumed={() => setPendingMatchId(null)}
                   />

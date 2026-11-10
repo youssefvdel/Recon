@@ -1438,7 +1438,7 @@ const LAST_ACTIVE_MATCH_KEY = 'recon_last_active_match_v1';
 const LAST_ACTIVE_TTL_MS = 6 * 60 * 60 * 1000;
 /** A persisted live lobby older than this is never treated as live.
  *  The live poll refreshes the cache every 3s while a match is running
- *  (LiveMatchView interval; overlay backs off to ~30s when idle), so a
+ *  (live-lobby interval; overlay backs off to ~30s when idle), so a
  *  snapshot this old means the poll stopped — Riot/RECON closed or the app
  *  was restarted after a past match — and the lobby it describes is over.
  *  2 min is ~40 missed 3s polls: generous enough that a transient poll stall
@@ -1578,7 +1578,7 @@ async function fetchLiveGamePodId(
 }
 
 /**
- * Live-match entry point shared by every poller (overlay, LiveMatchView,
+ * Live-match entry point shared by every poller (overlay, live lobby,
  * focus/visibility handlers, global refresh).
  *
  * Concurrent callers share one in-flight fetch, and a monotonic sequence
