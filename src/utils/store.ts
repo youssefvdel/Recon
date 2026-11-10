@@ -282,11 +282,16 @@ export async function getAccountStore(force = false): Promise<AccountStore | nul
 
   const task = (async (): Promise<AccountStore | null> => {
     try {
-      const { getEntitlements, detectRegion, riotPost } = await import('./tracker');
+      const { getEntitlements, detectRegion } = await import('./tracker');
+      const { readStorefront } = await import('../sources/riot');
       const ent = await getEntitlements().catch(() => null);
       if (!ent?.puuid) return memStore?.data ?? null;
       const region = await detectRegion().catch(() => 'eu');
-      const raw = await riotPost(pdHostFor(region), `/store/v3/storefront/${ent.puuid}`);
+      // Validated read: an error payload throws (the catch below keeps the
+      // memory cache) instead of parsing as an empty shop. The deep offer shape
+      // is still the caller's model, as before.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const raw = (await readStorefront(ent.puuid, pdHostFor(region))) as Record<string, any>;
       const layout = raw?.SkinsPanelLayout ?? {};
       const accStore = raw?.AccessoryStore ?? {};
       const bundle = raw?.FeaturedBundle?.Bundle ?? {};

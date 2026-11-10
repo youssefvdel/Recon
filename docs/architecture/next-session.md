@@ -85,9 +85,8 @@ raw. The call sites are pinned by devqa (file + function + count), so this list 
 only change deliberately:
 
 - `src/utils/crosshair.ts:639` — `riotPut(host, '/playerPref/v3/savePreference', payload)`
-- `src/utils/store.ts:289` — `riotPost(pdHostFor(region), '/store/v3/storefront/{puuid}')`
-- **Converted:** `src/utils/prepick.ts` now goes through `riotPostValidated`; the
-  devqa pin no longer lists it.
+- **Converted:** `src/utils/prepick.ts` → `riotPostValidated`; `src/utils/store.ts`
+  → `readStorefront`. The devqa pin now lists only the crosshair PUT.
 
 A validated write means **two** validations, not one:
 
@@ -108,13 +107,13 @@ path-injection guard as much as a correctness one), the call goes through
 `.catch(() => {})` stays — a failed hover is not user-facing. The devqa pin
 shrinking by one site is the receipt.
 
-**2. `store.ts:289` — safe after a response-shape pass.** A read-shaped POST (empty
-body) returning storefront JSON that the function parses (`SkinsPanelLayout`,
-`AccessoryStore`, `FeaturedBundle`). Nothing user-owned is written; the risk is
-treating an error payload as an empty shop. Conversion: `readStorefront(puuid, host)`
-= POST + `assertRiotOk` + `Validated<unknown>`; the caller keeps its parse and its
-cache. Needs a schema pass over those three fields and must keep "an error is not
-an empty store" (today the caller falls back to the memory cache).
+**2. `store.ts` — converted.** A read-shaped POST (empty body) whose response is
+the shop. `readStorefront(puuid, host)` validates the transport (`assertRiotOk`)
+and requires at least one of `SkinsPanelLayout` / `AccessoryStore` /
+`FeaturedBundle`, so an error payload or a non-shop shape throws instead of
+parsing into an empty store and overwriting the cache. The caller's existing
+catch still returns the memory/localStorage snapshot, so a failed read keeps the
+last known shop. The deep offer model stays with the caller for now.
 
 **3. `crosshair.ts:639` — convert last, with read-back.** A true write: deflated
 `Ares.PlayerSettings` envelope, response must be `{ data: string }`, and a wrong
@@ -125,8 +124,8 @@ reporting `true`. Keep the 30 s timeout race and the `catch → false` contract.
 
 ### Order and receipts
 
-storefront (read-shaped POST) → crosshair (real write with read-back). prepick is
-already converted. Each is its own commit, with the devqa pin updated in the same
+Only the crosshair PUT remains: a real write with a deflated payload and a
+read-back requirement, so it gets its own session. Each is its own commit, with the devqa pin updated in the same
 write; the pin's expected list shrinking is the receipt that raw writes converted.
 
 ## Rules that carried this refactor and should carry the next one
