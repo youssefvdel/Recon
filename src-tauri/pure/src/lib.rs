@@ -22,6 +22,9 @@ pub mod cache_paths;
 #[path = "../../src/trn_proxy/trace.rs"]
 pub mod trace;
 
+#[path = "../../src/trn_http_rules.rs"]
+pub mod trn_http_rules;
+
 #[cfg(test)]
 mod tests {
     use crate::cache_paths::{
@@ -52,6 +55,73 @@ mod tests {
             basis: MemBasis::ResidentWorkingSet,
             omitted: 0,
         }
+    }
+
+    // ---- trn_http_rules.rs: the security-relevant transport rules ----------
+
+    use crate::trn_http_rules::{host_allowed, status_error, validate_path, MAX_PATH};
+
+    #[test]
+    fn only_the_trn_api_host_is_allowed() {
+        assert!(host_allowed("api.tracker.network"));
+        assert!(host_allowed("API.TRACKER.NETWORK"));
+        // Suffix/prefix tricks and userinfo are not the allowlisted host.
+        assert!(!host_allowed("api.tracker.network.evil.example"));
+        assert!(!host_allowed("evilapi.tracker.network"));
+        assert!(!host_allowed("api.tracker.network@evil.example"));
+        assert!(!host_allowed("evil.example#api.tracker.network"));
+        // A port never makes it a different host, but it is also never a match
+        // for the exact host string the redirect check passes.
+        assert!(!host_allowed("api.tracker.network:443"));
+        // Scheme-relative and absolute redirect targets.
+        assert!(!host_allowed("//evil.example"));
+        assert!(!host_allowed("https://evil.example"));
+        // Empty host can only be a parse failure, never "allowed".
+        assert!(!host_allowed(""));
+    }
+
+    #[test]
+    fn path_validation_rejects_anything_but_a_root_relative_path() {
+        assert!(validate_path("/api/v2/valorant/standard/profile/riot/Ginger%20Tofu%231312").is_ok());
+        assert!(validate_path("/api/v2/valorant/standard/matches/riot/x").is_ok());
+        // Absolute URL / scheme smuggling.
+        assert_eq!(validate_path("https://evil.example/api/x").unwrap_err(), "TRN_HTTP_BAD_PATH");
+        assert_eq!(validate_path("//evil.example/api/x").unwrap_err(), "TRN_HTTP_BAD_PATH");
+        // Traversal, in any position.
+        assert!(validate_path("/api/../secrets").is_err());
+        assert!(validate_path("/api/v2/..").is_err());
+        assert!(validate_path("/api/./x").is_err());
+        // The query string is allowed and passed through untouched: the profile
+        // routes need ?source=overwolf-2 for the full payload.
+        assert!(validate_path(
+            "/api/v2/valorant/standard/profile/riot/Ginger%20Tofu%231312?source=overwolf-2"
+        )
+        .is_ok());
+        assert!(validate_path("/api/v2/valorant/standard/profile/riot/x?source=overwolf-2&extra=1").is_ok());
+        // ...but a query cannot smuggle a scheme or traversal.
+        assert!(validate_path("/api/x?next=https://evil.example").is_err());
+        assert!(validate_path("/api/x?x=..").is_err());
+        // Whitespace, empty and oversized paths.
+        assert!(validate_path(" /api/x").is_err());
+        assert!(validate_path("/api/x y").is_err());
+        assert!(validate_path("/api/x\ny").is_err());
+        assert!(validate_path("").is_err());
+        assert!(validate_path(&format!("/api/{}", "a".repeat(MAX_PATH))).is_err());
+        // Exactly at the cap is fine.
+        assert!(validate_path(&format!("/api/{}", "a".repeat(MAX_PATH - 5))).is_ok());
+    }
+
+    #[test]
+    fn status_mapping_is_the_contract_ts_keys_on() {
+        assert_eq!(status_error(200), None);
+        assert_eq!(status_error(204), None);
+        assert_eq!(status_error(299), None);
+        assert_eq!(status_error(451).as_deref(), Some("TRN_PRIVATE"));
+        assert_eq!(status_error(404).as_deref(), Some("TRN_NO_DATA"));
+        assert_eq!(status_error(429).as_deref(), Some("TRN_RATE_LIMITED"));
+        assert_eq!(status_error(403).as_deref(), Some("HTTP 403"));
+        assert_eq!(status_error(500).as_deref(), Some("HTTP 500"));
+        assert_eq!(status_error(302).as_deref(), Some("HTTP 302"));
     }
 
     // ---- perf/model.rs: the numbers the dashboard renders ------------------

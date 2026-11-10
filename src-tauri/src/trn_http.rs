@@ -23,6 +23,12 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
+// Pure rules live in their own module so `src-tauri/pure` can test them on any
+// host (see docs/architecture/host-agnostic-tests.md).
+#[path = "trn_http_rules.rs"]
+mod rules;
+use rules::{host_allowed, status_error, validate_path};
+
 /// TRN's allowlist for its Overwolf client.
 ///
 /// This is an UNOFFICIAL COMPATIBILITY HEADER, not an identity claim: it says
@@ -33,70 +39,14 @@ use std::time::Duration;
 /// one-line change.
 pub const TRN_UA: &str = "OverwolfClient";
 
-/// The only host this transport may talk to.
-const TRN_HOST: &str = "api.tracker.network";
 const TRN_BASE: &str = "https://api.tracker.network";
 /// Same 15 s budget the WebView2 transport uses.
 const TIMEOUT: Duration = Duration::from_secs(15);
 /// Body ceiling: the largest TRN body measured is ~1.7 MB (a season segment);
 /// 8 MB is the proxy's cap too. Anything over is refused, never truncated.
 const MAX_BODY: usize = 8 * 1024 * 1024;
-/// Same path cap the proxy enforces.
-const MAX_PATH: usize = 300;
 
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-
-/// Host allowlist: the only place a caller-supplied URL or a redirect may land.
-fn host_allowed(host: &str) -> bool {
-    host.eq_ignore_ascii_case(TRN_HOST)
-}
-
-/// Path rules, stricter than `trn_proxy::validate_path` because this transport
-/// has no browser origin to constrain it: root-relative only, no scheme, no
-/// protocol-relative "//", no dot segments, no whitespace, ≤300 chars.
-///
-/// A QUERY STRING IS ALLOWED AND PASSED THROUGH UNTOUCHED: the profile routes
-/// take `?source=overwolf-2`, and that parameter is what makes TRN return the
-/// full payload (3 season segments + weapon/map data). Nothing here re-encodes
-/// it — the string is concatenated onto the constant base and parsed once.
-fn validate_path(path: &str) -> Result<(), String> {
-    if path.is_empty() || path.len() > MAX_PATH {
-        return Err("TRN_HTTP_BAD_PATH".to_string());
-    }
-    // The URL path proper, without the query. Scheme/host smuggling and
-    // traversal are judged on this part; the query may contain '?'/'&'/'='.
-    let path_only = path.split_once('?').map(|(p, _)| p).unwrap_or(path);
-    if !path_only.starts_with('/') || path_only.starts_with("//") {
-        return Err("TRN_HTTP_BAD_PATH".to_string());
-    }
-    if path.contains("://") {
-        return Err("TRN_HTTP_BAD_PATH".to_string());
-    }
-    // No raw whitespace or control characters anywhere (a query with a space
-    // must arrive percent-encoded).
-    if path.contains([' ', '\n', '\r', '\t']) {
-        return Err("TRN_HTTP_BAD_PATH".to_string());
-    }
-    // Literal ".." anywhere, query included: no legitimate TRN route or query
-    // needs it, and it can only be an attempt to confuse a normalizer. A bare
-    // "." segment is refused for the same reason.
-    if path.contains("..") || path.split('/').any(|seg| seg == ".") {
-        return Err("TRN_HTTP_BAD_PATH".to_string());
-    }
-    Ok(())
-}
-
-/// Map a status to this transport's error surface. `None` = a body to return.
-/// Pure — unit-tested.
-fn status_error(status: u16) -> Option<String> {
-    match status {
-        200..=299 => None,
-        451 => Some("TRN_PRIVATE".to_string()),
-        404 => Some("TRN_NO_DATA".to_string()),
-        429 => Some("TRN_RATE_LIMITED".to_string()),
-        other => Some(format!("HTTP {other}")),
-    }
-}
 
 /// Shared client: one connection pool, one TLS config, built once.
 ///
@@ -197,6 +147,8 @@ pub async fn trn_http_get(path: String, enabled: bool) -> Result<String, String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use super::rules::MAX_PATH;
 
     #[test]
     fn path_validation_rejects_anything_but_a_root_relative_path() {

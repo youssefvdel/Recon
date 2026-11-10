@@ -22,6 +22,7 @@ cd src-tauri/pure && cargo test        # 24 tests, no PC, no Tauri
 | `src/trn_proxy/ceiling.rs` | 5 | lobby cap at 30 rolls per match, hour cap at 900, window roll at 1 h, unkeyed requests hour-only, refunds saturate and never touch another lobby, refund allowlist (`TRN_CAPTCHA_REQUIRED` / `EDGE_*` vs `HTTP 429` / `TRN_BUDGET`) |
 | `src/trn_cache/paths.rs` + `constants.rs` | 7 | path allowlist incl. the 300/301 boundary, published FNV-1a 64 vector (`hello` → `a430d84680aabd0b`), 16-hex stable keys, `entry_path` cannot escape the cache dir, header round-trip with spaces, garbage rejection, `read_header` on real temp files |
 | `src/trn_proxy/trace.rs` | 2 | bounded ring eviction, incremental `trace_since` head/lines/missed semantics, zero cap |
+| `src/trn_http_rules.rs` | 3 | host allowlist (exact host only: suffix/prefix/userinfo tricks, scheme-relative and absolute redirect targets, empty host, port), path allowlist (scheme smuggling, `//`, `.`/`..` segments, query pass-through that cannot smuggle a scheme or traversal, whitespace, empty, 300 boundary), status map (2xx → body, 451/404/429 → TS keys, 403/500/302 → `HTTP n`) |
 
 `src/perf/model.rs` is the strongest case: it is the memory/CPU maths the
 dashboard renders, and it is a pure function of its arguments.
@@ -36,7 +37,6 @@ dashboard renders, and it is a pure function of its arguments.
 | `window_manager.rs`, `shortcuts.rs`, `space_spam.rs` | Win32 window/input APIs |
 | `accounts.rs` | Windows registry + Tauri app paths |
 | `state.rs` | `crate::display` (Win32) |
-| `trn_http.rs` | compiles on Linux in principle, but its pure rules (`host_allowed`, `validate_path`, `status_error`) are private inside a `reqwest` network module — extracting them is the next testable slice |
 | `updater.rs` | the file imports `tauri` / `tauri-plugin-updater`, so the whole module needs a Tauri build even though `is_upgrade` and the channel-endpoint maths are pure — same extraction candidate |
 | `trn_cache/{store,read,sweep}.rs` | `tauri::AppHandle` for app paths (the path/header layer above is covered) |
 | `trn_proxy/{window,fetch,...}.rs` | WebView2 / Tauri window runtime |
