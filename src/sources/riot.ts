@@ -5,13 +5,18 @@
  * caller can obtain an unvalidated response from HERE, and every parser it owns
  * accepts `Validated<T>`, a branded type nothing outside this module can mint.
  *
- * HONEST SCOPE, because a header that overclaims is worse than none:
- * `utils/tracker.ts` still holds its own private raw transport with 14 call
- * sites not yet migrated (match history, act samples, storefront, wallet,
- * crosshair prefs). So this module is the validated boundary for the reads it
- * owns — it is NOT, today, the only place a raw payload exists. The assertion
- * in scripts/devqa-check.ts ties this paragraph to the actual call-site count,
- * so the claim cannot drift from the code again. */
+ * HONEST SCOPE, and the number is checked, not trusted:
+ * this module now holds the ONE Riot transport, but `utils/tracker.ts` still
+ * makes 13 raw `riotGet` calls (mmr, match details, core-game and pregame
+ * player/match lookups, match history) until step 2 of
+ * docs/architecture/next-session.md converts them to validated readers.
+ * `riotGet` is therefore exported with a named expiry — a devqa assertion fails
+ * once those call sites reach zero and the export is still there.
+ *
+ * When step 2 lands the count in this paragraph becomes 0 and this module is
+ * then, and only then, the only place a raw payload exists. The assertion in
+ * scripts/devqa-check.ts compares THIS NUMBER to the real call-site count, so
+ * the two cannot drift apart again. */
 
 import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '../utils/ipc';
@@ -49,6 +54,22 @@ export function initRiotSource(hooks: {
  * Transport (private)
  * ------------------------------------------------------------------ */
 
+export const platformBlob = (): string => {
+  try {
+    return btoa(
+      JSON.stringify({
+        platformType: 'PC',
+        platformOS: 'Windows',
+        platformOSVersion: '10.0.19042.1.256.64bit',
+        platformChipset: 'Unknown',
+      })
+    );
+  } catch {
+    return '';
+  }
+};
+
+
 interface DirectEnt {
   access_token: string;
   entitlements: string;
@@ -56,8 +77,24 @@ interface DirectEnt {
 }
 
 let entCache: { at: number; ent: DirectEnt } | null = null;
-let cachedVersion = '';
 
+export async function getEntitlements(): Promise<DirectEnt> {
+  if (entCache && Date.now() - entCache.at < 5 * 60 * 1000) return entCache.ent;
+  if (!isTauri()) throw new Error('Tracker needs the desktop app.');
+  const ent = await invoke<DirectEnt>('local_entitlements');
+  if (!ent.access_token) throw new Error('No active session — log into the Riot Client first.');
+  entCache = { at: Date.now(), ent };
+  return ent;
+}
+
+export const clearEntitlements = (): void => {
+  entCache = null;
+};
+
+let cachedVersion: string | null = null;
+
+/** Client version Riot demands in headers. Log scrape first, public API fallback
+    (log only exists after the game itself has launched once). */
 async function resolveVersion(): Promise<string> {
   if (cachedVersion) return cachedVersion;
   try {
@@ -78,12 +115,12 @@ async function resolveVersion(): Promise<string> {
   return 'release-13.05-shipping-11-5350494';
 }
 
-/** One choke point for Riot's local API: bursting spawns one curl process per
- *  call, which tanks the machine. */
+/* Global gate for Riot's local API: one choke point so every caller
+   (match details, MMR, history, 24h tracker) shares a single concurrency cap.
+   Bursting spawns one curl process per call, which tanks the machine. */
 const RIOT_CONCURRENCY = 6;
 let riotActive = 0;
 const riotQueue: Array<() => void> = [];
-
 async function withRiotSlot<R>(fn: () => Promise<R>): Promise<R> {
   if (riotActive >= RIOT_CONCURRENCY) {
     await new Promise<void>((resolve) => riotQueue.push(resolve));
@@ -98,32 +135,17 @@ async function withRiotSlot<R>(fn: () => Promise<R>): Promise<R> {
   }
 }
 
-export async function getEntitlements(): Promise<DirectEnt> {
-  if (entCache && Date.now() - entCache.at < 5 * 60 * 1000) return entCache.ent;
-  if (!isTauri()) throw new Error('Tracker needs the desktop app.');
-  const ent = await invoke<DirectEnt>('local_entitlements');
-  if (!ent.access_token) throw new Error('No active session — log into the Riot Client first.');
-  entCache = { at: Date.now(), ent };
-  return ent;
-}
-
-export const clearEntitlements = (): void => {
-  entCache = null;
-};
-
-const PLATFORM_BLOB =
-  'ew0KCSJwbGF0Zm9ybVR5cGUiOiJQQyIsDQoJInBsYXRmb3JtT3MiOiJXaW5kb3dzIg0KfQ==';
-
-/** Same blob the Riot client sends; a const so the transport is self-contained. */
-function platformBlob(): string {
-  return PLATFORM_BLOB;
-}
-
-/**
- * Raw GET. NOT exported: this is the only function in the codebase that can
- * produce an unchecked Riot payload, and it must stay unreachable from parsers.
- */
-async function riotGet(host: string, path: string): Promise<unknown> {
+/** Authed Riot GET from Rust (browser origins are blocked). Refetches entitlements once on expiry.
+ * Exported for player-data reads outside the tracker module (notably the wallet). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+/* NOT exported (step 1 of the data-layer design): the raw transport is the only
+ * way to obtain an unvalidated Riot payload, so it stays inside this module.
+ * Validated readers live in src/sources/riot.ts. */
+/** Raw GET. TEMPORARY EXPORT — step 2 of docs/architecture/next-session.md
+ *  converts the 13 remaining call sites to validated readers, after which this
+ *  stops being exported and the header's "only validated boundary" claim
+ *  becomes true. A devqa check fails if the export outlives the conversion. */
+export async function riotGet(host: string, path: string): Promise<any> {
   const call = async (e: DirectEnt): Promise<string> => {
     const version = await resolveVersion();
     return invoke<string>('riot_direct_get', {
@@ -141,6 +163,7 @@ async function riotGet(host: string, path: string): Promise<unknown> {
     if (j?.httpStatus === 401 || j?.errorCode === 'BAD_AUTH' || j?.message === 'Unauthorized') {
       clearEntitlements();
       const retried = JSON.parse(await withRiotSlot(async () => call(await getEntitlements())));
+      // Still 401/403 after a fresh entitlements read = the session is gone.
       if (retried?.httpStatus === 401 || retried?.httpStatus === 403) {
         onStatus('locked-out', 'Riot Client is logged out');
       } else {
@@ -148,6 +171,7 @@ async function riotGet(host: string, path: string): Promise<unknown> {
       }
       return retried;
     }
+    // An answered read proves the client is alive and authenticated.
     onStatus('ok');
     return j;
   } catch (e) {
@@ -156,35 +180,106 @@ async function riotGet(host: string, path: string): Promise<unknown> {
       return JSON.parse(await withRiotSlot(async () => call(await getEntitlements())));
     }
     const kind = onClassify(e);
-    if (kind) onStatus(kind);
+    if (kind) {
+      onStatus(
+        kind,
+        kind === 'locked-out'
+          ? 'Riot Client is logged out'
+          : kind === 'not-running'
+            ? 'Riot Client is not running'
+            : 'Riot Client is not responding'
+      );
+    }
     throw e;
   }
 }
 
-/* ------------------------------------------------------------------ *
- * Validating readers — the public surface
- * ------------------------------------------------------------------ */
+/** Authed Riot PUT from Rust — same pipeline as riotGet, but `-X PUT` with a
+ *  real JSON body. Exported for player-data routes that take PUT
+ *  (notably `PUT /playerPref/v3/savePreference` — crosshair saves). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function riotPut(host: string, path: string, body: string): Promise<any> {
+  const call = async (e: DirectEnt): Promise<string> => {
+    const version = await resolveVersion();
+    return invoke<string>('riot_direct_put', {
+      host,
+      path,
+      bodyArg: body,
+      accessToken: e.access_token,
+      entitlements: e.entitlements,
+      clientPlatform: platformBlob(),
+      clientVersion: version,
+    });
+  };
+  try {
+    const raw = await withRiotSlot(async () => call(await getEntitlements()));
+    const j = JSON.parse(raw);
+    if (j?.httpStatus === 401 || j?.errorCode === 'BAD_AUTH' || j?.message === 'Unauthorized') {
+      clearEntitlements();
+      return JSON.parse(await withRiotSlot(async () => call(await getEntitlements())));
+    }
+    return j;
+  } catch (e) {
+    if (String(e).includes('RIOT_EXPIRED')) {
+      clearEntitlements();
+      return JSON.parse(await withRiotSlot(async () => call(await getEntitlements())));
+    }
+    throw e;
+  }
+}
+/** Authed Riot POST from Rust — same pipeline as riotGet, but `-X POST` with
+ *  an empty JSON body. Exported for player-data routes that reject GET
+ *  (notably `POST /store/v3/storefront/{puuid}` — the daily shop). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function riotPost(host: string, path: string): Promise<any> {
+  const call = async (e: DirectEnt): Promise<string> => {
+    const version = await resolveVersion();
+    return invoke<string>('riot_direct_post', {
+      host,
+      path,
+      accessToken: e.access_token,
+      entitlements: e.entitlements,
+      clientPlatform: platformBlob(),
+      clientVersion: version,
+    });
+  };
+  try {
+    const raw = await withRiotSlot(async () => call(await getEntitlements()));
+    const j = JSON.parse(raw);
+    if (j?.httpStatus === 401 || j?.errorCode === 'BAD_AUTH' || j?.message === 'Unauthorized') {
+      clearEntitlements();
+      return JSON.parse(await withRiotSlot(async () => call(await getEntitlements())));
+    }
+    return j;
+  } catch (e) {
+    if (String(e).includes('RIOT_EXPIRED')) {
+      clearEntitlements();
+      return JSON.parse(await withRiotSlot(async () => call(await getEntitlements())));
+    }
+    throw e;
+  }
+}
 
+export function assertRiotOk(j: any, what: string): void {
+  const status = Number(j?.httpStatus ?? 0);
+  const code = String(j?.errorCode ?? '');
+  if (code || status >= 400) {
+    const detail = code || `HTTP ${status}`;
+    const msg = String(j?.message ?? '').slice(0, 140);
+    throw new Error(
+      `Riot ${what} unavailable (${detail})${msg ? ` — ${msg}` : ''}`
+    );
+  }
+}
+
+/** A Riot read that failed. Carries the code so callers can tell a private
+ *  profile from a dead client without string-matching. */
 export class RiotError extends Error {
   readonly code: string;
   constructor(code: string, message: string) {
     super(message);
     this.name = 'RiotError';
     this.code = code;
-  }
-}
-
-/** True when the payload is a Riot error object rather than data. */
-function assertRiotOk(j: unknown, what: string): void {
-  const o = j as { httpStatus?: number; errorCode?: string; message?: string };
-  // A SUCCESSFUL Riot payload carries no httpStatus, so `status === 0` is the
-  // normal case, not an error. Only an explicit errorCode or a 4xx/5xx status
-  // marks a failure — treating 0 as an error made every validated read throw.
-  const status = Number(o?.httpStatus ?? 0);
-  const code = String(o?.errorCode ?? '');
-  if (code || status >= 400) {
-    const detail = code || `HTTP ${status}`;
-    throw new RiotError(detail, `Riot ${what} failed: ${detail} ${String(o?.message ?? '').slice(0, 120)}`);
   }
 }
 
