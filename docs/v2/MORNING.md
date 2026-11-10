@@ -12,6 +12,12 @@ server, not from memory.
 | Theme B — Graphite (near-black, lime, condensed) | http://192.168.100.2:8100/board-b.html |
 | Theme C — Ledger (warm paper, ink, red — the light one) | http://192.168.100.2:8100/board-c.html |
 
+**Latest installable build (verified, mirrored):**
+`http://192.168.100.2:8099/Recon_0.5.0-alpha33_x64-setup.exe` —
+sha256 `b1b9f753…25c225ce`, Authenticode + minisign checked against
+`77FD5160E2EB15E6`. This is the last checkpoint before the shell changes, so if
+v2 misbehaves you roll back here.
+
 The boards are served by `recon-boards.service` (systemd user unit, enabled), so
 they survive a reboot. The app harness is a Vite server and needs restarting
 with `bun run dev:ui --host 0.0.0.0 --port 5174` in `~/Projects/Recon-live`.
