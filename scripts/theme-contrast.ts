@@ -5,6 +5,10 @@
 //   bun scripts/theme-contrast.ts http://127.0.0.1:8110/board-a.html
 //   bun scripts/theme-contrast.ts <url...> --fail        # exit 1 on a failure
 //   bun scripts/theme-contrast.ts <url...> --json        # machine-readable
+//   bun scripts/theme-contrast.ts <url...> --wait 8000   # max readiness wait (ms)
+//
+// A dev server compiles routes on first hit, so the page is measured only once
+// its text has stopped changing — not 600ms after the load event.
 //
 // Thresholds: WCAG 2.1 — normal text 4.5:1, large text (>=24px, or >=18.66px at
 // weight >=700) 3:1, UI glyphs (a lone ›/∅/…) 3:1. Decorative marks (a
@@ -184,7 +188,20 @@ async function measurePage(port: number, url: string): Promise<PageResult> {
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
-    await Bun.sleep(600);
+    // Ready when the rendered text stops growing. Vite dev compiles on demand,
+    // so a fixed sleep measures the old frame (or an empty one) and lies.
+    let last = -1;
+    let stable = 0;
+    const deadline = Date.now() + maxWait;
+    while (Date.now() < deadline) {
+      await Bun.sleep(250);
+      const probe = await cdp.send('Runtime.evaluate', { expression: 'document.body.innerText.length', returnByValue: true });
+      const len = Number(probe.result?.value ?? 0);
+      stable = len > 0 && len === last ? stable + 1 : 0;
+      last = len;
+      if (stable >= 2) break;
+    }
+    await Bun.sleep(200);
     const out = await cdp.send('Runtime.evaluate', { expression: PROBE, returnByValue: true, awaitPromise: true });
     if (out.exceptionDetails) throw new Error(JSON.stringify(out.exceptionDetails).slice(0, 300));
     return JSON.parse(out.result.value) as PageResult;
@@ -198,6 +215,8 @@ const args = process.argv.slice(2);
 const urls = args.filter((a) => /^https?:\/\//.test(a));
 const failMode = args.includes('--fail');
 const jsonMode = args.includes('--json');
+const waitIdx = args.indexOf('--wait');
+const maxWait = waitIdx >= 0 ? Number(args[waitIdx + 1]) || 10000 : 10000;
 if (urls.length === 0) {
   console.error('usage: bun scripts/theme-contrast.ts <url...> [--fail] [--json]');
   process.exit(2);
