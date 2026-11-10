@@ -4,6 +4,8 @@
 //   bun scripts/devqa-check.ts
 export {};
 
+import { fileURLToPath } from "node:url";
+
 // Deterministic localStorage BEFORE the modules under test load.
 const store = new Map<string, string>();
 const fakeStorage = {
@@ -846,8 +848,8 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   // as shippable as one in the bundle, and the direct transport sets its header
   // there. Scan code/config extensions on both trees; skip build output.
   const roots = [
-    new URL('../src/', import.meta.url).pathname,
-    new URL('../src-tauri/', import.meta.url).pathname,
+    fileURLToPath(new URL('../src/', import.meta.url)),
+    fileURLToPath(new URL('../src-tauri/', import.meta.url)),
   ];
   const root = roots[0];
   const SCAN_EXT = /\.(ts|tsx|js|cjs|mjs|json|rs|toml|conf)$/;
@@ -1294,7 +1296,7 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
         const full = `${dir}/${f}`;
         return statSync(full).isDirectory() ? walk(full) : full.endsWith('.ts') ? [full] : [];
       });
-    const root = new URL('../src', import.meta.url).pathname;
+    const root = fileURLToPath(new URL('../src', import.meta.url));
     const filesMentioning = walk(root).filter((f) =>
       /\briotGet\b/.test(readFileSync(f, 'utf8'))
     );
@@ -1702,10 +1704,22 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('and still owns its own open/close contract', /if \(!isOpen \|\| !detail\) return null;/.test(body), true);
   check('nothing the modal showed was dropped', /RoundTimeline/.test(body) && /RoundRail/.test(body) && /role="tablist"/.test(body), true);
 
-  // No importer anywhere.
-  const { execSync } = await import('node:child_process');
-  const hits = execSync("grep -rn 'MatchDetailModal' src/ || true", { encoding: 'utf8' }).trim();
-  check('no import of the modal survives', hits.length, 0);
+  // No importer anywhere (pure fs walk: `grep` does not exist on Windows).
+  const { readdirSync, statSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const srcDir = fileURLToPath(new URL('../src/', import.meta.url));
+  const offenders: string[] = [];
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name);
+      if (statSync(full).isDirectory()) walk(full);
+      else if (/\.(ts|tsx)$/.test(name) && readFileSync(full, 'utf8').includes('MatchDetailModal')) {
+        offenders.push(full);
+      }
+    }
+  };
+  walk(srcDir);
+  check('no import of the modal survives', offenders.length, 0);
 
   // Overview hands the match to the ledger instead of opening a dialog.
   const ov = readFileSync(new URL('../src/components/Overview.tsx', import.meta.url), 'utf8');
