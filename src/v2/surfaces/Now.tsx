@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTrackerData } from '../../hooks/useTrackerData';
 import { LiveSection } from '../../components/live/LiveSection';
 
@@ -10,7 +10,16 @@ export const Now: React.FC = () => {
   const actLabel = seasonNames?.[profile?.currentSeasonId?.toLowerCase() ?? ''] ?? 'Current Act';
   const record =
     trn && trn.wins !== undefined && trn.losses !== undefined ? `${trn.wins}–${trn.losses}` : undefined;
-  const age = trnFetchedAt ? Math.round((Date.now() - trnFetchedAt) / 3_600_000) : undefined;
+  /* A clock, not a call to Date.now() during render: the latter is impure (two
+   * renders of the same state can disagree) and the age would only change when
+   * something else happened to re-render. One tick a minute is the resolution
+   * the label shows. */
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+  const age = trnFetchedAt ? Math.round((now - trnFetchedAt) / 3_600_000) : undefined;
 
   const feed = useMemo(() => {
     const list = [...(games ?? [])].sort((a, b) => (b.when ?? 0) - (a.when ?? 0)).slice(0, 5);
