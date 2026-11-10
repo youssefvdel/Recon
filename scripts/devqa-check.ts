@@ -1402,6 +1402,61 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('the riotGet export does not outlive its reason', rawSites > 0 ? stillExported : !stillExported, true);
 }
 
+// --- a snapshot past its TTL is STALE, not absent --------------------------
+{
+  const { snapshotAgeLabel, snapshotIsStale } = await import('../src/hooks/useTrackerData.ts');
+  const now = Date.now();
+  const DAY = 24 * 3600 * 1000;
+
+  // TTL governs freshness, never availability: the snapshot is still used.
+  check('a week-old snapshot is still stale-marked', snapshotIsStale(now - 7 * DAY, now), true);
+  check('a fresh snapshot is not stale', snapshotIsStale(now - 3600 * 1000, now), false);
+  check('the banner can say how old it is', snapshotAgeLabel(now - 4 * DAY, now), '4d ago');
+  check('hours are reported in hours', snapshotAgeLabel(now - 2 * 3600 * 1000, now), '2h ago');
+  check('a recent snapshot needs no age label', snapshotAgeLabel(now - 10 * 60 * 1000, now), '');
+
+  const { readFileSync } = await import('node:fs');
+  const hookSrc5 = readFileSync(new URL('../src/hooks/useTrackerData.ts', import.meta.url), 'utf8');
+  const parseBody = hookSrc5.slice(
+    hookSrc5.indexOf('function parseSnapshot'),
+    hookSrc5.indexOf('export function snapshotIsStale')
+  );
+  check('readSnapshot no longer discards a stale snapshot', /return null;\s*\}\s*\n\}/.test(parseBody) && !/SNAPSHOT_TTL/.test(parseBody), true);
+}
+
+// --- an uncached match row is one state, not six dashes --------------------
+{
+  const { readFileSync } = await import('node:fs');
+  const mhSrc = readFileSync(new URL('../src/components/MatchHistory.tsx', import.meta.url), 'utf8');
+  check('an uncached row says so once', /Not cached/.test(mhSrc), true);
+  check(
+    'and it replaces the stat block rather than adding a cell',
+    /\{!hasDetail \? \([\s\S]{0,600}Not cached[\s\S]{0,200}\) : \(\s*<>/m.test(mhSrc),
+    true
+  );
+  // The desktop stat block used to emit one placeholder per column. Only the
+  // mobile compact cell may still say "not fetched yet".
+  const placeholders = (mhSrc.match(/reason="Match detail not fetched yet"/g) ?? []).length;
+  check('the six desktop placeholders are gone', placeholders <= 1, true);
+}
+
+// --- act labels survive a closed client, and never show a raw id -----------
+{
+  const { readFileSync } = await import('node:fs');
+  const hookSrc4 = readFileSync(new URL('../src/hooks/useTrackerData.ts', import.meta.url), 'utf8');
+  const ovSrc = readFileSync(new URL('../src/components/Overview.tsx', import.meta.url), 'utf8');
+  check('seasonNames is part of the persisted snapshot', /seasonNames\?: Record<string, string>/.test(hookSrc4), true);
+  check('and is written with it', /seasonNames: ensureStore\(\)\.seasonNames/.test(hookSrc4), true);
+  check(
+    'and hydrated on every cached branch',
+    (hookSrc4.match(/seasonNames: \{ \.\.\.ensureStore\(\)\.seasonNames/g) ?? []).length,
+    3
+  );
+  // A UUID on screen is internal data leaking into the UI.
+  check('an unknown act never renders its raw id', /\?\? s\.id\)/.test(ovSrc), false);
+  check('an unknown act falls back to a neutral label', /return label \? shortAct\(label\) : 'Act'/.test(ovSrc), true);
+}
+
 // --- A23-2: JS warn/error must reach the same sink the Rust lines use ------
 {
   const { readFileSync } = await import('node:fs');

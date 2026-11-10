@@ -649,7 +649,14 @@ export const Overview: React.FC = () => {
                     return (
                       <div key={s.id} className="flex flex-col items-center justify-between h-full py-1">
                         <span className="text-[11px] font-bold text-m3-outline uppercase tracking-wider">
-                          {shortAct(seasonNames[s.id.toLowerCase()] ?? s.id)}
+                          {(() => {
+                            // Never render the raw act id: a UUID on screen is
+                            // internal data leaking into the UI, the same class
+                            // as a raw hostname. Unknown acts get a neutral
+                            // label until seasonNames hydrates.
+                            const label = seasonNames[s.id.toLowerCase()];
+                            return label ? shortAct(label) : 'Act';
+                          })()}
                         </span>
                         <div className="my-1.5 flex items-center justify-center">
                           {icon ? (
