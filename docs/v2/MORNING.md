@@ -37,6 +37,22 @@ three, and it does not look like the violet MMR language every other tracker
 uses. Ledger is the most striking but it is a light theme, which is a product
 decision I did not want to make for you at 3am.
 
+## The themes were measured, not eyeballed
+
+Contrast ratios taken through the DOM on the live boards (`docs/v2/theme-contrast.md`):
+
+| | info text | worst fail | accent as text / fill | focus |
+| --- | --- | --- | --- | --- |
+| A Nocturne | 17.47 / 7.64 | watermark 1.54 | violet 11.15 / 10.13 | **1.04** |
+| **B Graphite** | 16.96 / 6.53 | watermark 1.93 | lime **15.19 / 14.43** | **1.03** |
+| C Ledger | ink 13.24 | muted fails **30 of 36 uses** | red 5.12 / 5.41 | 14.65 |
+
+So: **Graphite's lime is the strongest accent of the three** — that is why it is the
+default. **A and B had no focus styles at all (1.03–1.04)** — they were keyboard-
+unusable, which is now a token-level fix, not a preference. **C cannot ship as-is**:
+one muted ink a touch darker fixes it. Every accent is usable as text *and* fill, so
+no theme is limited to decorative dots.
+
 ## What was built overnight
 
 - **The app now runs on Linux** with mocked Riot data — real Overview, Matches
