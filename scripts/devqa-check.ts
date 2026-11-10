@@ -1402,6 +1402,23 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('the riotGet export does not outlive its reason', rawSites > 0 ? stillExported : !stillExported, true);
 }
 
+// --- act labels survive a closed client, and never show a raw id -----------
+{
+  const { readFileSync } = await import('node:fs');
+  const hookSrc4 = readFileSync(new URL('../src/hooks/useTrackerData.ts', import.meta.url), 'utf8');
+  const ovSrc = readFileSync(new URL('../src/components/Overview.tsx', import.meta.url), 'utf8');
+  check('seasonNames is part of the persisted snapshot', /seasonNames\?: Record<string, string>/.test(hookSrc4), true);
+  check('and is written with it', /seasonNames: ensureStore\(\)\.seasonNames/.test(hookSrc4), true);
+  check(
+    'and hydrated on every cached branch',
+    (hookSrc4.match(/seasonNames: \{ \.\.\.ensureStore\(\)\.seasonNames/g) ?? []).length,
+    3
+  );
+  // A UUID on screen is internal data leaking into the UI.
+  check('an unknown act never renders its raw id', /\?\? s\.id\)/.test(ovSrc), false);
+  check('an unknown act falls back to a neutral label', /return label \? shortAct\(label\) : 'Act'/.test(ovSrc), true);
+}
+
 // --- A23-2: JS warn/error must reach the same sink the Rust lines use ------
 {
   const { readFileSync } = await import('node:fs');

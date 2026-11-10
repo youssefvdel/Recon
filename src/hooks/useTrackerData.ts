@@ -52,6 +52,9 @@ type Snapshot = {
   agg: AggStats | null;
   mapById: Record<string, string>;
   queueById: Record<string, string>;
+  /** Act/season display names. Static once known, so it survives a closed
+   *  client — without it the UI falls back to raw act ids. */
+  seasonNames?: Record<string, string>;
   trn: TrnActStats | null;
   trnAgents: TrnAgentStat[];
   trnMaps: TrnMapStat[];
@@ -388,6 +391,7 @@ async function runRefresh(): Promise<void> {
               agg: fresh.agg ?? null,
               mapById: fresh.mapById ?? {},
               queueById: fresh.queueById ?? {},
+              seasonNames: { ...ensureStore().seasonNames, ...(fresh.seasonNames ?? {}) },
               trn: fresh.trn ?? null,
               trnAgents: fresh.trnAgents ?? [],
               trnMaps: fresh.trnMaps ?? [],
@@ -444,6 +448,7 @@ async function runRefresh(): Promise<void> {
           agg: newSnap.agg ?? null,
           mapById: newSnap.mapById ?? {},
           queueById: newSnap.queueById ?? {},
+          seasonNames: { ...ensureStore().seasonNames, ...(newSnap.seasonNames ?? {}) },
           trn: newSnap.trn ?? null,
           trnAgents: newSnap.trnAgents ?? [],
           trnMaps: newSnap.trnMaps ?? [],
@@ -525,6 +530,7 @@ async function runRefresh(): Promise<void> {
         agg: ensureStore().agg,
         mapById: mm,
         queueById: meta.queueById,
+        seasonNames: ensureStore().seasonNames,
         trn: ensureStore().trn,
         trnAgents: ensureStore().trnAgents,
         trnMaps: ensureStore().trnMaps,
@@ -651,6 +657,9 @@ async function runRefresh(): Promise<void> {
         agg: cachedSnap.agg ?? null,
         mapById: cachedSnap.mapById ?? {},
         queueById: cachedSnap.queueById ?? {},
+        // Act names are static once known: hydrate them so a closed client
+        // never leaves raw act ids on screen.
+        seasonNames: { ...ensureStore().seasonNames, ...(cachedSnap.seasonNames ?? {}) },
         trn: cachedSnap.trn ?? null,
         trnAgents: cachedSnap.trnAgents ?? [],
         trnMaps: cachedSnap.trnMaps ?? [],
