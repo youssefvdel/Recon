@@ -15,6 +15,8 @@ export interface OverlayConfig {
   showStartingSide?: boolean;
   /** Lobby-only pre-pick reminder badge. Self-hides unless the Pre-Picker is armed. */
   showPrepick?: boolean;
+  /** Pre-round information plate (agent select / round start). */
+  showPreRound?: boolean;
   /** Screen-centred overlay crosshair. Opt-in; in-match only. */
   showCrosshair?: boolean;
   crosshair?: OverlayCrosshairShape;
@@ -23,12 +25,15 @@ export interface OverlayConfig {
     pregame: WidgetPos;
     topAgents: WidgetPos;
     prepick?: WidgetPos;
+    /** Pre-round plate: agent select and round start. */
+    preRound?: WidgetPos;
   };
   scales: {
     lobby: number;
     pregame: number;
     topAgents: number;
     prepick?: number;
+    preRound?: number;
   };
   /**
    * Widget offsets are CSS px, which depend on the display they were authored
@@ -52,6 +57,7 @@ export function getDefaultOverlayPositions(): OverlayConfig['positions'] {
       pregame: { x: 767, y: 447 },
       topAgents: { x: 1691, y: 836 },
       prepick: { x: 10, y: 10 },
+      preRound: { x: 24, y: 300 },
     };
   }
 
@@ -82,6 +88,7 @@ export function getDefaultOverlayConfig(): OverlayConfig {
     showTopAgents: true,
     showStartingSide: true,
     showPrepick: true,
+    showPreRound: true,
     // Opt-in only: existing users must not suddenly get a second crosshair
     // drawn over their native one.
     showCrosshair: false,
@@ -92,6 +99,7 @@ export function getDefaultOverlayConfig(): OverlayConfig {
       pregame: 1.0,
       topAgents: 1.0,
       prepick: 1.0,
+      preRound: 1.0,
     },
     layouts: {},
   };

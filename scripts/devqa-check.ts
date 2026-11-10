@@ -1424,6 +1424,30 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('readSnapshot no longer discards a stale snapshot', /return null;\s*\}\s*\n\}/.test(parseBody) && !/SNAPSHOT_TTL/.test(parseBody), true);
 }
 
+// --- the pre-round plate is a first-class HUD widget -----------------------
+{
+  const { readFileSync } = await import('node:fs');
+  const canvasSrc = readFileSync(new URL('../src/components/hud/HudCanvas.tsx', import.meta.url), 'utf8');
+  const cfgSrc = readFileSync(new URL('../src/components/hud/overlayConfig.ts', import.meta.url), 'utf8');
+  const panelSrc = readFileSync(new URL('../src/components/hud/PreRoundPanel.tsx', import.meta.url), 'utf8');
+
+  check('the plate has its own show flag', /showPreRound\?: boolean/.test(cfgSrc), true);
+  check('and its own position and scale', /preRound\?: WidgetPos/.test(cfgSrc) && /preRound\?: number/.test(cfgSrc), true);
+  check(
+    'it mounts as its own draggable widget',
+    /startDrag\('preRound', e\)/.test(canvasSrc) && /<PreRoundPanel/.test(canvasSrc),
+    true
+  );
+  check('it is hidden outside a live match', /phase !== 'idle'/.test(canvasSrc), true);
+
+  // Honesty rules the component must keep.
+  // 'ROUND START' is the phase chip; the panel must not invent a round NUMBER.
+  check('no round number is invented', /roundNumber|RoundNumber|ROUND \$\{|round:/.test(panelSrc), false);
+  check('an absent score renders no segment', /typeof state\.allyScore === 'number'/.test(panelSrc), true);
+  check('side only when the starting side is still current', /sum === 0/.test(panelSrc), true);
+  check('the hold is bounded', /PREROUND_HOLD_MS = 15_000/.test(panelSrc), true);
+}
+
 // --- an uncached match row is one state, not six dashes --------------------
 {
   const { readFileSync } = await import('node:fs');

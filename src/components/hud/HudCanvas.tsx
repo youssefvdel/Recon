@@ -32,6 +32,7 @@ import { PregamePanel } from './PregamePanel';
 import { EditChrome } from './EditChrome';
 import { MatchPanel } from './MatchPanel';
 import { PrepickBadge } from './PrepickBadge';
+import { PreRoundPanel } from './PreRoundPanel';
 import { useDrag } from './useDrag';
 import { useLivePoll } from './useLivePoll';
 import { useOverlayConfig } from './useOverlayConfig';
@@ -473,7 +474,7 @@ export const OverlayView: React.FC = () => {
 
   // Direct element references for GPU hardware-accelerated zero-lag dragging
   const rootRef = useRef<HTMLDivElement>(null);
-  const { lobbyRef, pregameRef, topAgentsRef, prepickRef, startDrag, startResize } = useDrag({
+  const { lobbyRef, pregameRef, topAgentsRef, prepickRef, preRoundRef, startDrag, startResize } = useDrag({
     config,
     setConfig,
     saveConfig,
@@ -530,6 +531,11 @@ export const OverlayView: React.FC = () => {
           bounds,
           box(prepickRef, 260, 40, cur.scales?.prepick ?? 1)
         ),
+        preRound: clampWidgetPos(
+          source.preRound ?? { x: 24, y: 300 },
+          bounds,
+          box(preRoundRef, 340, 190, cur.scales?.preRound ?? 1)
+        ),
       };
       if (saved && samePositions(next, cur.positions)) return;
       const merged: OverlayConfig = {
@@ -555,7 +561,7 @@ export const OverlayView: React.FC = () => {
     };
     // Refs are stable identities; listed so a hook-owned ref cannot quietly
     // change meaning without the effect re-binding.
-  }, [lobbyRef, pregameRef, topAgentsRef, prepickRef, setConfig]);
+  }, [lobbyRef, pregameRef, topAgentsRef, prepickRef, preRoundRef, setConfig]);
 
 
   // Sync edit mode and config changes from main app
@@ -696,7 +702,13 @@ export const OverlayView: React.FC = () => {
       ? liveRed
       : liveBlue
     : PREVIEW_OPPONENTS;
-  // Scoreboard mounts/unmounts on every Tab press and panels flip on phase
+
+  /* The local player's live row, when the roster carries it. Absent is normal:
+   * the panel omits the pick chip rather than inventing one. */
+  const preRoundYou =
+    [...yourTeam, ...enemyTeam].find(
+      (p) => p.puuid && p.puuid.toLowerCase() === (profile?.puuid ?? '').toLowerCase()
+    ) ?? null;  // Scoreboard mounts/unmounts on every Tab press and panels flip on phase
   // changes — repaint after each transition so DWM never keeps a stale
   // white region from the mount/unmount repaint storm.
   const scoreVisible = config.showLobby && showScorePanel;
@@ -862,6 +874,33 @@ export const OverlayView: React.FC = () => {
           />
         </div>
       )}
+      {/* ============================================================ */}
+      {/* WIDGET 6: Pre-round plate — agent select / round start       */}
+      {/* ============================================================ */}
+      {config.showPreRound && matchState && matchState.phase !== 'idle' && (
+        <div
+          ref={preRoundRef}
+          onPointerDown={(e) => startDrag('preRound', e)}
+          style={{
+            transform: `translate3d(${config.positions.preRound?.x ?? 24}px, ${config.positions.preRound?.y ?? 300}px, 0) scale(${config.scales?.preRound ?? 1.0})`,
+            transformOrigin: 'top left',
+            touchAction: 'none',
+          }}
+          className={`fixed top-0 left-0 ${
+            isEditMode ? 'pointer-events-auto' : 'pointer-events-none'
+          } select-none will-change-transform z-10`}
+        >
+          <PreRoundPanel
+            isEditMode={isEditMode}
+            matchState={matchState}
+            you={preRoundYou}
+            yourTeam={yourTeam}
+            enemyTeam={enemyTeam}
+            tierIcons={tierIcons}
+          />
+        </div>
+      )}
+
       {/* ============================================================ */}
       {/* WIDGET 5: Agent Select — big centered detailed team panel    */}
       {/* ============================================================ */}

@@ -13,6 +13,7 @@ export interface DragControls {
   pregameRef: RefObject<HTMLDivElement | null>;
   topAgentsRef: RefObject<HTMLDivElement | null>;
   prepickRef: RefObject<HTMLDivElement | null>;
+  preRoundRef: RefObject<HTMLDivElement | null>;
   startDrag: (
     key: keyof OverlayConfig['positions'],
     e: ReactPointerEvent,
@@ -32,12 +33,14 @@ export function useDrag({ config, setConfig, saveConfig, isEditMode }: UseDragAr
   const pregameRef = useRef<HTMLDivElement>(null);
   const topAgentsRef = useRef<HTMLDivElement>(null);
   const prepickRef = useRef<HTMLDivElement>(null);
+  const preRoundRef = useRef<HTMLDivElement>(null);
 
   const widgetRefs = {
     lobby: lobbyRef,
     pregame: pregameRef,
     topAgents: topAgentsRef,
     prepick: prepickRef,
+    preRound: preRoundRef,
   };
   // Smooth GPU-composited drag handler with pointer capture
   const startDrag = (
@@ -171,5 +174,5 @@ export function useDrag({ config, setConfig, saveConfig, isEditMode }: UseDragAr
     window.addEventListener('pointercancel', onPointerUp, { passive: false });
   };
 
-  return { lobbyRef, pregameRef, topAgentsRef, prepickRef, startDrag, startResize };
+  return { lobbyRef, pregameRef, topAgentsRef, prepickRef, preRoundRef, startDrag, startResize };
 }
