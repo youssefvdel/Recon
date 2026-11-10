@@ -1467,6 +1467,19 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('readSnapshot no longer discards a stale snapshot', /return null;\s*\}\s*\n\}/.test(parseBody) && !/SNAPSHOT_TTL/.test(parseBody), true);
 }
 
+// --- Overview is one column, not a card grid ------------------------------
+{
+  const { readFileSync } = await import('node:fs');
+  const ov = readFileSync(new URL('../src/components/Overview.tsx', import.meta.url), 'utf8');
+  check('Overview is under 450 lines', ov.split('\n').length < 450, true);
+  check('no card surfaces survive', /rounded-2xl|rounded-3xl|shadow-m3-1|StatValue/.test(ov), false);
+  check('the retired components are gone', /BodyFigure|pctLabel|BigTile|SmallStat|RiotClientNotice|useCountUp|OverviewSkeletons/.test(ov), false);
+  check('shortAct stays exported for other surfaces', /export const shortAct/.test(ov), true);
+  check('no em-dash or ellipsis placeholder', /'—'|"—"|'…'|"…"/.test(ov), false);
+  check('it renders the primitives, not cards', /<ActHeader/.test(ov) && /<FeedRow/.test(ov) && /<Sparkline/.test(ov), true);
+  check('the feed opens the existing modal', /<MatchDetailModal/.test(ov), true);
+}
+
 // --- B foundations: one file per primitive, one colour contract -----------
 {
   const { existsSync, readFileSync } = await import('node:fs');
@@ -1657,7 +1670,9 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   );
   // A UUID on screen is internal data leaking into the UI.
   check('an unknown act never renders its raw id', /\?\? s\.id\)/.test(ovSrc), false);
-  check('an unknown act falls back to a neutral label', /return label \? shortAct\(label\) : 'Act'/.test(ovSrc), true);
+  // Direction B removed the per-act columns entirely; the page must still never
+  // print a raw act id, and unknown labels go through shortAct.
+  check('an unknown act still goes through shortAct', /shortAct\(/.test(ovSrc), true);
 }
 
 // --- A23-2: JS warn/error must reach the same sink the Rust lines use ------
