@@ -1110,9 +1110,9 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   // "does not outlive its reason" assertion further down.
   check('the transport is not defined in tracker', /^async function riotGet\(/m.test(trk), false);
   check(
-    'tracker imports the one implementation',
-    /import \{[^}]*riotGet[^}]*\} from '\.\.\/sources\/riot'/.test(trk),
-    true
+    'tracker no longer imports the raw transport',
+    /riotGet/.test(trk),
+    false
   );
   check('sources/riot.ts exists with a branded type', src.includes('declare const VALIDATED: unique symbol'), true);
   for (const fn of ['readMmr', 'readMatchDetails', 'readLiveMatchById', 'readPlayer24h']) {
@@ -1212,11 +1212,26 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   }
   check('exactly one riotGet implementation remains', impls, 1);
   check('the transport is not defined in tracker', /^async function riotGet\(/m.test(trackerSrc2), false);
-  check(
-    'tracker imports the one transport',
-    /import \{[^}]*riotGet[^}]*\} from '\.\.\/sources\/riot'/.test(trackerSrc2),
-    true
-  );
+  // Final contract: the raw transport lives in exactly ONE file in src/, and
+  // it is not tracker. Stronger than "tracker imports it" — a second copy
+  // anywhere would fail.
+  {
+    const { readdirSync, statSync } = await import('node:fs');
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((f) => {
+        const full = `${dir}/${f}`;
+        return statSync(full).isDirectory() ? walk(full) : full.endsWith('.ts') ? [full] : [];
+      });
+    const root = new URL('../src', import.meta.url).pathname;
+    const filesMentioning = walk(root).filter((f) =>
+      /\briotGet\b/.test(readFileSync(f, 'utf8'))
+    );
+    check(
+      'the raw transport lives in exactly one file',
+      filesMentioning.map((f) => f.split('/').pop()).join(','),
+      'riot.ts'
+    );
+  }
 
   // The status detail mapping is user-visible copy; losing it in a refactor
   // would leave the banner saying something generic.
@@ -1328,6 +1343,11 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   // failure mode this whole refactor exists to remove is a comment nobody
   // recomputes.
   const rawSites = (trackerSrc2.match(/await riotGet\(/g) ?? []).length;
+  // Stricter second count: the NAME must be gone from tracker entirely, so a
+  // local alias or a comment cannot satisfy "zero call sites" while the raw
+  // transport is still reachable.
+  const rawNameMentions = (trackerSrc2.match(/riotGet/g) ?? []).length;
+  check('the raw transport name appears nowhere in tracker', rawNameMentions, 0);
   const stated = Number((riotSrc.match(/makes (\d+) raw `riotGet` calls?/) ?? [])[1] ?? -1);
   check('the header states the real number of raw call sites', stated, rawSites);
 
@@ -1345,7 +1365,7 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   // Temporary escape hatch with a named expiry: it is exported ONLY while raw
   // call sites remain, and marked as such.
   const stillExported = /export async function riotGet/.test(riotSrc);
-  check('the raw transport export is marked temporary', /TEMPORARY EXPORT/.test(riotSrc), true);
+  check('the raw transport is not exported', stillExported, false);
   check('the riotGet export does not outlive its reason', rawSites > 0 ? stillExported : !stillExported, true);
 }
 

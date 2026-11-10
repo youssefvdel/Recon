@@ -5,17 +5,12 @@
  * caller can obtain an unvalidated response from HERE, and every parser it owns
  * accepts `Validated<T>`, a branded type nothing outside this module can mint.
  *
- * HONEST SCOPE, and the number is checked, not trusted:
- * this module now holds the ONE Riot transport, but `utils/tracker.ts` still
- * makes 1 raw `riotGet` call (match loadouts only — the 404-as-control-flow route loop) until step 2 of
- * docs/architecture/next-session.md converts them to validated readers.
- * `riotGet` is therefore exported with a named expiry — a devqa assertion fails
- * once those call sites reach zero and the export is still there.
- *
- * When step 2 lands the count in this paragraph becomes 0 and this module is
- * then, and only then, the only place a raw payload exists. The assertion in
- * scripts/devqa-check.ts compares THIS NUMBER to the real call-site count, so
- * the two cannot drift apart again. */
+ * SINGLE OWNER, and the claim is checked, not trusted:
+ * this module is the ONLY place a raw payload exists: tracker makes 0 raw `riotGet` calls
+ * (checked against the source), the temporary export is gone, and `riotGet` is private
+ * again. The assertion in scripts/devqa-check.ts compares the number in this
+ * paragraph to the real call-site count and requires the exclusivity claim to
+ * hold while it is zero — so the count and this paragraph cannot drift apart. */
 
 import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '../utils/ipc';
@@ -148,11 +143,10 @@ async function withRiotSlot<R>(fn: () => Promise<R>): Promise<R> {
 /* NOT exported (step 1 of the data-layer design): the raw transport is the only
  * way to obtain an unvalidated Riot payload, so it stays inside this module.
  * Validated readers live in src/sources/riot.ts. */
-/** Raw GET. TEMPORARY EXPORT — step 2 of docs/architecture/next-session.md
- *  converts the 13 remaining call sites to validated readers, after which this
- *  stops being exported and the header's "only validated boundary" claim
- *  becomes true. A devqa check fails if the export outlives the conversion. */
-export async function riotGet(host: string, path: string): Promise<any> {
+/** Raw GET. PRIVATE: every call site in src/ now goes through a validated
+ *  reader, so the only way to obtain an unvalidated payload is inside this
+ *  module. A devqa assertion fails if this is ever exported again. */
+async function riotGet(host: string, path: string): Promise<any> {
   const call = async (e: DirectEnt): Promise<string> => {
     const version = await resolveVersion();
     return invoke<string>('riot_direct_get', {

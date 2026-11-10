@@ -843,29 +843,13 @@ export async function fetchMatchLoadouts(
     return [];
   }
   try {
-    const glz = glzHostFor(region);
-    const routes =
-      phase === 'pregame'
-        ? [
-            `/pregame/v1/matches/${matchId}/loadouts`,
-            `/core-game/v1/matches/${matchId}/loadouts`,
-            `/coregame/v1/matches/${matchId}/loadouts`,
-          ]
-        : [
-            `/core-game/v1/matches/${matchId}/loadouts`,
-            `/coregame/v1/matches/${matchId}/loadouts`,
-            `/pregame/v1/matches/${matchId}/loadouts`,
-          ];
-    for (const route of routes) {
-      try {
-        const raw = await riotGet(glz, route);
-        const list = raw?.Loadouts ?? raw?.loadouts;
-        if (Array.isArray(list) && list.length > 0) return list;
-      } catch {
-        /* Wrong phase namespace 404s here — try the next route. */
-      }
-    }
-    return [];
+    // Validated reader (docs/riotget-conversion.md #3): it owns the phase-order
+    // spellings, the 404-as-control-flow rule and the GLZ host — null means no
+    // such match in that namespace, [] means a spelling answered genuinely
+    // empty. The outer fallback stays here: a loadout viewer with no data
+    // renders empty, never throws.
+    const list = await readMatchLoadouts(phase ?? 'coregame', matchId, region);
+    return list ?? [];
   } catch {
     return [];
   }
@@ -911,7 +895,7 @@ export type { PersistedRank } from '../cache/namespace';
 // external importers; a re-export does not bring the name into this scope).
 import { evictOldest, pruneSupersededCaches, persistLiveRank, readPersistedRank } from '../cache/namespace';
 import { inCurrentLobby, setCurrentLobbyPuuids } from '../live/lobbyScope';
-import { riotGet, getEntitlements, clearEntitlements, readMmr, readMatchHistoryPage, readMatchDetails, readRiotValidated, readLivePlayer, readLiveMatchById, readMmrProfile, readCompetitiveUpdates, readHistoryPageWithTime } from '../sources/riot';
+import { getEntitlements, clearEntitlements, readMmr, readMatchHistoryPage, readMatchDetails, readRiotValidated, readLivePlayer, readLiveMatchById, readMmrProfile, readCompetitiveUpdates, readHistoryPageWithTime, readMatchLoadouts } from '../sources/riot';
 export { riotPut, riotPost, getEntitlements, clearEntitlements } from '../sources/riot';
 import {
   enqueueTrnSpread,
@@ -1396,7 +1380,7 @@ if (typeof localStorage !== 'undefined') {
  * tracker.gg is dead for this app (Warden captcha in front of the      *
  * keyless API, no VALORANT licence for the official one). What the     *
  * local Riot client still answers for ANY puuid, with the app's own    *
- * token (the same `riotGet` transport every other read here uses):     *
+ * token (the same validated Riot transport every other read uses):     *
  *   /mmr/v1/players/{puuid}              tier + RR + seasonal history  *
  *   /match-history/v1/history/{puuid}    match ids, newest first       *
  *   /match-details/v1/matches/{id}       per-player scoreboard         *
