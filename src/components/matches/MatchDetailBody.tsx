@@ -10,7 +10,8 @@ import { RoundTimeline } from '../RoundTimeline';
 import { RoundRail } from '../primitives/RoundRail';
 import { ScoreBadge, scoreTier } from '../ScoreBadge';
 import { StatValue } from '../StatValue';
-import { formatPct } from '../../utils/format';
+import { formatKd, formatPct } from '../../utils/format';
+import { safeRatio } from '../../utils/absent';
 import { calculateTrsFallback, fetchTrnMatchDetails } from '../../utils/trn';
 import { useTrackerData } from '../../hooks/useTrackerData';
 
@@ -133,23 +134,29 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
 
   const teamBlueScore = detail?.teamScore['Blue'] ?? 0;
   const teamRedScore = detail?.teamScore['Red'] ?? 0;
-  const roundsCount = Math.max(1, teamBlueScore + teamRedScore);
+  /* Zero rounds is a real state (an unparsed/old payload): no per-round stat may
+   * be computed from it. The old `Math.max(1, …)` divided ACS/ADR by 1 and
+   * inflated them 10-30x while still looking plausible. */
+  const roundsCount = teamBlueScore + teamRedScore;
+  const hasRounds = roundsCount > 0;
 
+  /* Absent is absent: a duration is only shown when the payload carried one.
+   * `rounds x 105s` was a fabricated match length indistinguishable from a
+   * measured one. */
   const matchDurationMs =
-    detail?.durationMs && detail.durationMs > 0
-      ? detail.durationMs
-      : roundsCount * 105 * 1000;
+    detail?.durationMs && detail.durationMs > 0 ? detail.durationMs : null;
 
   // Process and enrich all players
   const playerStats = useMemo(() => {
     if (!detail) return [];
     return detail.players.map((p) => {
       const isMe = p.puuid === puuid;
-      const acs = Math.round(p.score / roundsCount);
-      const kd = p.deaths > 0 ? Number((p.kills / p.deaths).toFixed(2)) : p.kills;
+      const acs = hasRounds ? Math.round(p.score / roundsCount) : null;
+      /* No deaths is "undefined K/D", not "K/D equals your kill count". */
+      const kd = safeRatio(p.kills, p.deaths);
       const diff = p.kills - p.deaths;
-      const adr = Math.round(p.damage / roundsCount);
-      const ddPerRound = Math.round((p.damage - p.damageTaken) / roundsCount);
+      const adr = hasRounds ? Math.round(p.damage / roundsCount) : null;
+      const ddPerRound = hasRounds ? Math.round((p.damage - p.damageTaken) / roundsCount) : null;
 
       // Headshot %: REAL hit counts only. The old fallback derived a number
       // from K/D whenever the counts were absent, which printed a fabricated
@@ -200,13 +207,12 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
       const agentKey = `agent:${p.agent.toLowerCase()}`;
       const won = (detail.teamScore[p.team] ?? 0) > (detail.teamScore[p.team === 'Blue' ? 'Red' : 'Blue'] ?? 0);
 
-      const fallbackTrs = calculateTrsFallback({
-        kd,
-        acs,
-        ddPerRound,
-        kast: kast ?? 0,
-        won,
-      });
+      /* An estimated score needs its inputs; with any of them missing there is
+       * no estimate to show. */
+      const fallbackTrs =
+        kd != null && acs != null && ddPerRound != null
+          ? calculateTrsFallback({ kd, acs, ddPerRound, kast: kast ?? 0, won })
+          : null;
 
       // Real Tracker Score from TRN: matches outside match card exactly for the player,
       // and resolves each teammate/opponent from TRN match details.
@@ -216,7 +222,7 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
 
       const trsReal = typeof realTrs === 'number' && realTrs > 0;
       const trs = trsReal ? realTrs : fallbackTrs;
-      const trsEstimated = !trsReal && trs > 0;
+      const trsEstimated = !trsReal && trs != null && trs > 0;
 
       const displayName = isMe
         ? myAccountName || rawName || 'You'
@@ -250,11 +256,11 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
 
   // Split into Team Blue and Team Red
   const teamBlue = useMemo(
-    () => playerStats.filter((p) => p.team === 'Blue').sort((a, b) => b.acs - a.acs),
+    () => playerStats.filter((p) => p.team === 'Blue').sort((a, b) => (b.acs ?? -1) - (a.acs ?? -1)),
     [playerStats]
   );
   const teamRed = useMemo(
-    () => playerStats.filter((p) => p.team === 'Red').sort((a, b) => b.acs - a.acs),
+    () => playerStats.filter((p) => p.team === 'Red').sort((a, b) => (b.acs ?? -1) - (a.acs ?? -1)),
     [playerStats]
   );
 
@@ -272,7 +278,7 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
   // Overall Match MVP and Team MVPs
   const matchMvpPuuid = useMemo(() => {
     if (playerStats.length === 0) return '';
-    return [...playerStats].sort((a, b) => b.acs - a.acs)[0]?.puuid ?? '';
+    return [...playerStats].sort((a, b) => (b.acs ?? -1) - (a.acs ?? -1))[0]?.puuid ?? '';
   }, [playerStats]);
 
   // Head-to-head duel matrix: Blue rows × Red columns (kills each way)
@@ -486,7 +492,7 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
               <Clock className="w-3 h-3 text-m3-outline shrink-0" />
               <span className="whitespace-nowrap">{formatMatchDate(detail.when)}</span>
               <span>·</span>
-              <span className="font-mono whitespace-nowrap">{formatDuration(matchDurationMs)}</span>
+              <span className="font-mono whitespace-nowrap">{matchDurationMs != null ? formatDuration(matchDurationMs) : <StatValue reason="Match duration not recorded" />}</span>
             </div>
           </div>
 
@@ -669,8 +675,8 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
                             </td>
 
                             {/* K/D */}
-                            <td className={`py-1.5 px-2 text-center font-extrabold text-xs ${p.kd >= 1 ? 'text-m3-mint' : 'text-m3-coral'}`}>
-                              {p.kd.toFixed(2)}
+                            <td className={`py-1.5 px-2 text-center font-extrabold text-xs ${p.kd != null && p.kd >= 1 ? 'text-m3-mint' : 'text-m3-coral'}`}>
+                              {formatKd(p.kd)}
                             </td>
 
                             {/* Damage */}
@@ -823,12 +829,12 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
                               <div
                                 className="flex items-center justify-center cursor-default"
                                 data-tip={
-                                  p.trs > 0
+                                  p.trs != null && p.trs > 0
                                     ? `Tracker Score: ${p.trs} / 1000 — Tier ${scoreTier(p.trs).tier}${p.trsEstimated ? ' (estimated from K/D/ACS — not tracker.gg)' : ''}`
                                     : 'Tracker Score unavailable'
                                 }
                               >
-                                {p.trs > 0 ? (
+                                {p.trs != null && p.trs > 0 ? (
                                   <span className="flex items-baseline justify-center gap-0.5">
                                     <ScoreBadge tier={scoreTier(p.trs).tier} size={20} />
                                     {p.trsEstimated && (
@@ -842,7 +848,7 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
                             </td>
 
                             {/* ACS */}
-                            <td className="py-1.5 px-1 text-center text-m3-on-surface font-extrabold text-xs">{p.acs}</td>
+                            <td className="py-1.5 px-1 text-center text-m3-on-surface font-extrabold text-xs">{p.acs ?? '—'}</td>
 
                             {/* K/D/A */}
                             <td className="py-1.5 px-2 text-center text-m3-on-surface text-xs whitespace-nowrap">
@@ -855,23 +861,23 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
                             </td>
 
                             {/* K/D */}
-                            <td className={`py-1.5 px-1 text-center font-extrabold text-xs ${p.kd >= 1 ? 'text-m3-mint' : 'text-m3-coral'}`}>
-                              {p.kd.toFixed(2)}
+                            <td className={`py-1.5 px-1 text-center font-extrabold text-xs ${p.kd != null && p.kd >= 1 ? 'text-m3-mint' : 'text-m3-coral'}`}>
+                              {formatKd(p.kd)}
                             </td>
 
                             {/* DDΔ */}
-                            <td className={`py-1.5 px-1 text-center font-bold text-xs ${p.ddPerRound >= 0 ? 'text-m3-mint' : 'text-m3-coral'}`}>
-                              {p.ddPerRound > 0 ? `+${p.ddPerRound}` : p.ddPerRound}
+                            <td className={`py-1.5 px-1 text-center font-bold text-xs ${p.ddPerRound != null && p.ddPerRound >= 0 ? 'text-m3-mint' : 'text-m3-coral'}`}>
+                              {p.ddPerRound == null ? '—' : p.ddPerRound > 0 ? `+${p.ddPerRound}` : p.ddPerRound}
                             </td>
 
                             {/* ADR */}
-                            <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.adr}</td>
+                            <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.adr ?? '—'}</td>
 
                             {/* HS% */}
                             <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.hsPct > 0 ? formatPct(p.hsPct, 1) : <StatValue reason="Headshot % not recorded for this match" />}</td>
 
                             {/* KAST */}
-                            <td className="py-1.5 px-1 text-center text-m3-outline font-medium text-xs">{p.kast !== undefined ? `${p.kast}%` : ''}</td>
+                            <td className="py-1.5 px-1 text-center text-m3-outline font-medium text-xs">{p.kast != null ? `${p.kast}%` : '—'}</td>
 
                             {/* FK */}
                             <td className="py-1.5 px-1 text-center text-m3-mint font-bold text-xs">{p.fk}</td>
@@ -1025,12 +1031,12 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
                               <div
                                 className="flex items-center justify-center cursor-default"
                                 data-tip={
-                                  p.trs > 0
+                                  p.trs != null && p.trs > 0
                                     ? `Tracker Score: ${p.trs} / 1000 — Tier ${scoreTier(p.trs).tier}${p.trsEstimated ? ' (estimated from K/D/ACS — not tracker.gg)' : ''}`
                                     : 'Tracker Score unavailable'
                                 }
                               >
-                                {p.trs > 0 ? (
+                                {p.trs != null && p.trs > 0 ? (
                                   <span className="flex items-baseline justify-center gap-0.5">
                                     <ScoreBadge tier={scoreTier(p.trs).tier} size={20} />
                                     {p.trsEstimated && (
@@ -1044,7 +1050,7 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
                             </td>
 
                             {/* ACS */}
-                            <td className="py-1.5 px-1 text-center text-m3-on-surface font-extrabold text-xs">{p.acs}</td>
+                            <td className="py-1.5 px-1 text-center text-m3-on-surface font-extrabold text-xs">{p.acs ?? '—'}</td>
 
                             {/* K/D/A */}
                             <td className="py-1.5 px-2 text-center text-m3-on-surface text-xs whitespace-nowrap">
@@ -1057,23 +1063,23 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
                             </td>
 
                             {/* K/D */}
-                            <td className={`py-1.5 px-1 text-center font-extrabold text-xs ${p.kd >= 1 ? 'text-m3-mint' : 'text-m3-coral'}`}>
-                              {p.kd.toFixed(2)}
+                            <td className={`py-1.5 px-1 text-center font-extrabold text-xs ${p.kd != null && p.kd >= 1 ? 'text-m3-mint' : 'text-m3-coral'}`}>
+                              {formatKd(p.kd)}
                             </td>
 
                             {/* DDΔ */}
-                            <td className={`py-1.5 px-1 text-center font-bold text-xs ${p.ddPerRound >= 0 ? 'text-m3-mint' : 'text-m3-coral'}`}>
-                              {p.ddPerRound > 0 ? `+${p.ddPerRound}` : p.ddPerRound}
+                            <td className={`py-1.5 px-1 text-center font-bold text-xs ${p.ddPerRound != null && p.ddPerRound >= 0 ? 'text-m3-mint' : 'text-m3-coral'}`}>
+                              {p.ddPerRound == null ? '—' : p.ddPerRound > 0 ? `+${p.ddPerRound}` : p.ddPerRound}
                             </td>
 
                             {/* ADR */}
-                            <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.adr}</td>
+                            <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.adr ?? '—'}</td>
 
                             {/* HS% */}
                             <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.hsPct > 0 ? formatPct(p.hsPct, 1) : <StatValue reason="Headshot % not recorded for this match" />}</td>
 
                             {/* KAST */}
-                            <td className="py-1.5 px-1 text-center text-m3-outline font-medium text-xs">{p.kast !== undefined ? `${p.kast}%` : ''}</td>
+                            <td className="py-1.5 px-1 text-center text-m3-outline font-medium text-xs">{p.kast != null ? `${p.kast}%` : '—'}</td>
 
                             {/* FK */}
                             <td className="py-1.5 px-1 text-center text-m3-mint font-bold text-xs">{p.fk}</td>

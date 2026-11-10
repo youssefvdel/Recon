@@ -1,4 +1,5 @@
 import type { TrackerMatchDetail } from '../types';
+import { pctOf } from './absent';
 
 export interface AgentStatSummary {
   agent: string;
@@ -6,8 +7,8 @@ export interface AgentStatSummary {
   matches: number;
   wins: number;
   losses: number;
-  winPct: number;
-  kd: number;
+  winPct: number | null;
+  kd: number | null;
   hsPct: number;
 }
 
@@ -72,7 +73,7 @@ export function computeMapAgentStats(
 
   return Object.entries(statsMap)
     .map(([, s]) => {
-      const winPct = s.matches > 0 ? (s.wins / s.matches) * 100 : 0;
+      const winPct = pctOf(s.wins, s.matches);
       const kd = s.deaths > 0 ? s.kills / s.deaths : s.kills;
       const hsPct = s.totalShots > 0 ? (s.headshots / s.totalShots) * 100 : 0;
       return {
@@ -80,10 +81,10 @@ export function computeMapAgentStats(
         matches: s.matches,
         wins: s.wins,
         losses: s.losses,
-        winPct: Number(winPct.toFixed(1)),
+        winPct: winPct == null ? null : Number(winPct.toFixed(1)),
         kd: Number(kd.toFixed(2)),
         hsPct: Number(hsPct.toFixed(0)),
       };
     })
-    .sort((a, b) => b.matches - a.matches || b.winPct - a.winPct);
+    .sort((a, b) => b.matches - a.matches || (b.winPct ?? -1) - (a.winPct ?? -1));
 }

@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlertTriangle, Trophy } from 'lucide-react';
-import { formatPct } from '../../utils/format';
+import { formatKd, formatPct } from '../../utils/format';
 import type { AgentStatSummary } from '../../utils/mapMeta';
 import type { BlitzAgentStat } from '../../utils/blitzMeta';
 
@@ -213,9 +213,9 @@ export const MetaTiles: React.FC<MetaTilesProps> = ({
             ? 'https://media.valorant-api.com/agents/320b2a48-4d9b-a075-30f1-1f93a9b638fa/displayicon.png'
             : '');
         const role = meta?.role || stat.role || 'Agent';
-        const kd = stat.kd.toFixed(2);
+        const kd = formatKd(stat.kd);
         const kdColor =
-          stat.kd >= 1 ? 'text-m3-on-surface font-semibold' : 'text-m3-on-surface-variant font-medium';
+          stat.kd != null && stat.kd >= 1 ? 'text-m3-on-surface font-semibold' : 'text-m3-on-surface-variant font-medium';
         return (
           <div
             key={stat.agent}
@@ -255,14 +255,14 @@ export const MetaTiles: React.FC<MetaTilesProps> = ({
 
             {/* Win % */}
             <div className="text-right font-mono text-[10px] font-bold tabular-nums whitespace-nowrap" data-tip="Win Rate">
-              <span className={stat.winPct >= 50 ? 'text-m3-on-surface' : 'text-m3-on-surface-variant'}>
+              <span className={(stat.winPct ?? -1) >= 50 ? 'text-m3-on-surface' : 'text-m3-on-surface-variant'}>
                 {formatPct(stat.winPct, 1)}
               </span>
             </div>
 
             {/* K/D — TRN's map segment has no K/D, so only local games can fill it */}
             <div className="text-right font-mono text-[10px] font-bold tabular-nums whitespace-nowrap" data-tip="K/D Ratio (last-20 local games)">
-              {stat.kd > 0 ? <span className={kdColor}>{kd}</span> : null}
+              {stat.kd != null && stat.kd > 0 ? <span className={kdColor}>{kd}</span> : null}
             </div>
 
             {/* HS% */}

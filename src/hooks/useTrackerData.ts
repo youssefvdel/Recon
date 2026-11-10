@@ -622,7 +622,7 @@ async function runRefresh(): Promise<void> {
           )
         ).then((res) => {
           const m: Record<string, { kd: number; matches: number }> = {};
-          for (const r of res) if (r) m[r.sid] = { kd: r.kd, matches: r.matches };
+          for (const r of res) if (r && r.kd != null) m[r.sid] = { kd: r.kd, matches: r.matches };
           updateStore({ trnPrev: m });
         })
       );

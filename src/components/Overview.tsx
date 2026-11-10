@@ -155,7 +155,7 @@ export const Overview: React.FC = () => {
       {topAgentMeta?.icon && <img src={topAgentMeta.icon} alt="" className="w-5 h-5 object-contain" />}
       <span>
         {topAgent.agent} · {topAgent.matches} games
-        {topAgent.winPct > 0 ? ` · ${Math.round(topAgent.winPct)}% win` : ''}
+        {topAgent.winPct != null && topAgent.winPct > 0 ? ` · ${Math.round(topAgent.winPct)}% win` : ''}
       </span>
     </span>
   ) : undefined;
@@ -264,7 +264,7 @@ export const Overview: React.FC = () => {
             .filter(Boolean)
             .join(' · ')}
           record={selLoading ? undefined : record}
-          winPct={selLoading ? undefined : winPct !== undefined ? `${Math.round(winPct)}%` : undefined}
+          winPct={selLoading ? undefined : winPct != null ? `${Math.round(winPct)}%` : undefined}
           metrics={selLoading ? [] : metrics}
           rankLine={rankLine}
           agentLine={agentLine}

@@ -6,8 +6,8 @@
  * same metric ends up rendered 3-4 different ways again.
  */
 
-export const formatKd = (value: number): string =>
-  Number.isFinite(value) ? value.toFixed(1) : '—';
+export const formatKd = (value: number | null | undefined): string =>
+  value != null && Number.isFinite(value) ? value.toFixed(1) : '—';
 
-export const formatPct = (value: number, decimals = 1): string =>
-  Number.isFinite(value) ? `${value.toFixed(decimals)}%` : '—';
+export const formatPct = (value: number | null | undefined, decimals = 1): string =>
+  value != null && Number.isFinite(value) ? `${value.toFixed(decimals)}%` : '—';

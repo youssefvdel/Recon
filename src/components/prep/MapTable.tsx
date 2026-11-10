@@ -123,7 +123,7 @@ export const MapTable: React.FC<MapTableProps> = ({ rows, openKey, onOpenChange 
                       <span key={a.name} className="flex flex-col items-center gap-0.5">
                         {a.icon && <img src={a.icon} alt={a.name} className="w-5 h-5 object-contain" />}
                         <span className="text-micro font-mono text-m3-outline tabular-nums">
-                          {a.winPct > 0 ? `${Math.round(a.winPct)}%` : ''}
+                          {a.winPct != null && a.winPct > 0 ? `${Math.round(a.winPct)}%` : ''}
                         </span>
                       </span>
                     ))}

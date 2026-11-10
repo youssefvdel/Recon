@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from './ipc';
 import { logger } from './logger';
+import { pctOf, safeRatio } from './absent';
 
 /* TRN enrichment: tracker.gg's public read API through a hidden same-origin
    WebView2 window (genuine Edge TLS + navigation chain + page cookies — no
@@ -1332,8 +1333,8 @@ export interface TrnActStats {
   wins: number;
   losses: number;
   ties: number;
-  winPct: number;
-  kd: number;
+  winPct: number | null;
+  kd: number | null;
   kda: number;
   kills: number;
   deaths: number;
@@ -1644,8 +1645,8 @@ export interface TrnAgentTopMap {
   mapKey: string;
   matches: number;
   wins: number;
-  winPct: number;
-  kd: number;
+  winPct: number | null;
+  kd: number | null;
 }
 
 export interface TrnAgentStat {
@@ -1655,8 +1656,8 @@ export interface TrnAgentStat {
   matches: number;
   wins: number;
   losses: number;
-  winPct: number;
-  kd: number;
+  winPct: number | null;
+  kd: number | null;
   kda: number;
   kills: number;
   deaths: number;
@@ -1785,8 +1786,8 @@ export async function fetchTrnAgents(name: string, tag: string, seasonId: string
         matches: m,
         wins: w,
         losses: l,
-        winPct: m > 0 ? (w / m) * 100 : 0,
-        kd: d > 0 ? k / d : k,
+        winPct: pctOf(w, m),
+        kd: safeRatio(k, d),
         kda: d > 0 ? (k + a) / d : k + a,
         kills: k,
         deaths: d,
@@ -1835,7 +1836,7 @@ export interface TrnMapAgent {
   name: string;
   icon: string;
   matches: number;
-  winPct: number;
+  winPct: number | null;
 }
 
 export interface TrnMapStat {
@@ -1845,8 +1846,8 @@ export interface TrnMapStat {
   matchesPlayed: number;
   matchesWon: number;
   matchesLost: number;
-  winPct: number;
-  kd: number;
+  winPct: number | null;
+  kd: number | null;
   adr: number;
   acs: number;
   damageDeltaPerRound: number;
@@ -1945,7 +1946,7 @@ export async function fetchTrnMaps(name: string, tag: string, seasonId: string, 
       };
     })
     .filter((m: TrnMapStat) => m.matchesPlayed > 0)
-    .sort((a: TrnMapStat, b: TrnMapStat) => b.winPct - a.winPct);
+    .sort((a: TrnMapStat, b: TrnMapStat) => (b.winPct ?? -1) - (a.winPct ?? -1));
 }
 
 /** Matches-weighted average of a per-match rate. */
@@ -1989,7 +1990,7 @@ export function mergeAgentStats(all: TrnAgentStat[][]): TrnAgentStat[] {
         const e = mapAgg.get(t.mapKey) ?? { mapName: t.mapName, mapKey: t.mapKey, matches: 0, wins: 0, kdW: 0, kdM: 0 };
         e.matches += t.matches;
         e.wins += t.wins;
-        e.kdW += t.kd * t.matches;
+        if (t.kd != null && Number.isFinite(t.kd)) e.kdW += t.kd * t.matches;
         e.kdM += t.matches;
         mapAgg.set(t.mapKey, e);
       }
@@ -2001,8 +2002,8 @@ export function mergeAgentStats(all: TrnAgentStat[][]): TrnAgentStat[] {
       matches,
       wins,
       losses,
-      winPct: (wins / matches) * 100,
-      kd: deaths > 0 ? kills / deaths : kills,
+      winPct: pctOf(wins, matches),
+      kd: safeRatio(kills, deaths),
       kda: deaths > 0 ? (kills + assists) / deaths : kills + assists,
       kills,
       deaths,
@@ -2046,8 +2047,8 @@ export function mergeAgentStats(all: TrnAgentStat[][]): TrnAgentStat[] {
           mapKey: e.mapKey,
           matches: e.matches,
           wins: e.wins,
-          winPct: e.matches > 0 ? (e.wins / e.matches) * 100 : 0,
-          kd: e.kdM > 0 ? e.kdW / e.kdM : 0,
+          winPct: pctOf(e.wins, e.matches),
+          kd: safeRatio(e.kdW, e.kdM),
         }))
         .sort((x, y) => y.matches - x.matches),
     });
@@ -2084,7 +2085,7 @@ export function mergeMapStats(all: TrnMapStat[][]): TrnMapStat[] {
         const e = agentAgg.get(k) ?? { name: t.name, icon: t.icon, matches: 0, winW: 0, winM: 0 };
         if (!e.icon && t.icon) e.icon = t.icon;
         e.matches += t.matches;
-        e.winW += t.winPct * t.matches;
+        if (t.winPct != null && Number.isFinite(t.winPct)) e.winW += t.winPct * t.matches;
         e.winM += t.matches;
         agentAgg.set(k, e);
       }
@@ -2096,8 +2097,8 @@ export function mergeMapStats(all: TrnMapStat[][]): TrnMapStat[] {
       matchesPlayed,
       matchesWon,
       matchesLost,
-      winPct: (matchesWon / matchesPlayed) * 100,
-      kd: deaths > 0 ? kills / deaths : kills,
+      winPct: pctOf(matchesWon, matchesPlayed),
+      kd: safeRatio(kills, deaths),
       adr: w((m) => m.adr),
       acs: w((m) => m.acs),
       damageDeltaPerRound: Math.round(w((m) => m.damageDeltaPerRound)),
@@ -2125,13 +2126,13 @@ export function mergeMapStats(all: TrnMapStat[][]): TrnMapStat[] {
           name: e.name,
           icon: e.icon,
           matches: e.matches,
-          winPct: e.winM > 0 ? e.winW / e.winM : 0,
+          winPct: e.winM > 0 ? e.winW / e.winM : null,
         }))
         .sort((x, y) => y.matches - x.matches)
         .slice(0, 3),
     });
   }
-  return out.sort((a, b) => b.winPct - a.winPct);
+  return out.sort((a, b) => (b.winPct ?? -1) - (a.winPct ?? -1));
 }
 
 /**
