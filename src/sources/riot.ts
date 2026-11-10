@@ -619,25 +619,21 @@ export async function readCompetitiveUpdates(
 export type LoadoutRow = Record<string, unknown>;
 
 /**
- * All loadouts for the match the given puuid is in. `null` = the player is not
- * in a match, or no loadout spelling answered 404-free but empty; an empty
- * array is real data (the match exists and has no loadouts yet).
+ * All loadouts for one match. `null` = no match (every spelling answered 404);
+ * an empty array is real data — one spelling answered 200 with an empty
+ * Loadouts list. The caller owns the match id, the reader owns the 404
+ * contract: no player resolution here, so opening loadouts costs exactly the
+ * loadout read and nothing else.
  *
- * The match id comes from the live-player read because the caller has the
- * player, not the id; this is the one composite reader. Legacy `/coregame/`
- * spelling is tried only after the canonical route 404s, so a real 403 throws
- * instead of being masked.
+ * Spellings are tried in phase order; the legacy `/coregame/` name is retried
+ * only after the canonical route 404s, so a real 403 throws instead of being
+ * masked.
  */
 export async function readMatchLoadouts(
   phase: 'pregame' | 'coregame',
-  puuid: string
+  matchId: string
 ): Promise<NoMatch<LoadoutRow[]>> {
-  if (!puuid) throw new RiotError('NO_PUUID', 'readMatchLoadouts: puuid is required');
-  const player = await readLivePlayer(phase, puuid);
-  if (player === null) return null;
-  const matchId = String(player.matchId ?? '');
-  if (!matchId) return null;
-
+  if (!matchId) throw new RiotError('NO_MATCH_ID', 'readMatchLoadouts: matchId is required');
   const routes =
     phase === 'pregame'
       ? [
