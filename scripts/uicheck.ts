@@ -1,8 +1,10 @@
 // Regression harness for the headless UI: load the dev fixture in Chromium and
-// assert every destination still renders without breaking.
+// assert every destination still renders without breaking, in both the old app
+// and the v2 shell.
 //
-//   bun run uicheck                # default http://127.0.0.1:5173/
+//   bun run uicheck                 # old + v2 passes, default dev server
 //   UICHECK_URL=http://host:port/ bun run uicheck
+//   bun scripts/uicheck.ts --fail   # explicit failure semantics (same as default)
 //
 // It needs the dev server *and* a Chromium binary (CHROME_PATH, a Playwright
 // cache, or a system chrome/chromium/brave). It is deliberately NOT part of
@@ -12,10 +14,11 @@
 //   A. no view error boundary
 //   B. the route's primary landmark renders
 //   C. no rendered cell contains NaN / undefined / Infinity / a bare em dash
-//   D. document height <= one viewport, except routes the design allows to scroll
+//   D. document height <= one viewport, except routes with a written allow reason
+//   E. container census: elements with a radius and a border/background
 //
 // Exit codes: 0 all pass, 1 at least one route failed, 2 harness/setup failure.
-// A failure prints the route id and the exact reason.
+// A failure prints the pass, route id and the exact reason.
 
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -23,18 +26,18 @@ import { join } from 'node:path';
 
 type Route = {
   id: string;
-  /** Labels to click after load, in order. Overview/Matches/Prep share a tab strip. */
   clicks?: string[];
-  /** Text that must appear in the rendered main area (the primary landmark). */
   marker: RegExp;
-  /** The design allows this route to exceed one viewport (the redesign target). */
+  /** Written reason why this route may exceed one viewport. */
   allowTall?: string;
 };
 
-const BASE = process.env.UICHECK_URL ?? 'http://127.0.0.1:5173/';
+type Pass = { name: 'old' | 'v2'; base: string; routes: Route[] };
 
-const ROUTES: Route[] = [
-  { id: 'overview', clicks: ['Tracker', 'Overview'], marker: /EPISODE|Current Act|Competitive/i },
+const BASE = (process.env.UICHECK_URL ?? 'http://127.0.0.1:5173/').replace(/\/+$/, '') + '/';
+
+const OLD_ROUTES: Route[] = [
+  { id: 'overview', clicks: ['Tracker', 'Overview'], marker: /EPISODE|Current Act|Competitive/i, allowTall: 'the Overview feed is the page (Direction B)' },
   { id: 'matches', clicks: ['Tracker', 'Matches'], marker: /Match History/i },
   { id: 'prep', clicks: ['Tracker', 'Prep'], marker: /AGENTS ·|Agent Time/i },
   { id: 'store', clicks: ['Store'], marker: /STORE/i },
@@ -46,9 +49,16 @@ const ROUTES: Route[] = [
   { id: 'settings', clicks: ['Settings'], marker: /Application Settings/i },
 ];
 
-// The feed is the page: natural page scroll is the Direction B design.
-ROUTES[0].allowTall = 'the Overview feed is the page';
-const UNIQUE_ROUTES = ROUTES;
+const V2_ROUTES: Route[] = [
+  { id: 'now', clicks: ['Now'], marker: /Recent matches|as of|Current Act/i, allowTall: 'the v2 feed is the page' },
+  { id: 'matches', clicks: ['Matches'], marker: /Matches|Surface not built yet/i },
+  { id: 'prep', clicks: ['Prep'], marker: /Prep|Surface not built yet/i },
+];
+
+const PASSES: Pass[] = [
+  { name: 'old', base: `${BASE}?fixture=lobby`, routes: OLD_ROUTES },
+  { name: 'v2', base: `${BASE}?fixture=lobby&v2=1`, routes: V2_ROUTES },
+];
 
 const PROBE = String.raw`(() => {
   const norm = (s) => (s || '').replace(/\s+/g, ' ').trim();
@@ -56,31 +66,40 @@ const PROBE = String.raw`(() => {
   const text = norm(main.innerText);
   const body = norm(document.body.innerText);
 
-  const boundary = /This view failed to load|Something went wrong|view failed to load/i.test(body);
+  const boundary = /This view failed to load|Something went wrong/i.test(body);
   const alerts = [...document.querySelectorAll('[role="alert"]')].map((e) => norm(e.innerText)).filter(Boolean);
 
   const cells = [];
   for (const el of document.querySelectorAll('td, th, [role="cell"], [data-cell], [class*="stat"], [class*="value"], [class*="metric"]')) {
     const t = norm(el.innerText);
     if (!t) continue;
-    // only leaf-ish cells; parents would repeat their children's text
     if (el.querySelector('td, [role="cell"], [data-cell], [class*="stat"], [class*="value"], [class*="metric"]')) continue;
     cells.push({ tag: el.tagName.toLowerCase(), cls: String(el.className).slice(0, 60), text: t });
   }
-  const badCells = cells.filter((c) =>
-    /\b(?:NaN|undefined|Infinity)\b/.test(c.text) || c.text === '—' || c.text === '— —'
-  );
+  const badCells = cells.filter((c) => /\b(?:NaN|undefined|Infinity)\b/.test(c.text) || c.text === '—' || c.text === '— —');
   const badBody = /\b(?:NaN|undefined|Infinity)\b/.test(text);
+
+  let cards = 0;
+  for (const el of main.querySelectorAll('*')) {
+    const s = getComputedStyle(el);
+    const r = el.getBoundingClientRect();
+    if (r.width * r.height <= 10000) continue;
+    const radius = parseFloat(s.borderTopLeftRadius) || 0;
+    if (radius <= 0) continue;
+    const border = (parseFloat(s.borderTopWidth) || 0) > 0;
+    const bg = s.backgroundColor && s.backgroundColor !== 'transparent' && s.backgroundColor !== 'rgba(0, 0, 0, 0)';
+    if (!border && !bg) continue;
+    const tag = el.tagName;
+    if (tag === 'BUTTON' || tag === 'INPUT' || tag === 'A' || tag === 'SVG') continue;
+    cards++;
+  }
 
   return JSON.stringify({
     height: document.documentElement.scrollHeight,
     viewport: window.innerHeight,
-    boundary,
-    alerts,
-    markerHit: false, // set by the caller against the route marker
-    badCells,
-    badBody,
-    head: text.slice(0, 160),
+    boundary, alerts, cards, badCells, badBody,
+    placeholder: /Surface not built yet/i.test(body),
+    head: text.slice(0, 180),
   });
 })()`;
 
@@ -144,14 +163,13 @@ async function waitForDevtools(profile: string, timeoutMs = 15000): Promise<numb
   throw new Error('chromium did not expose a DevTools port');
 }
 
-type Result = { route: string; pass: boolean; reasons: string[]; height: number; viewport: number };
+type Result = { pass: string; route: string; ok: boolean; na: boolean; reasons: string[]; height: number; viewport: number; cards: number };
 
 async function run(): Promise<number> {
-  // The dev server must be up; this check is intentionally not part of verify.
   try {
     const res = await fetch(BASE, { signal: AbortSignal.timeout(3000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  } catch (e) {
+  } catch {
     console.error(`uicheck: dev server not reachable at ${BASE} — run "bun run dev:ui" first.`);
     return 2;
   }
@@ -179,38 +197,53 @@ async function run(): Promise<number> {
       };
 
       const results: Result[] = [];
-      for (const route of UNIQUE_ROUTES) {
-        const reasons: string[] = [];
-        await cdp.send('Page.navigate', { url: `${BASE}?fixture=lobby` });
-        await Bun.sleep(900);
-        for (const label of route.clicks ?? []) {
-          const clicked = await evalx(`(() => { const n=(s)=>(s||'').replace(/\\s+/g,' ').trim(); const b=[...document.querySelectorAll('button')].find(x=>n(x.innerText)===${JSON.stringify(label)}); if(!b) return 'NO_BUTTON'; b.click(); return 'ok'; })()`);
-          if (clicked !== 'ok') reasons.push(`click failed: ${label} (${clicked})`);
-          await Bun.sleep(260);
-        }
-        await Bun.sleep(650);
-        const data = JSON.parse(await evalx(PROBE));
+      for (const pass of PASSES) {
+        console.log(`\n=== ${pass.name} pass ===`);
+        for (const route of pass.routes) {
+          const reasons: string[] = [];
+          await cdp.send('Page.navigate', { url: pass.base });
+          await Bun.sleep(900);
+          for (const label of route.clicks ?? []) {
+            const clicked = await evalx(`(() => { const n=(s)=>(s||'').replace(/\\s+/g,' ').trim(); const b=[...document.querySelectorAll('button')].find(x=>n(x.innerText)===${JSON.stringify(label)}); if(!b) return 'NO_BUTTON'; b.click(); return 'ok'; })()`);
+            if (clicked !== 'ok') reasons.push(`click failed: ${label} (${clicked})`);
+            await Bun.sleep(260);
+          }
+          await Bun.sleep(650);
+          const data = JSON.parse(await evalx(PROBE));
 
-        if (data.boundary) reasons.push('view error boundary is rendered');
-        if (data.alerts.length) reasons.push(`role=alert: ${data.alerts.join(' | ').slice(0, 120)}`);
-        const rendered = String(data.head || '');
-        if (!route.marker.test(rendered)) reasons.push(`primary landmark missing (${route.marker})`);
-        if (data.badBody) reasons.push('body contains NaN/undefined/Infinity');
-        for (const cell of data.badCells.slice(0, 4)) {
-          reasons.push(`bad cell <${cell.tag} class="${cell.cls}">: ${JSON.stringify(cell.text).slice(0, 80)}`);
-        }
-        if (data.height > data.viewport + 1 && !route.allowTall) {
-          reasons.push(`page height ${data.height} > viewport ${data.viewport}`);
-        }
+          if (data.boundary) reasons.push('view error boundary is rendered');
+          if (data.alerts.length) reasons.push(`role=alert: ${data.alerts.join(' | ').slice(0, 120)}`);
+          if (!data.placeholder && !route.marker.test(String(data.head || ''))) reasons.push(`primary landmark missing (${route.marker})`);
+          if (data.badBody) reasons.push('body contains NaN/undefined/Infinity');
+          for (const cell of data.badCells.slice(0, 4)) reasons.push(`bad cell <${cell.tag} class="${cell.cls}">: ${JSON.stringify(cell.text).slice(0, 80)}`);
+          if (data.height > data.viewport + 1 && !route.allowTall) reasons.push(`page height ${data.height} > viewport ${data.viewport}`);
 
-        const pass = reasons.length === 0;
-        if (!pass) failures++;
-        results.push({ route: route.id, pass, reasons, height: data.height, viewport: data.viewport });
-        console.log(`${pass ? 'PASS' : 'FAIL'} ${route.id}  ${data.height}/${data.viewport}px${route.allowTall ? `  (allowed: ${route.allowTall})` : ''}`);
-        for (const r of reasons) console.log(`  - ${r}`);
+          const na = Boolean(data.placeholder);
+          const passOk = reasons.length === 0 && !na;
+          if (!passOk && !na) failures++;
+          results.push({ pass: pass.name, route: route.id, ok: passOk, na, reasons, height: data.height, viewport: data.viewport, cards: data.cards });
+          console.log(
+            `${na ? 'N/A ' : passOk ? 'PASS' : 'FAIL'} ${route.id}  ${data.height}/${data.viewport}px  ${data.cards} container(s)${route.allowTall ? `  (tall: ${route.allowTall})` : ''}${na ? '  (surface not built)' : ''}`
+          );
+          for (const r of reasons) console.log(`  - ${r}`);
+        }
       }
 
-      console.log(`\n${UNIQUE_ROUTES.length - failures}/${UNIQUE_ROUTES.length} routes pass${failures ? ` — ${failures} failed` : ''}`);
+      // Side-by-side view for the routes that exist in both passes.
+      console.log('\n=== old vs v2 ===');
+      for (const oldR of OLD_ROUTES) {
+        const old = results.find((r) => r.pass === 'old' && r.route === oldR.id);
+        const v2 = results.find((r) => r.pass === 'v2' && r.route === oldR.id);
+        if (!old) continue;
+        if (!v2) {
+          console.log(`${oldR.id}: old ${old.height}px/${old.cards} containers · v2 n/a (not a v2 destination)`);
+          continue;
+        }
+        console.log(`${oldR.id}: old ${old.height}px/${old.cards} containers · v2 ${v2.height}px/${v2.cards} containers${v2.na ? ' (surface not built)' : ''}`);
+      }
+
+      const total = results.filter((r) => !r.na).length;
+      console.log(`\n${total - failures}/${total} checked routes pass${failures ? ` — ${failures} failed` : ''}`);
     } finally {
       cdp.close();
       await fetch(`http://127.0.0.1:${port}/json/close/${created.id}`).catch(() => {});
