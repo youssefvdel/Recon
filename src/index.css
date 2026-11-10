@@ -65,8 +65,11 @@ html.bg-transparent {
   color: #e8def8;
 }
 
+/* One ring for the whole app. The v2 shell defines --focus per theme; the
+ * legacy shell has no token, so it keeps the Material violet it always had.
+ * A raw hex here meant a theme swap changed every colour except this one. */
 :focus-visible {
-  outline: 2px solid #d0bcff;
+  outline: 2px solid var(--focus, #d0bcff);
   outline-offset: 2px;
 }
 
