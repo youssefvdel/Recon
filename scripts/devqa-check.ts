@@ -1467,6 +1467,21 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('readSnapshot no longer discards a stale snapshot', /return null;\s*\}\s*\n\}/.test(parseBody) && !/SNAPSHOT_TTL/.test(parseBody), true);
 }
 
+// --- 2b: one expansion, in place, Escape collapses ------------------------
+{
+  const { readFileSync } = await import('node:fs');
+  const mh = readFileSync(new URL('../src/components/MatchHistory.tsx', import.meta.url), 'utf8');
+
+  check('there is exactly one expansion state', /const \[expandedId, setExpandedId\] = useState<string \| null>\(null\)/.test(mh), true);
+  check('the old set-of-ids is gone', /openIds/.test(mh), false);
+  check('and the separate modal selection is gone', /selectedMatch/.test(mh), false);
+  check('opening another row collapses the previous', /setExpandedId\(\(prev\) => \(prev === id \? null : id\)\)/.test(mh), true);
+  check('Escape collapses the open row', /e\.key === 'Escape'[\s\S]{0,40}setExpandedId\(null\)/.test(mh), true);
+  check('the body renders under its own row, not in a dialog', /<MatchDetailBody/.test(mh) && /open && r\.detail && \(/.test(mh), true);
+  check('the ledger no longer mounts the modal', /<MatchDetailModal/.test(mh), false);
+  check('the filters survive the collapse', /agentFilter/.test(mh) && /mapFilter/.test(mh), true);
+}
+
 // --- 2a: the body moved out, the dialog stayed a thin wrapper -------------
 {
   const { existsSync, readFileSync } = await import('node:fs');
