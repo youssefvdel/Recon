@@ -1534,6 +1534,16 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   const lobbySrc = readFileSync(new URL('../src/components/live/LobbyRow.tsx', import.meta.url), 'utf8');
   check('the "no profile" branch exists', /text: 'no profile'/.test(lobbySrc), true);
 
+  /* A fresh timestamp with no values is NOT a fifth state. An age on its own
+   * tells the reader nothing about the player, so the cell says "not cached"
+   * even though we know when the empty cache was written (judge, step 3). */
+  const ageOnly = trackerCell({ ...base, kd: 0, hsPct: 0 }, now);
+  check('an age with no values is "not cached"', ageOnly?.text, 'not cached');
+
+  /* Rows are 36px: 6 + 24px icon + 6. `py-2` made them 40 (judge, step 3). */
+  check('lobby rows are 36px (py-1.5 + 24px icon)', /py-1\.5/.test(lobbySrc), true);
+  check('no py-2 row padding', /gap-3 py-2 /.test(lobbySrc), false);
+
   const pending = trackerCell({ ...base, trnState: 'pending' }, now);
   check('a transient read says nothing', pending, null);
 

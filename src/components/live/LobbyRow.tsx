@@ -48,6 +48,10 @@ export function trackerCell(
   const kd = Number(p.kd);
   if (Number.isFinite(kd) && kd > 0) parts.push(`${formatKd(kd)} K/D`);
   if (typeof p.hsPct === 'number' && p.hsPct > 0) parts.push(`${formatPct(p.hsPct, 0)} HS`);
+  /* A fresh timestamp with no values is not a fifth state: an age on its own
+   * tells the reader nothing about the player. "not cached" is the honest word
+   * even though we know *when* the empty cache was written. */
+  if (parts.length === 0) return { text: 'not cached', muted: true };
   parts.push(ageLabel(asOf, now));
   return { text: parts.join(' · '), muted: false };
 }
@@ -59,7 +63,7 @@ export const LobbyRow: React.FC<LobbyRowProps> = ({ player, partyCount, tierIcon
     : '';
 
   return (
-    <div className="grid grid-cols-[minmax(0,1.7fr)_120px_120px_56px_52px_minmax(0,1.5fr)] items-center gap-3 py-2 border-b border-m3-outline-subtle/50">
+    <div className="grid grid-cols-[minmax(0,1.7fr)_120px_120px_56px_52px_minmax(0,1.5fr)] items-center gap-3 py-1.5 border-b border-m3-outline-subtle/50">
       {/* Player */}
       <span className="flex items-center gap-2 min-w-0">
         {player.agentIcon && (
