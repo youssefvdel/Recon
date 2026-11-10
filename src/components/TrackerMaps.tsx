@@ -10,7 +10,7 @@ import { MapsSkeletons } from './TrackerSkeletons';
 type SortKey = 'winPct' | 'matchesWon' | 'matchesLost' | 'kd' | 'adr' | 'acs' | 'damageDeltaPerRound' | 'name';
 
 const formatTime = (totalSeconds: number): string => {
-  if (!totalSeconds || totalSeconds <= 0) return '0m';
+  if (!totalSeconds || totalSeconds <= 0) return '';
   const h = Math.floor(totalSeconds / 3600);
   const m = Math.floor((totalSeconds % 3600) / 60);
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
@@ -542,7 +542,7 @@ export const TrackerMaps: React.FC = () => {
                                 </div>
                                 <div className="rounded-xl bg-m3-surface-container-high/60 border border-m3-outline-subtle/50 p-3 flex flex-col justify-between shadow-xs">
                                   <span className="text-[10px] font-bold uppercase tracking-wider text-m3-outline">Time Played</span>
-                                  <span className="font-display font-extrabold text-xl text-m3-on-surface tabular-nums mt-1">{formatTime(m.timePlayedSeconds)}</span>
+                                  <span className="font-display font-extrabold text-xl text-m3-on-surface tabular-nums mt-1">{formatTime(m.timePlayedSeconds) || 'not available'}</span>
                                 </div>
                               </div>
 

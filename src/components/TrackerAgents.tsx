@@ -114,7 +114,8 @@ export const TrackerAgents: React.FC = () => {
         hsPct: d.hits > 0 ? (d.headshots / d.hits) * 100 : 0,
         timePlayedSeconds: Math.round(d.timeMs / 1000),
         hours: Math.round((d.timeMs / (3600 * 1000)) * 10) / 10,
-        kast: 72,
+        /* No KAST from a local fallback: it has no derivation here. */
+        kast: 0,
         aces: 0,
         clutches: 0,
         flawless: 0,
@@ -425,11 +426,17 @@ export const TrackerAgents: React.FC = () => {
                 const isTopKast = a.kast === maxVals.maxKast && a.kast > 0;
                 const isTopDd = a.damageDeltaPerRound === maxVals.maxDd && a.damageDeltaPerRound > 0;
 
-                const defRoundsTotal = Math.max(1, (a.defenseRoundsWon || 0) + (a.defenseRoundsLost || 0));
-                const defWinPct = defRoundsTotal > 0 ? ((a.defenseRoundsWon || 0) / defRoundsTotal) * 100 : a.defenseRoundsWinPct || 0;
+                const defRoundsWon = a.defenseRoundsWon ?? 0;
+                const defRoundsLost = a.defenseRoundsLost ?? 0;
+                const defRoundsKnown = defRoundsWon + defRoundsLost > 0;
+                const defComputed = defRoundsKnown ? (defRoundsWon / (defRoundsWon + defRoundsLost)) * 100 : undefined;
+                const defSideWin = a.defenseRoundsWinPct > 0 ? a.defenseRoundsWinPct : defComputed;
 
-                const atkRoundsTotal = Math.max(1, (a.attackRoundsWon || 0) + (a.attackRoundsLost || 0));
-                const atkWinPct = atkRoundsTotal > 0 ? ((a.attackRoundsWon || 0) / atkRoundsTotal) * 100 : a.attackRoundsWinPct || 0;
+                const atkRoundsWon = a.attackRoundsWon ?? 0;
+                const atkRoundsLost = a.attackRoundsLost ?? 0;
+                const atkRoundsKnown = atkRoundsWon + atkRoundsLost > 0;
+                const atkComputed = atkRoundsKnown ? (atkRoundsWon / (atkRoundsWon + atkRoundsLost)) * 100 : undefined;
+                const atkSideWin = a.attackRoundsWinPct > 0 ? a.attackRoundsWinPct : atkComputed;
 
                 return (
                   <React.Fragment key={a.agent}>
@@ -527,7 +534,7 @@ export const TrackerAgents: React.FC = () => {
                       {/* KAST */}
                       <td className={`py-2.5 px-3 text-center font-mono ${sortKey === 'kast' ? 'bg-m3-primary/5' : ''}`}>
                         <span className={`text-[13px] font-bold ${isTopKast ? 'text-m3-gold font-extrabold' : 'text-m3-on-surface'}`}>
-                          {a.kast > 0 ? `${a.kast.toFixed(1)}%` : '—'}
+                          {a.kast > 0 ? `${a.kast.toFixed(1)}%` : ''}
                         </span>
                       </td>
 
@@ -576,7 +583,7 @@ export const TrackerAgents: React.FC = () => {
                                         Match Kills (Best)
                                       </div>
                                       <div className="font-display font-extrabold text-xl text-m3-on-surface tabular-nums leading-tight mt-0.5">
-                                        {a.bestKills || 30}
+                                        {a.bestKills > 0 ? a.bestKills : 'not available'}
                                       </div>
                                     </div>
                                   </div>
@@ -618,32 +625,40 @@ export const TrackerAgents: React.FC = () => {
                                       <span className="font-display font-bold text-sm">Defense</span>
                                     </div>
                                     <div className="flex items-center gap-1.5 text-xs font-mono font-bold">
-                                      <span className="text-m3-mint">{a.defenseRoundsWon || 0} W</span>
-                                      <span className="text-[10px] uppercase font-semibold text-m3-outline">Rounds</span>
-                                      <span className="text-m3-coral">{a.defenseRoundsLost || 0} L</span>
+                                      {defRoundsKnown ? (
+                                        <>
+                                          <span className="text-m3-mint">{defRoundsWon} W</span>
+                                          <span className="text-[10px] uppercase font-semibold text-m3-outline">Rounds</span>
+                                          <span className="text-m3-coral">{defRoundsLost} L</span>
+                                        </>
+                                      ) : (
+                                        <span className="text-[11px] text-m3-outline">not available</span>
+                                      )}
                                     </div>
                                   </div>
 
-                                  {/* M3 Ratio Bar */}
-                                  <div className="h-1.5 rounded-full bg-m3-coral/20 overflow-hidden flex mb-3.5">
-                                    <div
-                                      className="h-full bg-m3-mint rounded-l-full"
-                                      style={{ width: `${Math.min(100, Math.max(5, defWinPct))}%` }}
-                                    />
-                                  </div>
+                                  {/* Ratio bar only when the rounds are known. */}
+                                  {defSideWin !== undefined && (
+                                    <div className="h-1.5 rounded-full bg-m3-coral/20 overflow-hidden flex mb-3.5">
+                                      <div
+                                        className="h-full bg-m3-mint rounded-l-full"
+                                        style={{ width: `${Math.min(100, Math.max(5, defSideWin))}%` }}
+                                      />
+                                    </div>
+                                  )}
 
                                   {/* 5 Metric Columns */}
                                   <div className="grid grid-cols-5 gap-1 text-center">
                                     <div>
                                       <div className="text-[10px] font-bold uppercase tracking-wider text-m3-outline truncate">Round Win %</div>
                                       <div className="font-display font-extrabold text-sm text-m3-on-surface mt-0.5 truncate">
-                                        {(a.defenseRoundsWinPct || defWinPct).toFixed(1)}%
+                                        {defSideWin !== undefined ? `${defSideWin.toFixed(1)}%` : 'not available'}
                                       </div>
                                     </div>
                                     <div>
                                       <div className="text-[10px] font-bold uppercase tracking-wider text-m3-outline truncate">Def. K/D</div>
-                                      <div className={`font-mono font-extrabold text-sm mt-0.5 truncate ${((a.defenseKd || a.kd) >= 1) ? 'text-m3-mint' : 'text-m3-coral'}`}>
-                                        {(a.defenseKd || a.kd).toFixed(2)}
+                                      <div className="font-mono font-extrabold text-sm text-m3-on-surface mt-0.5 truncate">
+                                        {a.defenseKd > 0 ? a.defenseKd.toFixed(2) : 'not available'}
                                       </div>
                                     </div>
                                     <div>
@@ -661,7 +676,7 @@ export const TrackerAgents: React.FC = () => {
                                     <div>
                                       <div className="text-[10px] font-bold uppercase tracking-wider text-m3-outline truncate">Defuses/Match</div>
                                       <div className="font-mono font-extrabold text-sm text-m3-on-surface mt-0.5 truncate">
-                                        {(a.defusesPerMatch || 0.58).toFixed(2)}
+                                        {a.defusesPerMatch > 0 ? a.defusesPerMatch.toFixed(2) : 'not available'}
                                       </div>
                                     </div>
                                   </div>
@@ -677,32 +692,40 @@ export const TrackerAgents: React.FC = () => {
                                       <span className="font-display font-bold text-sm">Attack</span>
                                     </div>
                                     <div className="flex items-center gap-1.5 text-xs font-mono font-bold">
-                                      <span className="text-m3-mint">{a.attackRoundsWon || 0} W</span>
-                                      <span className="text-[10px] uppercase font-semibold text-m3-outline">Rounds</span>
-                                      <span className="text-m3-coral">{a.attackRoundsLost || 0} L</span>
+                                      {atkRoundsKnown ? (
+                                        <>
+                                          <span className="text-m3-mint">{atkRoundsWon} W</span>
+                                          <span className="text-[10px] uppercase font-semibold text-m3-outline">Rounds</span>
+                                          <span className="text-m3-coral">{atkRoundsLost} L</span>
+                                        </>
+                                      ) : (
+                                        <span className="text-[11px] text-m3-outline">not available</span>
+                                      )}
                                     </div>
                                   </div>
 
-                                  {/* M3 Ratio Bar */}
-                                  <div className="h-1.5 rounded-full bg-m3-coral/20 overflow-hidden flex mb-3.5">
-                                    <div
-                                      className="h-full bg-m3-mint rounded-l-full"
-                                      style={{ width: `${Math.min(100, Math.max(5, atkWinPct))}%` }}
-                                    />
-                                  </div>
+                                  {/* Ratio bar only when the rounds are known. */}
+                                  {atkSideWin !== undefined && (
+                                    <div className="h-1.5 rounded-full bg-m3-coral/20 overflow-hidden flex mb-3.5">
+                                      <div
+                                        className="h-full bg-m3-mint rounded-l-full"
+                                        style={{ width: `${Math.min(100, Math.max(5, atkSideWin))}%` }}
+                                      />
+                                    </div>
+                                  )}
 
                                   {/* 5 Metric Columns */}
                                   <div className="grid grid-cols-5 gap-1 text-center">
                                     <div>
                                       <div className="text-[10px] font-bold uppercase tracking-wider text-m3-outline truncate">Round Win %</div>
                                       <div className="font-display font-extrabold text-sm text-m3-on-surface mt-0.5 truncate">
-                                        {(a.attackRoundsWinPct || atkWinPct).toFixed(1)}%
+                                        {atkSideWin !== undefined ? `${atkSideWin.toFixed(1)}%` : 'not available'}
                                       </div>
                                     </div>
                                     <div>
                                       <div className="text-[10px] font-bold uppercase tracking-wider text-m3-outline truncate">Atk. K/D</div>
-                                      <div className={`font-mono font-extrabold text-sm mt-0.5 truncate ${((a.attackKd || a.kd) >= 1) ? 'text-m3-mint' : 'text-m3-coral'}`}>
-                                        {(a.attackKd || a.kd).toFixed(2)}
+                                      <div className="font-mono font-extrabold text-sm text-m3-on-surface mt-0.5 truncate">
+                                        {a.attackKd > 0 ? a.attackKd.toFixed(2) : 'not available'}
                                       </div>
                                     </div>
                                     <div>
@@ -720,7 +743,7 @@ export const TrackerAgents: React.FC = () => {
                                     <div>
                                       <div className="text-[10px] font-bold uppercase tracking-wider text-m3-outline truncate">Plants/Match</div>
                                       <div className="font-mono font-extrabold text-sm text-m3-on-surface mt-0.5 truncate">
-                                        {(a.plantsPerMatch || 2.09).toFixed(2)}
+                                        {a.plantsPerMatch > 0 ? a.plantsPerMatch.toFixed(2) : 'not available'}
                                       </div>
                                     </div>
                                   </div>

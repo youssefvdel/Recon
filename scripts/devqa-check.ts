@@ -1991,6 +1991,20 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   );
 }
 
+// --- No fabricated tracker-table defaults --------------------------------
+{
+  const { readFileSync } = await import('node:fs');
+  const agents = readFileSync(new URL('../src/components/TrackerAgents.tsx', import.meta.url), 'utf8');
+  const maps = readFileSync(new URL('../src/components/TrackerMaps.tsx', import.meta.url), 'utf8');
+  check('no invented best-kills default', /\|\|\s*30\b/.test(agents), false);
+  check('no invented defuses-per-match default', /\|\|\s*0\.58\b/.test(agents), false);
+  check('no invented plants-per-match default', /\|\|\s*2\.09\b/.test(agents), false);
+  check('no invented KAST fallback', /kast:\s*72\b/.test(agents), false);
+  check('no overall K/D under a side label (defense)', /defenseKd\s*\|\|\s*a?\.?kd/.test(agents), false);
+  check('no overall K/D under a side label (attack)', /attackKd\s*\|\|\s*a?\.?kd/.test(agents), false);
+  check('no fake map playtime', /return '0m'/.test(maps), false);
+}
+
 if (failures > 0) {
   console.error(`${failures} failure(s)`);
   process.exit(1);
