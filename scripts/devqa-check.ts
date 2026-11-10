@@ -1226,6 +1226,30 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
     true
   );
 
+  // Sites #10/#11: the presence-driven retry uses the validated transport and
+  // KEEPS its .catch — a failed probe preserves last-live-match state.
+  check(
+    'the presence retry uses the validated transport and keeps its catch',
+    (trackerSrc2.match(/readRiotValidated\(\s*glz,\s*loop === 'INGAME'/g) ?? []).length === 2,
+    true
+  );
+
+  // Site #4: the lite match result goes through the typed reader, and its
+  // parse is a pure function the reader can validate before calling.
+  check(
+    'the lite result parses through the typed reader',
+    /readMatchDetails<Record<string, 1 \| 0> \| null>/.test(trackerSrc2) &&
+      /function parseLiteResultRow\(payload: unknown\)/.test(trackerSrc2),
+    true
+  );
+
+  // Site #13: party clustering reads through the validated reader.
+  check(
+    'party clustering uses the validated reader',
+    /readMatchHistoryPage\(rp\.puuid, shardFor\(region\), 0, 5\)/.test(trackerSrc2),
+    true
+  );
+
   // Site #12 of docs/riotget-conversion.md: the batch rank swap must use the
   // shared parser through the reader, never a local guard.
   check(

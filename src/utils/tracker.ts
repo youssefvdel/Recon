@@ -925,7 +925,7 @@ export type { PersistedRank } from '../cache/namespace';
 // external importers; a re-export does not bring the name into this scope).
 import { evictOldest, pruneSupersededCaches, persistLiveRank, readPersistedRank } from '../cache/namespace';
 import { inCurrentLobby, setCurrentLobbyPuuids } from '../live/lobbyScope';
-import { riotGet, getEntitlements, clearEntitlements, assertRiotOk, readMmr } from '../sources/riot';
+import { riotGet, getEntitlements, clearEntitlements, assertRiotOk, readMmr, readMatchHistoryPage, readMatchDetails, readRiotValidated } from '../sources/riot';
 export { riotPut, riotPost, getEntitlements, clearEntitlements } from '../sources/riot';
 import {
   enqueueTrnSpread,
@@ -1038,6 +1038,38 @@ function persistResultTable(): void {
 }
 
 /** Compact W/L lookup for one match+player. Returns 1 win, 0 loss, null unknown. */
+/** Pure: turn one match-details payload into a per-puuid 1/0 map, or null when
+ *  the match has no honest two-sided result (FFA, draw, empty). Extracted from
+ *  fetchLiteMatchResult so the reader can validate before it runs. */
+function parseLiteResultRow(payload: unknown): Record<string, 1 | 0> | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const j = payload as any;
+  const scores: Record<string, number> = {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const t of (Array.isArray(j?.teams) ? j.teams : []) as any[]) {
+    scores[normTeam(t?.teamId)] = Number(t?.roundsWon ?? 0);
+  }
+  // FFA modes have no two-sided result — recording one would pick an
+  // arbitrary opponent, so the whole match is unknown rather than wrong.
+  if (Object.keys(scores).length !== 2) return null;
+  const row: Record<string, 1 | 0> = {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const p of (Array.isArray(j?.players) ? j.players : []) as any[]) {
+    const sub = String(p?.subject ?? '');
+    if (!sub) continue;
+    const tm = normTeam(p?.teamId);
+    const opp = Object.keys(scores).find((k) => k !== tm);
+    if (!opp) continue;
+    const mine = scores[tm] ?? 0;
+    const theirs = scores[opp] ?? 0;
+    // Draws are neither — recording them as losses fabricates the record.
+    if (mine === theirs) continue;
+    row[sub] = mine > theirs ? 1 : 0;
+  }
+  if (Object.keys(row).length === 0) return null;
+  return row;
+}
+
 async function fetchLiteMatchResult(
   region: string,
   matchId: string,
@@ -1047,31 +1079,15 @@ async function fetchLiteMatchResult(
   const known = table[matchId]?.[puuid];
   if (known !== undefined) return known;
   try {
-    // riotGet itself is globally gated, so no extra slot here.
-    const j = await riotGet(shardFor(region), `/match-details/v1/matches/${matchId}`);
-    const scores: Record<string, number> = {};
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    for (const t of (Array.isArray(j?.teams) ? j.teams : []) as any[]) {
-      scores[normTeam(t?.teamId)] = Number(t?.roundsWon ?? 0);
-    }
-    const row: Record<string, 1 | 0> = {};
-    // FFA modes have no two-sided result — recording one would pick an
-    // arbitrary opponent, so the whole match is unknown rather than wrong.
-    if (Object.keys(scores).length !== 2) return null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    for (const p of (Array.isArray(j?.players) ? j.players : []) as any[]) {
-      const sub = String(p?.subject ?? '');
-      if (!sub) continue;
-      const tm = normTeam(p?.teamId);
-      const opp = Object.keys(scores).find((k) => k !== tm);
-      if (!opp) continue;
-      const mine = scores[tm] ?? 0;
-      const theirs = scores[opp] ?? 0;
-      // Draws are neither — recording them as losses fabricates the record.
-      if (mine === theirs) continue;
-      row[sub] = mine > theirs ? 1 : 0;
-    }
-    if (Object.keys(row).length === 0) return null;
+    // Validated reader (docs/riotget-conversion.md #4): a Riot error payload
+    // now throws RiotError into the catch below instead of parsing into "no
+    // result". The parse stays pure; the cache write stays in this caller.
+    const row = await readMatchDetails<Record<string, 1 | 0> | null>(
+      matchId,
+      shardFor(region),
+      parseLiteResultRow
+    );
+    if (!row) return null;
     loadResultTable()[matchId] = row;
     persistResultTable();
     return row[puuid] ?? null;
@@ -1772,13 +1788,18 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
               clearEntitlements();
               const freshEnt = await getEntitlements();
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const retryPlayer: any = await riotGet(
+              // Validated transport (docs/riotget-conversion.md #10/#11): the
+              // .catch stays — this is a presence-driven retry and a failure
+              // must preserve the last live-match state, not throw into the
+              // menu tick. The only change is that a failed read now arrives as
+              // a RiotError with a code instead of an error object.
+              const retryPlayer: any = await readRiotValidated(
                 glz,
                 loop === 'INGAME' ? `/core-game/v1/players/${freshEnt.puuid}` : `/pregame/v1/players/${freshEnt.puuid}`
               ).catch(() => null);
               if (retryPlayer?.MatchID) {
                 matchId = retryPlayer.MatchID;
-                matchData = await riotGet(
+                matchData = await readRiotValidated(
                   glz,
                   loop === 'INGAME' ? `/core-game/v1/matches/${matchId}` : `/pregame/v1/matches/${matchId}`
                 ).catch(() => null);
@@ -2124,12 +2145,12 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
         return;
       }
       try {
-        const j = await riotGet(
-          shardFor(region),
-          `/match-history/v1/history/${rp.puuid}?startIndex=0&endIndex=5`
-        );
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rows = (Array.isArray(j?.History) ? j.History : []).map((h: any) => String(h?.MatchID ?? '').toLowerCase()).filter(Boolean);
+        // Validated reader (docs/riotget-conversion.md #13): only ids are used
+        // here. A Riot error now throws RiotError into the existing catch — the
+        // party clustering still degrades silently rather than failing a lobby.
+        const rows = (await readMatchHistoryPage(rp.puuid, shardFor(region), 0, 5))
+          .map((r) => r.id.toLowerCase())
+          .filter(Boolean);
         livePlayerRecentMatchesCache.set(pU, { matches: rows, fetchedAt: Date.now() });
         evictOldest(
           livePlayerRecentMatchesCache,
