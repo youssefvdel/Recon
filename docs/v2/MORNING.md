@@ -37,8 +37,12 @@ decision I did not want to make for you at 3am.
   not-cached cases). Production bundles are unaffected: `dist` contains zero
   harness strings.
 - **Backend tests that run without Windows**: `src-tauri/pure` includes
-  production files by path and runs **24 tests, 0 failed** —
-  `cargo test --manifest-path src-tauri/pure/Cargo.toml`.
+  production files by path and runs **37 tests, 0 failed** —
+  `cargo test --manifest-path src-tauri/pure/Cargo.toml`. The two extraction
+  slices are the ones that could bite silently: the **TRN host/path allowlist**
+  (suffix, userinfo, scheme-relative, `..`, 300/301 boundary) and the **updater's
+  natural version order** (`alpha9 < alpha10`, which a string compare gets
+  backwards).
 - **Three theme boards**, rendered and served.
 
 ## Decisions I made overnight (all reversible)
