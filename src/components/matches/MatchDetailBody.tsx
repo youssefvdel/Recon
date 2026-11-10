@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {Swords, Clock, Copy, Check} from 'lucide-react';
+import { computeAdvancedStats } from '../../live/advancedStats';
 import { matchVerdict } from '../../utils/matchVerdict';
 import type { TrackerMatchDetail, TrackerMmrPoint } from '../../types';
 import { tierName, resolvePlayerNames, gameData } from '../../utils/tracker';
@@ -171,6 +172,9 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
         const killsThisRound = roundKills.filter((k) => k.killerPuuid === p.puuid).length;
 
         if (killsThisRound >= 2) mk++;
+        /* KAST is four-way: kill, assist, survive, or traded. The old test was
+         * `gotKill || !died`, which silently dropped assists and trades and
+         * under-reported every player who assisted without dying. */
         if (gotKill || !died) kastRounds++;
 
         const sortedRoundKills = [...roundKills];
@@ -180,7 +184,11 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
         }
       }
 
-      const kast = Math.round((kastRounds / roundsCount) * 100);
+      /* The four-way value comes from the shared derivation; the loop above
+       * still owns first kills/deaths and multi-kills, which are kill-feed
+       * facts, not KAST facts. */
+      const advanced = computeAdvancedStats(detail, p.puuid);
+      const kast = advanced.kastPct !== undefined ? Math.round(advanced.kastPct) : 0;
 
       const agIcon =
         Object.values(agentInfo).find(
