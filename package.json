@@ -12,6 +12,7 @@
     "tauri": "tauri",
     "lint": "oxlint",
     "verify": "bun scripts/verify.ts",
+    "uicheck": "bun scripts/uicheck.ts",
     "preview": "vite preview",
     "bump": "node scripts/bump-version.js",
     "test:loadout": "bun scripts/loadout-check.ts",
