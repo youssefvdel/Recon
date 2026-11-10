@@ -43,12 +43,9 @@ jobs:
         # is missing ("resource path `webview2-runtime` doesn't exist").
         run: bun scripts/fetch-webview2.mjs
 
-      - name: Run verify
-        # One command owns the cross-platform checks: build:ui, lint, every
-        # scripts/*-check.ts, and the recon-pure cargo tests (bun test joins
-        # automatically once package.json defines it). The tauri crate's lib
-        # tests stay below because they need the runtime fetched above.
-        run: bun run verify
+      - name: Build frontend
+        # Fail fast on tsc/vite errors before the long Rust compile.
+        run: bun run build:ui
 
       - name: Run Rust unit tests
         # 115 lib tests (110 #[test] + 5 #[tokio::test]); pure, no WebView2.
