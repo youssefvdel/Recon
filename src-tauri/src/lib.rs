@@ -130,6 +130,20 @@ fn append_startup_log(identifier: &str, level: log::Level, msg: &str) {
 /// `tauri-plugin-log` is now registered, but its setup runs late: the guard and
 /// a failed `Builder::run` both execute before it, and those are exactly the
 /// lines worth having.
+/// JS `logger.warn`/`error` → the same sink the Rust lines use, so `[riot]` and
+/// `[tracker]` diagnostics land in Recon.log instead of only in the in-memory
+/// download bundle. Content comes from the redacting JS logger.
+#[tauri::command]
+fn ui_log(level: String, message: String) {
+    let lvl = match level.as_str() {
+        "error" => log::Level::Error,
+        "warn" => log::Level::Warn,
+        "debug" => log::Level::Debug,
+        _ => log::Level::Info,
+    };
+    log_line("ui", lvl, &message);
+}
+
 pub(crate) fn log_line(identifier: &str, level: log::Level, msg: &str) {
     if log::max_level() == log::LevelFilter::Off {
         append_startup_log(identifier, level, msg);
@@ -463,6 +477,7 @@ pub fn run() {
             commands::display::get_preferred_stretched_res,
             commands::display::set_preferred_stretched_res,
             commands::settings::get_shortcut_binding,
+            ui_log,
             commands::settings::save_shortcut_binding,
             commands::gpu::get_gpu_info,
             commands::gpu::get_gpu_settings,

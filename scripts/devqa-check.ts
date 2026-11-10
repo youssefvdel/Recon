@@ -1377,6 +1377,31 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('the riotGet export does not outlive its reason', rawSites > 0 ? stillExported : !stillExported, true);
 }
 
+// --- A23-2: JS warn/error must reach the same sink the Rust lines use ------
+{
+  const { readFileSync } = await import('node:fs');
+  const logSrc = readFileSync(new URL('../src/utils/logger.ts', import.meta.url), 'utf8');
+  const libSrc = readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
+  check(
+    'the logger has a file sink for warn and error',
+    /function queueForFile\(level: string, line: string\)/.test(logSrc) && /invoke\('ui_log'/.test(logSrc),
+    true
+  );
+  check(
+    'only warn and error reach the file',
+    /if \(level !== 'warn' && level !== 'error'\) return;/.test(logSrc),
+    true
+  );
+  check('the sink is batched, not one call per line', /UI_LOG_BATCH = 20/.test(logSrc), true);
+  check(
+    'Rust exposes ui_log through log_line',
+    /#\[tauri::command\]\s*\nfn ui_log\(level: String, message: String\)/.test(libSrc) &&
+      /log_line\("ui", lvl, &message\)/.test(libSrc) &&
+      /\n            ui_log,/.test(libSrc),
+    true
+  );
+}
+
 // --- A23-1: cached details must not wait behind unreachable ids ------------
 {
   const { cachedDetailsFor } = await import('../src/hooks/useTrackerData.ts');
