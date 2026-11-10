@@ -2,6 +2,15 @@
 
 use super::model::*;
 
+// Debug-only sampler state (ring buffer, last CPU totals, PDH scratch). The
+// statics below are `#[cfg(debug_assertions)]`, so in a release build these
+// imports would be dead — but `cargo test --lib` is a DEBUG build and CI runs
+// it, so they are required there. Gated with their users, not left unconditional.
+#[cfg(debug_assertions)]
+use std::collections::VecDeque;
+#[cfg(debug_assertions)]
+use std::sync::Mutex;
+
 /// Kernel+user CPU time of one PID since process start, in 100ns units.
 ///
 /// `PROCESS_QUERY_LIMITED_INFORMATION` rather than the full-query right the
