@@ -15,8 +15,13 @@ export interface CommandLayerProps {
 }
 
 export const CommandLayer: React.FC<CommandLayerProps> = ({ overlay, setOverlay }) => {
+  /* Written in an effect, never during render: a render-phase ref write is a
+   * concurrent-rendering hazard, and the listener only reads it after the
+   * effect has run. */
   const overlayRef = useRef<Overlay>(overlay);
-  overlayRef.current = overlay;
+  useEffect(() => {
+    overlayRef.current = overlay;
+  }, [overlay]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
