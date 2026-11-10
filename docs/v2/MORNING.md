@@ -1,0 +1,71 @@
+# Good morning — what is waiting for you
+
+Written overnight while the PC was off. Everything below was verified from this
+server, not from memory.
+
+## Open these first
+
+| What | URL |
+| --- | --- |
+| **The app, running on Linux, with data** | http://192.168.100.2:5174/?fixture=lobby |
+| Theme A — Nocturne (editorial dark, serif display, violet) | http://192.168.100.2:8100/board-a.html |
+| Theme B — Graphite (near-black, lime, condensed) | http://192.168.100.2:8100/board-b.html |
+| Theme C — Ledger (warm paper, ink, red — the light one) | http://192.168.100.2:8100/board-c.html |
+
+The boards are served by `recon-boards.service` (systemd user unit, enabled), so
+they survive a reboot. The app harness is a Vite server and needs restarting
+with `bun run dev:ui --host 0.0.0.0 --port 5174` in `~/Projects/Recon-live`.
+
+## The one thing I need from you
+
+**Pick a theme: A, B or C.** The build is running on **Graphite (B)** as the
+default so the night was not blocked, with **Nocturne (A)** as a second token
+set. Switching is a token swap, not a rewrite — that is why it was safe to
+proceed.
+
+My reasoning, so you can overrule it in one word: Graphite has the best numeral
+contrast on dark (you read this mid-match), it is the most distinctive of the
+three, and it does not look like the violet MMR language every other tracker
+uses. Ledger is the most striking but it is a light theme, which is a product
+decision I did not want to make for you at 3am.
+
+## What was built overnight
+
+- **The app now runs on Linux** with mocked Riot data — real Overview, Matches
+  and Prep populated from fixtures (20 matches, 11 with full details, a 10-player
+  lobby with incognito / unresolved name / no rank / hidden rank / private /
+  not-cached cases). Production bundles are unaffected: `dist` contains zero
+  harness strings.
+- **Backend tests that run without Windows**: `src-tauri/pure` includes
+  production files by path and runs **24 tests, 0 failed** —
+  `cargo test --manifest-path src-tauri/pure/Cargo.toml`.
+- **Three theme boards**, rendered and served.
+
+## Decisions I made overnight (all reversible)
+
+1. **Engine stays, presentation is rebuilt.** `src/sources/`, `src/live/`,
+   `src/cache/` and the Rust backend are untouched — that is where the app's
+   real value is (validated transport, zero raw writes, twelve fabricated values
+   deleted). Everything above the hook line is being rebuilt.
+2. **Theme is data, not code.** Colour/type/space/radius live in one token file;
+   a theme is a set of values.
+3. **We do not copy the industry's lies.** No hidden MMR, no "smurf score", no
+   0–1000 tracker score, no win probability. The evidence pack
+   (`docs/v2/player-features.md`) quotes the demand for each and explains why a
+   number would be invented rather than measured.
+
+## Still unanswered — your call, not mine
+
+- **Theme pick** (A / B / C).
+- **IA**: should the app stay Now / Matches / Prep + ⌘K + ⋯, or go further — no
+  sidebar at all, live-first?
+- **Anything you specifically hate** in the current UI. One concrete complaint is
+  worth ten "make it better".
+
+## Honest status
+
+The rebuild is **not finished** — the shell and the surfaces are being built from
+the tokens tonight, with a parity checklist (`docs/qa/judge/parity-checklist.md`)
+tracking every existing feature and the test that proves it. Anything that cannot
+be verified without your PC is marked **UNVERIFIED** with the reason, never
+silently passed.
