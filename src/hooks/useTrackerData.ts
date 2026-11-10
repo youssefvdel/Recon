@@ -636,10 +636,53 @@ async function runRefresh(): Promise<void> {
       );
     }
   } catch (e) {
-    // If live fetch fails, we keep the cached profile/games intact!
-    updateStore({
-      banner: String(e instanceof Error ? e.message : e),
-    });
+    /* A23-1: a logged-out or unreachable Riot client is NOT an empty account.
+     * When the entitlement read fails here, the old code set a banner and
+     * returned, leaving the board blank while valid recon_match_v7_* entries
+     * sat on disk. Render the cached snapshot instead, and say why it is old:
+     * "empty" must mean empty, never "we could not ask". */
+    const knownPuuid = ensureStore().profile?.puuid ?? readCachedAccount()?.puuid;
+    const cachedSnap = knownPuuid ? readSnapshot(knownPuuid) : null;
+    if (cachedSnap?.profile) {
+      updateStore({
+        profile: cachedSnap.profile,
+        games: cachedSnap.games ?? [],
+        agg: cachedSnap.agg ?? null,
+        mapById: cachedSnap.mapById ?? {},
+        queueById: cachedSnap.queueById ?? {},
+        trn: cachedSnap.trn ?? null,
+        trnAgents: cachedSnap.trnAgents ?? [],
+        trnMaps: cachedSnap.trnMaps ?? [],
+        trnPrev: cachedSnap.trnPrev ?? {},
+        trnMatchTrs: cachedSnap.trnMatchTrs ?? {},
+        trnFetchedAt: cachedSnap.trnFetchedAt,
+        detailsById: cachedSnap.detailsById ?? {},
+        detailsReady: cachedSnap.detailsReady ?? 0,
+        detailsTotal: cachedSnap.games?.length ?? 0,
+        ready: true,
+        hasCached: true,
+        banner: 'Riot client not signed in — showing cached results',
+      });
+      // Merge whatever match details are already on disk: aggregateDetails
+      // reads the recon_match_v7_* cache per id and only fetches what is
+      // missing, so cached ids cost no network and failed ids cost one
+      // caught error each.
+      const cachedIds = (cachedSnap.games ?? []).map((g) => g.matchId).filter(Boolean);
+      const cachedPuuid = cachedSnap.profile.puuid;
+      if (cachedPuuid && cachedIds.length > 0) {
+        void detectRegion()
+          .catch(() => 'eu')
+          .then((region) => aggregateDetails(region, cachedIds, cachedPuuid))
+          .then(({ agg: a, byId }) => {
+            updateStore({ agg: a, detailsById: byId, detailsReady: Object.keys(byId).length });
+          })
+          .catch(() => {});
+      }
+    } else {
+      updateStore({
+        banner: String(e instanceof Error ? e.message : e),
+      });
+    }
   } finally {
     updateStore({ isLoading: false });
   }

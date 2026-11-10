@@ -1377,6 +1377,27 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('the riotGet export does not outlive its reason', rawSites > 0 ? stillExported : !stillExported, true);
 }
 
+// --- A23-1: a failed refresh must not blank a board we have on disk --------
+{
+  const { readFileSync } = await import('node:fs');
+  const hookSrc = readFileSync(new URL('../src/hooks/useTrackerData.ts', import.meta.url), 'utf8');
+  check(
+    'a failed refresh renders the cached snapshot',
+    /cachedSnap\?\.profile[\s\S]{0,900}hasCached: true/.test(hookSrc),
+    true
+  );
+  check(
+    'and says why it is old',
+    hookSrc.includes('Riot client not signed in — showing cached results'),
+    true
+  );
+  check(
+    'cached match details are still merged',
+    /aggregateDetails\(region, cachedIds, cachedPuuid\)/.test(hookSrc),
+    true
+  );
+}
+
 if (failures > 0) {
   console.error(`${failures} failure(s)`);
   process.exit(1);
