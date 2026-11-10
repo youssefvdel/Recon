@@ -17,8 +17,8 @@
         "title": "Recon \u2022 Stretched Resolution & Utility",
         "width": 1210,
         "height": 800,
-        "minWidth": 1210,
-        "minHeight": 800,
+        "minWidth": 1360,
+        "minHeight": 850,
         "resizable": true,
         "fullscreen": false,
         "decorations": false
