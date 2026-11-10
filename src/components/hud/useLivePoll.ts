@@ -22,6 +22,9 @@ export function useLivePoll({ setMatchState, setTierIcons, setAgentMap, setSeaso
   const prevStateRef = useRef<LiveMatchState | null>(null);
   const idleSkips = useRef(0);
   const ticking = useRef(false);
+  /** When the last poll started — lets a visibility return skip a fetch that
+   *  the 2.5s interval has already covered. */
+  const lastFetchAt = useRef(0);
   useEffect(() => {
     gameData()
       .then((d) => {
@@ -44,6 +47,7 @@ export function useLivePoll({ setMatchState, setTierIcons, setAgentMap, setSeaso
         if (idleSkips.current !== 0) return;
       }
       ticking.current = true;
+      lastFetchAt.current = Date.now();
       fetchLiveMatchState()
         .then((s) => {
           // Match just ended: Riot releases hidden names only now, so ask
@@ -64,10 +68,16 @@ export function useLivePoll({ setMatchState, setTierIcons, setAgentMap, setSeaso
 
     const onVis = () => {
       if (typeof document === 'undefined' || document.hidden) return;
+      // The Tab peek makes this window visible, and Chromium resumes
+      // compositing on this frame. A Riot round-trip fired here lands on the
+      // same frame as the first paint, which is the hitch the user feels, so
+      // paint first and let the poll catch up 300ms later — imperceptible, and
+      // skipped entirely when the last poll is still fresh.
+      if (Date.now() - lastFetchAt.current < 2500) return;
       // Prime the idle counter so the return-from-hidden tick always fetches
       // instead of landing on a skipped slot.
       if (phaseRef.current === 'idle') idleSkips.current = 11;
-      tick();
+      window.setTimeout(tick, 300);
     };
 
     if (typeof document !== 'undefined') {

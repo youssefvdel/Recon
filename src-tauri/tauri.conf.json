@@ -36,7 +36,8 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "visible": false,
-        "shadow": false
+        "shadow": false,
+        "additionalBrowserArgs": "--disable-features=CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows"
       }
     ],
     "security": {

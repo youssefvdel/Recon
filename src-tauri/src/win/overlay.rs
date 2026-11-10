@@ -12,32 +12,62 @@
 //! Split out of `lib.rs` by moving code only — same names, same bodies. The
 //! daemons that drive these still live in `setup`.
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicI8, Ordering};
 
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::state::{OVERLAY_AVAILABLE, OVERLAY_EDIT_MODE, OVERLAY_PRESENT, OVERLAY_WINDOWED};
 use crate::window_manager;
 
+/// Last click-through state applied to the overlay HWND (`-1` = never applied).
+/// `setup_overlay_window` writes `GWL_STYLE`, and a style write forces a
+/// non-client frame recalculation — a visible hitch when it runs on every Tab
+/// press. The style is only stale when this value differs from the current one.
+static APPLIED_CLICKTHROUGH: AtomicI8 = AtomicI8::new(-1);
+
 #[tauri::command]
 pub(crate) fn show_overlay(app: tauri::AppHandle) -> Result<(), String> {
+    let started = std::time::Instant::now();
     let window = app
         .get_webview_window("overlay")
         .ok_or_else(|| "Overlay window not found".to_string())?;
-    let _ = window.set_shadow(false);
     let clickthrough = !OVERLAY_EDIT_MODE.load(Ordering::Relaxed);
-    // Audit overlay#10: a swallowed style error here is how the overlay ends up
-    // visible but opaque (eating clicks) with the UI claiming success. Report.
-    window
-        .set_ignore_cursor_events(clickthrough)
-        .map_err(|e| format!("Overlay click-through failed: {e}"))?;
-    window.show().map_err(|e| format!("Overlay show failed: {e}"))?;
+    let desired = i8::from(clickthrough);
+    let stale = APPLIED_CLICKTHROUGH.load(Ordering::Relaxed) != desired;
+
     let _ = window.set_shadow(false);
+    // Crossing into the webview process is not free, so the pointer policy is
+    // only pushed when it actually changes (first show, or an edit transition).
+    if stale {
+        // Audit overlay#10: a swallowed style error here is how the overlay ends
+        // up visible but opaque (eating clicks) with the UI claiming success.
+        window
+            .set_ignore_cursor_events(clickthrough)
+            .map_err(|e| format!("Overlay click-through failed: {e}"))?;
+    }
+    window.show().map_err(|e| format!("Overlay show failed: {e}"))?;
     #[cfg(windows)]
     {
         if let Ok(hwnd) = window.hwnd() {
-            window_manager::setup_overlay_window(hwnd.0 as isize, clickthrough)?;
+            if stale {
+                // Style + geometry: the one path that writes GWL_STYLE.
+                window_manager::setup_overlay_window(hwnd.0 as isize, clickthrough)?;
+                APPLIED_CLICKTHROUGH.store(desired, Ordering::Relaxed);
+            } else {
+                // Geometry only — one SetWindowPos, no style write — so a game
+                // that moved or changed resolution is still tracked.
+                let _ = window_manager::align_overlay_to_valorant(hwnd.0 as isize);
+            }
         }
+    }
+    // One number, in the log the user already has: a slow show is the hitch
+    // he feels. Under 5ms is not worth a line.
+    let elapsed = started.elapsed();
+    if elapsed > std::time::Duration::from_millis(5) {
+        log::info!(
+            "[perf] overlay show {}ms (style reapplied: {stale})",
+            elapsed.as_millis()
+        );
     }
     Ok(())
 }
@@ -89,7 +119,12 @@ pub(crate) fn set_overlay_edit_mode(app: tauri::AppHandle, in_edit_mode: bool) -
     #[cfg(windows)]
     {
         match window.hwnd() {
-            Ok(hwnd) => window_manager::set_overlay_editable(hwnd.0 as isize)?,
+            Ok(hwnd) => {
+                window_manager::set_overlay_editable(hwnd.0 as isize)?;
+                // set_overlay_editable styles the window itself; the cached
+                // state must not claim the next show is already styled.
+                APPLIED_CLICKTHROUGH.store(-1, Ordering::Relaxed);
+            }
             Err(e) => {
                 OVERLAY_EDIT_MODE.store(false, Ordering::Relaxed);
                 return Err(format!("Overlay window handle unavailable: {e}"));
@@ -170,6 +205,7 @@ pub(crate) fn set_overlay_windowed(app: tauri::AppHandle, windowed: bool) -> Res
                     let clickthrough = !OVERLAY_EDIT_MODE.load(Ordering::Relaxed);
                     let _ = window_manager::setup_overlay_window(hwnd.0 as isize, clickthrough);
                 }
+                APPLIED_CLICKTHROUGH.store(-1, Ordering::Relaxed);
             }
         }
         #[cfg(not(windows))]
@@ -240,6 +276,7 @@ pub(crate) fn apply_overlay_unlocked(app: &tauri::AppHandle) {
                 if let Err(e) = window_manager::toggle_overlay_clickthrough(hwnd.0 as isize, true) {
                     log::warn!("overlay unlock: click-through restore failed: {e}");
                 }
+                APPLIED_CLICKTHROUGH.store(-1, Ordering::Relaxed);
             }
         }
     }
