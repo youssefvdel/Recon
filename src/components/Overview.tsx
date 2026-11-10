@@ -3,6 +3,7 @@ import { useTrackerData } from '../hooks/useTrackerData';
 import { fetchTrnActStats, type TrnActStats } from '../utils/trn';
 import type { TrackerMatchDetail, TrackerMmrPoint } from '../types';
 import { shortMapName, tierName } from '../utils/tracker';
+import { actFetchKey } from '../utils/actFetchKey';
 import { Skeleton } from './primitives/Skeleton';
 import { ActHeader, type ActMetric } from './primitives/ActHeader';
 import { FeedRow } from './primitives/FeedRow';
@@ -54,6 +55,8 @@ export const Overview: React.FC = () => {
   const [selState, setSelState] = useState<{ id: string; stats: TrnActStats } | null>(null);
   const [selError, setSelError] = useState<string | null>(null);
   const [selLoading, setSelLoading] = useState(false);
+  /** Bumped by Retry: part of the fetch identity, so the effect really re-runs. */
+  const [reloadKey, setReloadKey] = useState(0);
   const [openMatch, setOpenMatch] = useState<TrackerMmrPoint | null>(null);
   /* Ages are relative, so the page needs a clock: one tick a minute keeps
    * "2h" from silently becoming "2h" three hours later. */
@@ -64,6 +67,8 @@ export const Overview: React.FC = () => {
   }, []);
 
   const isDefault = playlist === 'competitive' && !seasonId;
+  /* Retry bumps the nonce, so this identity changes and the effect re-runs. */
+  const fetchKey = actFetchKey(isDefault, seasonId, playlist, reloadKey);
   const selStats = selState && selState.id === seasonId ? selState.stats : null;
   const S = isDefault ? trn : selStats;
 
@@ -85,7 +90,9 @@ export const Overview: React.FC = () => {
     return () => {
       alive = false;
     };
-  }, [isDefault, seasonId, playlist, profile?.name, profile?.tag]);
+    // `fetchKey` already encodes isDefault/seasonId/playlist/reloadKey; the
+    // three are listed because the effect body reads them directly.
+  }, [fetchKey, isDefault, seasonId, playlist, profile?.name, profile?.tag]);
 
   const seasonOptions = useMemo(() => {
     if (!profile) return [];
@@ -245,7 +252,9 @@ export const Overview: React.FC = () => {
       <div className="flex items-start justify-between gap-4">
         <ActHeader
           eyebrow={[
-            actLabel || (isDefault ? seasonNames?.[profile.currentSeasonId?.toLowerCase() ?? ''] ?? 'Current Act' : ''),
+            actLabel ||
+              seasonNames?.[profile.currentSeasonId?.toLowerCase() ?? ''] ||
+              'Current Act',
             PLAYLISTS.find((p) => p.value === playlist)?.label ?? '',
           ]
             .filter(Boolean)
@@ -291,6 +300,7 @@ export const Overview: React.FC = () => {
         reason={status}
         onRetry={() => {
           setSelError(null);
+          setReloadKey((n) => n + 1);
           refresh();
         }}
       />

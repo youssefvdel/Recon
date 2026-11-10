@@ -1467,6 +1467,34 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('readSnapshot no longer discards a stale snapshot', /return null;\s*\}\s*\n\}/.test(parseBody) && !/SNAPSHOT_TTL/.test(parseBody), true);
 }
 
+// --- Retry after a failed fetch issues a SECOND request -------------------
+{
+  const { actFetchKey } = await import('../src/utils/actFetchKey.ts');
+  /* React re-runs an effect when its dependency identity changes. Model that
+   * exactly: a re-render with the same key must NOT refetch, and a Retry (which
+   * bumps the nonce) MUST. A button that only clears the error would leave the
+   * request count at 1 — this is the assertion that fails if it goes decorative. */
+  let requests = 0;
+  let lastKey = '';
+  const render = (key: string) => {
+    if (key !== lastKey) {
+      lastKey = key;
+      requests += 1;
+    }
+  };
+  render(actFetchKey(false, 'act-2', 'competitive', 0)); // first attempt
+  render(actFetchKey(false, 'act-2', 'competitive', 0)); // re-render, unchanged
+  check('a re-render does not refetch', requests, 1);
+  render(actFetchKey(false, 'act-2', 'competitive', 1)); // Retry
+  check('Retry after a failure issues a second request', requests, 2);
+
+  const { readFileSync } = await import('node:fs');
+  const ov2 = readFileSync(new URL('../src/components/Overview.tsx', import.meta.url), 'utf8');
+  check('the nonce is part of the effect identity', /\[fetchKey, isDefault, seasonId, playlist/.test(ov2), true);
+  check('and Retry bumps it', /setReloadKey\(\(n\) => n \+ 1\)/.test(ov2), true);
+  check('the eyebrow always has an act name', /actLabel \|\|\s*\n\s*seasonNames/.test(ov2), true);
+}
+
 // --- Overview: a failed act fetch cannot leave the old act on screen ------
 {
   const { readFileSync } = await import('node:fs');
@@ -1480,7 +1508,7 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('act history names the peak rank', /\$\{tierName\(h\.tier\)\}/.test(ov), true);
   check('the act age ticks with the feed clock', /\[isDefault, trn, trnFetchedAt, now\]/.test(ov), true);
   check('a closed client says "date unknown", not "as of date unknown"', /' \u00b7 date unknown'/.test(ov), true);
-  check('the eyebrow never renders a dangling separator', /actLabel \|\| \(isDefault/.test(ov), true);
+  check('the eyebrow never renders a dangling separator', ov.includes("'Current Act'"), true);
   check('a row with no detail opens nothing', ov.includes('detailsById?.[g.matchId] ? () => setOpenMatch(g) : undefined'), true);
 }
 
