@@ -8,6 +8,7 @@ server, not from memory.
 | What | URL |
 | --- | --- |
 | **The app, running on Linux, with data** | http://192.168.100.2:5174/?fixture=lobby |
+| **The v2 shell (new frame, surfaces landing)** | http://192.168.100.2:5174/?v2=1 |
 | **All three, one page** | http://192.168.100.2:8110/ |
 | Theme A — Nocturne (editorial dark, serif display, violet) | http://192.168.100.2:8110/board-a.html |
 | Theme B — Graphite (near-black, lime, condensed) | http://192.168.100.2:8110/board-b.html |
