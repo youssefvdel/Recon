@@ -28,7 +28,7 @@ export interface SelectedPlayerInfo {
   kd: number;
   adr: number;
   hsPct: number;
-  kast: number;
+  kast?: number;
   fk: number;
   fd: number;
   mk: number;
