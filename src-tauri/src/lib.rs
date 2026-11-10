@@ -358,6 +358,15 @@ pub fn run() {
             if std::env::args().any(|a| a == "--minimized") {
                 if let Some(main) = app.get_webview_window("main") {
                     let _ = main.hide();
+                    // The only path that hides the main window at boot, and it
+                    // used to do so silently: a windowless first launch could
+                    // not be told apart from a stalled one. One line makes the
+                    // next occurrence a one-look diagnosis.
+                    log_line(
+                        &setup_log_id,
+                        log::Level::Warn,
+                        "[window] boot-to-tray: --minimized, main window hidden",
+                    );
                 }
             }
             // Dev-only: re-create the boot-time dev dashboard that used to be
