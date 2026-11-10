@@ -217,3 +217,31 @@ export const storageFixture = (kind: 'lobby' | 'act' | 'empty' | 'error') => {
   }
   return out;
 };
+
+/** The wire payloads the live parser reads. Shapes follow the parser's field
+ *  contract (docs/v2/live-fixture-contract.md), not a capture: no match ran
+ *  while logging existed, and that is stated rather than implied. */
+export const coreGamePayload = (): unknown => ({
+  MatchID: 'live-1',
+  MapID: '/Game/Maps/Ascent/Ascent',
+  ModeID: '/Game/GameModes/Bomb/BombGameMode.BombGameMode_C',
+  GamePodID: 'aresriot.aws-euc1-prod.eu-gp-frankfurt-1',
+  MatchInformation: { TeamScores: { Blue: 6, Red: 4 } },
+  Players: liveStateFixture().blueTeam.concat(liveStateFixture().redTeam).map((p) => ({
+    Subject: p.puuid,
+    TeamID: p.team === 'Blue' ? 'Blue' : 'Red',
+    CharacterID: p.agentId,
+    PlayerIdentity: {
+      AccountLevel: p.accountLevel,
+      PlayerCardID: p.cardId,
+      Incognito: Boolean(p.isIncognito),
+      partyId: p.partyId,
+    },
+  })),
+});
+
+/** base64url of a JWT body carrying `pp.c`, which is how the region resolves. */
+export const fakeEntitlementToken = (): string => {
+  const body = btoa(JSON.stringify({ pp: { c: 'eu' } })).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+  return `h.${body}.s`;
+};
