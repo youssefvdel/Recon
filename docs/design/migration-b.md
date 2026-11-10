@@ -79,3 +79,15 @@ row's existing summary stays inside that one expansion.
 
 **2c — delete `MatchDetailModal.tsx`** (19 lines) and update both importers: Matches,
 and Overview, whose feed currently opens the modal.
+
+**2c — Overview's feed needs a decision, not an import swap** (flagged during 2a).
+The feed row calls `setOpenMatch` and renders `<MatchDetailModal>` at the bottom of
+the page. When the modal is deleted, the row must either navigate to Matches with
+that match expanded, or stop being clickable.
+
+**Decision: navigate.** A row that looks clickable and does nothing is the same
+defect as the chevron we just hid. Implementation: a small cross-tab event
+(`recon:goto-match` with the match id) plus a listener in the ledger that sets
+`expandedId` and switches the tab — `App` already listens for `recon:goto-live`, so
+the pattern exists. Estimated five lines on the Overview side plus the listener.
+Do **not** silently drop the affordance, and do not point it at the outgoing modal.
