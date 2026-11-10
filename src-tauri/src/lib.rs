@@ -30,7 +30,7 @@ pub(crate) use state::{
 pub(crate) use win::tray::build_tray;
 pub(crate) use win::memory::trim_working_set;
 use win::daemons;
-pub(crate) use win::overlay::{build_overlay_window, force_overlay_edit_mode_off};
+pub(crate) use win::overlay::force_overlay_edit_mode_off;
 
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
@@ -438,18 +438,23 @@ pub fn run() {
 
             // The HUD is built here, not by Tauri's config loop, so a webview
             // failure disables overlays instead of killing the app. Every
-            // overlay daemon below reads OVERLAY_AVAILABLE and no-ops when this
-            // failed; the tray reports the reason on demand.
-            match build_overlay_window(app.handle()) {
-                Ok(_) => OVERLAY_AVAILABLE.store(true, Ordering::Relaxed),
-                Err(e) => {
-                    log_line(
-                        &setup_log_id,
-                        log::Level::Error,
-                        &format!("[overlay] HUD window creation failed; running without overlays: {e}"),
-                    );
-                }
-            }
+            // overlay daemon reads OVERLAY_AVAILABLE and no-ops when this failed;
+            // the tray reports the reason on demand.
+            //
+            // Deferred out of this closure on purpose: WebView2 returned
+            // ERROR_INVALID_STATE (0x8007139F) when the HUD's controller was
+            // created in the same burst as the main window's, and the runtime
+            // only logs that error — build() still returns Ok and leaves a
+            // window with no renderer. Creating it once the event loop has
+            // settled, then proving the webview exists, turns the silent
+            // failure into a state the tray can report. Nothing can show the HUD
+            // before Valorant is foreground, so the delay costs nothing.
+            let overlay_app = app.handle().clone();
+            let overlay_log_id = setup_log_id.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(700));
+                win::overlay::create_overlay_verified(&overlay_app, &overlay_log_id);
+            });
             space_spam::start(app.handle());
             daemons::display_hotkey(app.handle().clone(), rx, pref_clone);
 

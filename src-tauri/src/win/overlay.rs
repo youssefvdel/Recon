@@ -258,6 +258,79 @@ pub(crate) fn build_overlay_window(app: &tauri::AppHandle) -> Result<tauri::Webv
     builder.build().map_err(|e| e.to_string())
 }
 
+/// True when the window actually has a renderer behind it.
+///
+/// `url()` is the only cheap probe that *waits* for an answer: eval-style calls
+/// are fire-and-forget and return `Ok` even with no webview. The URL can be
+/// briefly unset right after creation, so a miss is retried before it counts as
+/// a failure — a false negative here would disable overlays for everyone.
+fn webview_alive(window: &tauri::WebviewWindow) -> bool {
+    for _ in 0..3 {
+        if window.url().is_ok() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+    false
+}
+
+/// Build the HUD and prove the webview exists.
+///
+/// `WebviewWindowBuilder::build` cannot report a webview failure:
+/// tauri-runtime-wry logs the error and drops it (`Message::CreateWebview`,
+/// lib.rs:4057-4072 in 2.11.4), then returns a window with no renderer. That is
+/// the worst state this window can be in — it lists as a window, answers the
+/// tray, "shows" successfully, and never draws.
+///
+/// `url()` goes through the same dispatcher and *does* fail when no webview is
+/// registered, so it is the probe. One retry covers the transient case
+/// (`ERROR_INVALID_STATE` / 0x8007139F when the controller is created too early);
+/// after that the truth is logged and overlays stay off.
+///
+/// Must run off the main thread: `url()` waits on the event loop.
+pub(crate) fn create_overlay_verified(app: &tauri::AppHandle, log_id: &str) {
+    const ATTEMPTS: usize = 2;
+    for attempt in 1..=ATTEMPTS {
+        match build_overlay_window(app) {
+            Ok(window) => {
+                if webview_alive(&window) {
+                    OVERLAY_AVAILABLE.store(true, Ordering::Relaxed);
+                    crate::log_line(
+                        log_id,
+                        log::Level::Info,
+                        &format!("[overlay] HUD webview ready (attempt {attempt})"),
+                    );
+                    return;
+                }
+                crate::log_line(
+                    log_id,
+                    log::Level::Error,
+                    &format!(
+                        "[overlay] webview did not initialise - no renderer (attempt {attempt}/{ATTEMPTS})"
+                    ),
+                );
+                let _ = window.destroy();
+            }
+            Err(e) => {
+                crate::log_line(
+                    log_id,
+                    log::Level::Error,
+                    &format!("[overlay] HUD window creation failed (attempt {attempt}/{ATTEMPTS}): {e}"),
+                );
+            }
+        }
+        if attempt < ATTEMPTS {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+        }
+    }
+    OVERLAY_AVAILABLE.store(false, Ordering::Relaxed);
+    crate::log_line(
+        log_id,
+        log::Level::Error,
+        "[overlay] HUD unavailable; running without overlays (tray reports it)",
+    );
+}
+
 /// Re-assert click-through, the one state the process must never lose.
 ///
 /// Single code path for the fail-safe exits (user exit, Ctrl+Shift+H, watchdog,
