@@ -2,7 +2,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
 import type { LiveMatchPlayer, LiveMatchState, LocalRiotAccount, TrackerDuel, TrackerMatchDetail, TrackerMmrPoint, TrackerPlayer, TrackerProfile } from '../types';
 import { isTauri } from './ipc';
-import { initRiotSource } from '../sources/riot';
+import { glzHostFor, initRiotSource } from '../sources/riot';
+export { glzHostFor };
 import { setTrnMatchPhase, setTrnLobbyKey, trnLog, pruneTrnCaches } from './trn';
 import { getDevMockMatch, isDevNoClient } from './devTools';
 import { extractGamePodId, parseGamePodId } from './matchServer';
@@ -808,18 +809,6 @@ export async function aggregateDetails(
   };
 }
 
-export const glzHostFor = (region: string): string => {
-  const r = region.toLowerCase();
-  const map: Record<string, string> = {
-    eu: 'glz-eu-1.eu.a.pvp.net',
-    na: 'glz-na-1.na.a.pvp.net',
-    ap: 'glz-ap-1.ap.a.pvp.net',
-    kr: 'glz-kr-1.kr.a.pvp.net',
-    latam: 'glz-latam-1.latam.a.pvp.net',
-    br: 'glz-br-1.br.a.pvp.net',
-  };
-  return map[r] ?? 'glz-eu-1.eu.a.pvp.net';
-};
 
 /**
  * Equipped skins + sprays for everyone in the match — agent select AND in-progress.
@@ -1740,10 +1729,10 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
       // catch below turns into probeFailed. The reader owns the legacy
       // `/coregame/` retry, and it only retries after a 404, so a real 403 is
       // no longer masked by the fallback.
-      const corePlayer = await readLivePlayer('coregame', ent.puuid);
+      const corePlayer = await readLivePlayer('coregame', ent.puuid, region);
       if (corePlayer?.matchId) {
         matchId = corePlayer.matchId;
-        matchData = await readLiveMatchById('coregame', matchId);
+        matchData = await readLiveMatchById('coregame', matchId, region);
         if (matchData) {
           phase = 'coregame';
         }
@@ -1756,10 +1745,10 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
     if (phase === 'idle') {
       try {
         // Sites #8/#9, same contract as #6/#7.
-        const prePlayer = await readLivePlayer('pregame', ent.puuid);
+        const prePlayer = await readLivePlayer('pregame', ent.puuid, region);
         if (prePlayer?.matchId) {
           matchId = prePlayer.matchId;
-          matchData = await readLiveMatchById('pregame', matchId);
+          matchData = await readLiveMatchById('pregame', matchId, region);
           if (matchData) {
             phase = 'pregame';
             // Safe Agent Pre-Picker: safely hover preferred agent once per match

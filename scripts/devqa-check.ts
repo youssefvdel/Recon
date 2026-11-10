@@ -1115,14 +1115,13 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
     true
   );
   check('sources/riot.ts exists with a branded type', src.includes('declare const VALIDATED: unique symbol'), true);
-  for (const fn of ['readMmr', 'readMatchDetails', 'readLiveMatch', 'readPlayer24h']) {
+  for (const fn of ['readMmr', 'readMatchDetails', 'readLiveMatchById', 'readPlayer24h']) {
     check(`${fn} is exported`, new RegExp(`export async function ${fn}`).test(src), true);
   }
   check('readMmr returns Validated', /readMmr[\s\S]{0,400}Validated<LocalRank>/.test(src), true);
   check('readMatchDetails returns Validated', /readMatchDetails<T>[\s\S]{0,300}Validated<T>/.test(src), true);
   // Live-match readers return NoMatch<T> (Validated<T> | null): 404 is control
   // flow there, so null is a legal answer while every other error throws.
-  check('readLiveMatch returns NoMatch', /readLiveMatch<T>[\s\S]{0,400}NoMatch<T>/.test(src), true);
   check('readLiveMatchById returns NoMatch', /readLiveMatchById[\s\S]{0,400}NoMatch<unknown>/.test(src), true);
   check('readPlayer24h returns Validated', /readPlayer24h[\s\S]{0,400}Validated</.test(src), true);
   // The raw call cannot be reached from outside the two transport modules.
@@ -1261,10 +1260,15 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   // failure paths stay distinct at the call site.
   check(
     'the live probes use the NoMatch readers',
-    /readLivePlayer\('coregame', ent\.puuid\)/.test(trackerSrc2) &&
-      /readLivePlayer\('pregame', ent\.puuid\)/.test(trackerSrc2) &&
-      /readLiveMatchById\('coregame', matchId\)/.test(trackerSrc2) &&
-      /readLiveMatchById\('pregame', matchId\)/.test(trackerSrc2),
+    /readLivePlayer\('coregame', ent\.puuid, region\)/.test(trackerSrc2) &&
+      /readLivePlayer\('pregame', ent\.puuid, region\)/.test(trackerSrc2) &&
+      /readLiveMatchById\('coregame', matchId, region\)/.test(trackerSrc2) &&
+      /readLiveMatchById\('pregame', matchId, region\)/.test(trackerSrc2),
+    true
+  );
+  check(
+    'the live readers resolve a real GLZ host, not a short name',
+    /glzHostFor\(region\)/.test(riotSrc) && !/riotGet(?:NoMatch)?\('glz'/.test(riotSrc),
     true
   );
   check(

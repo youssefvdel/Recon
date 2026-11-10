@@ -326,20 +326,6 @@ export async function readMatchDetails<T>(
   return validated(parse(validated(j)));
 }
 
-/** Live match (pregame/coregame). `null` means "no match", not "failed". */
-export async function readLiveMatch<T>(
-  phase: 'pregame' | 'coregame',
-  parse: (j: Validated<unknown>) => T | null
-): Promise<NoMatch<T>> {
-  const path = phase === 'coregame' ? '/core-game/v1/matches' : '/pregame/v1/matches';
-  const j = await riotGet('glz', path);
-  const o = j as { httpStatus?: number };
-  if (Number(o?.httpStatus ?? 0) === 404) return null;
-  assertRiotOk(j, 'live match');
-  const parsed = parse(validated(j));
-  return parsed === null ? null : validated(parsed);
-}
-
 /** Last-24h win/loss for a puuid, from match history + details. */
 export async function readPlayer24h(
   puuid: string,
@@ -371,6 +357,21 @@ export const shardFor = (region: string): string =>
       kr: 'pd.kr.a.pvp.net',
     } as Record<string, string>
   )[region] ?? 'pd.eu.a.pvp.net';
+
+/** GLZ (live game) host for a region. The transport takes a real hostname —
+ *  never a short region or shard name. */
+export const glzHostFor = (region: string): string => {
+  const r = region.toLowerCase();
+  const map: Record<string, string> = {
+    eu: 'glz-eu-1.eu.a.pvp.net',
+    na: 'glz-na-1.na.a.pvp.net',
+    ap: 'glz-ap-1.ap.a.pvp.net',
+    kr: 'glz-kr-1.kr.a.pvp.net',
+    latam: 'glz-latam-1.latam.a.pvp.net',
+    br: 'glz-br-1.br.a.pvp.net',
+  };
+  return map[r] ?? 'glz-eu-1.eu.a.pvp.net';
+};
 
 /** Run an async mapper over items with a hard concurrency cap. */
 export async function mapLimit<T, R>(
@@ -529,14 +530,16 @@ async function riotGetNoMatch(host: string, path: string): Promise<Validated<unk
  *  403/451 on the canonical route still throws instead of being masked. */
 export async function readLivePlayer(
   phase: 'pregame' | 'coregame',
-  puuid: string
+  puuid: string,
+  region: string
 ): Promise<NoMatch<{ matchId: string }>> {
   if (!puuid) throw new RiotError('NO_PUUID', 'readLivePlayer: puuid is required');
+  const host = glzHostFor(region);
   const canonical =
     phase === 'coregame' ? `/core-game/v1/players/${puuid}` : `/pregame/v1/players/${puuid}`;
-  let j = await riotGetNoMatch('glz', canonical);
+  let j = await riotGetNoMatch(host, canonical);
   if (j === null && phase === 'coregame') {
-    j = await riotGetNoMatch('glz', `/coregame/v1/players/${puuid}`);
+    j = await riotGetNoMatch(host, `/coregame/v1/players/${puuid}`);
   }
   if (j === null) return null;
   return validated({ matchId: String((j as { MatchID?: unknown }).MatchID ?? '') });
@@ -546,14 +549,16 @@ export async function readLivePlayer(
  *  live-match model is separate work. `null` = no such match (404). */
 export async function readLiveMatchById(
   phase: 'pregame' | 'coregame',
-  matchId: string
+  matchId: string,
+  region: string
 ): Promise<NoMatch<unknown>> {
   if (!matchId) throw new RiotError('NO_MATCH_ID', 'readLiveMatchById: matchId is required');
+  const host = glzHostFor(region);
   const canonical =
     phase === 'coregame' ? `/core-game/v1/matches/${matchId}` : `/pregame/v1/matches/${matchId}`;
-  let j = await riotGetNoMatch('glz', canonical);
+  let j = await riotGetNoMatch(host, canonical);
   if (j === null && phase === 'coregame') {
-    j = await riotGetNoMatch('glz', `/coregame/v1/matches/${matchId}`);
+    j = await riotGetNoMatch(host, `/coregame/v1/matches/${matchId}`);
   }
   return j;
 }
@@ -631,9 +636,11 @@ export type LoadoutRow = Record<string, unknown>;
  */
 export async function readMatchLoadouts(
   phase: 'pregame' | 'coregame',
-  matchId: string
+  matchId: string,
+  region: string
 ): Promise<NoMatch<LoadoutRow[]>> {
   if (!matchId) throw new RiotError('NO_MATCH_ID', 'readMatchLoadouts: matchId is required');
+  const host = glzHostFor(region);
   const routes =
     phase === 'pregame'
       ? [
@@ -649,7 +656,7 @@ export async function readMatchLoadouts(
 
   let sawData = false;
   for (const route of routes) {
-    const j = await riotGetNoMatch('glz', route);
+    const j = await riotGetNoMatch(host, route);
     if (j === null) continue; // this spelling does not exist — try the next
     const raw = j as { Loadouts?: unknown; loadouts?: unknown };
     const list = Array.isArray(raw?.Loadouts) ? raw.Loadouts : raw?.loadouts;
