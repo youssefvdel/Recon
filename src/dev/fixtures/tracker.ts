@@ -209,7 +209,13 @@ export const storageFixture = (kind: 'lobby' | 'act' | 'empty' | 'error') => {
     ...details,
   };
   if (kind === 'lobby') {
-    out['recon_live_match_state_v2'] = JSON.stringify(liveStateFixture());
+    const live = JSON.stringify(liveStateFixture());
+    out['recon_live_match_state_v2'] = live;
+    /* The browser preview path is served ONLY from this key (tracker.ts:1675):
+     * outside Tauri there is no Riot client to ask, so `fetchLiveMatchStateInner`
+     * reads `recon_preview_live_match` and returns idle when it is absent. The
+     * harness therefore exercises the same preview path the website uses. */
+    out['recon_preview_live_match'] = live;
     out['recon_live_player_stats_v3'] = JSON.stringify({
       [FIXTURE_PUUID]: { fetchedAt: NOW - 4 * 3600_000, kd: 1.24, hsPct: 27 },
       p2: { fetchedAt: NOW - 9 * 86_400_000, kd: 1.1, hsPct: 22 },
