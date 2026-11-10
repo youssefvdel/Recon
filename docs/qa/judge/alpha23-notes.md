@@ -130,3 +130,58 @@ failed`, `[riot] entitlements failed` and `[tracker] cached merge` are **invisib
 — the file we use for triage — and only appear in Settings → Download logs. The instrumentation is
 correct in content; the sink is missing. Recorded as its own finding; the judge record expects the
 log file to be the triage surface.
+
+## alpha26 — cache-first merge fires, UI still empty (downstream)
+
+Install sha `5c65031a…`, launch 05:08:46, Riot still signed out. `Recon.log` itself (A23-2 PASS —
+the new `ui_log` sink works) shows, in order:
+
+```
+[2026-11-10][05:09:06][WARN][app_lib] ... warn [tracker] cached merge {"reason":"from-cache","ids":20,"ready":11}
+[2026-11-10][05:09:07][WARN][app_lib] ... warn [riot] entitlements failed {"kind":"Riot Client not responding — launch it and retry."}
+[2026-11-10][05:09:08][WARN][app_lib] ... warn [riot] read failed {"host":"pd.eu.a.pvp.net","path":"/match-details/v1/matches/:uuid","status":0,"kind":"transport"}
+[2026-11-10][05:09:09][WARN][app_lib] ... warn [tracker] cached merge {"reason":"merged","ids":20,"ready":11}
+```
+
+`from-cache` **precedes** the transport line and reports `ready:11`; `merged` also reports `ready:11`.
+Yet at 05:09:31 the Matches board still shows **55 placeholders** over 11 rows (`SCORE — Score not
+fetched yet`, `K/D — Match detail not fetched yet`, …). This is downstream of the cache: the merge
+produces 11 details but they never reach the rendered `detailsById`. Screenshot:
+`docs/qa/judge/a26-signedout.png`.
+
+### Correction — alpha26 cache merge is PASS (the first read sampled only uncached rows)
+
+The board renders **20 rows**: the **9 newest have no v7 entry** and correctly show placeholders
+(no network, signed out); the **11 cached rows below all have `detail` and full numbers**. A fiber
+audit of every row: `rows=20, withDetail=11, cachedRows=11, cachedWithDetail=11`. Sample cached row:
+`Bind 10th · SCORE 2 : 13 · K/D 0.8? · 5/13/2 · −1244 · 41.7% · ACS 92` (see screenshot
+`docs/qa/judge/a26-cached-rows.png`). `Recon.log` shows `from-cache ready:11` then `merged ready:11`.
+
+So A23-1 is **PASS** on alpha26: 11 cached matches keep their real scores/ACS while signed out; empty
+detail is limited to the 9 uncached newest matches, which is the correct "we could not ask" case —
+they do not invent data. My earlier "55 placeholders over the whole board" was a top-of-list sampling
+error; corrected here.
+
+## Rule for the next reader
+
+**An empty detail row means "no cached detail for this match", not "the read failed".** The line
+that separates the two is `[tracker] cached merge {"ids":N,"ready":M}`: `ready` is the number of
+details actually applied. Sampling error to avoid: **the top of the list is the newest matches,
+which have no cache entry while signed out — sample the whole list, not the first screen.**
+
+## Final state — 2026-11-10, end of session
+
+Verified build: **`v0.5.0-alpha26`** (sha256 `5c65031a…`).
+
+- **A23-1 PASS** — signed-out board keeps the 11 cached matches with real scores/ACS; the 9 newest
+  uncached rows show placeholders correctly (fiber: `rows=20, withDetail=11, cachedRows=11,
+  cachedWithDetail=11`).
+- **A23-2 PASS** — `[riot]`/`[tracker]` lines land in `Recon.log` itself; `from-cache` precedes the
+  transport line.
+- Also verified on the alpha22→26 train: match details/aggregation populate when signed in, ranks and
+  Tracker values intact, storage generations correct, single-owner transport, startup ~18 s.
+- **Only unverified claim: the live board during a real match.**
+- First item next session (nice-to-have, not blocking): signed-in comparison — `[tracker] cached
+  merge` reasons before/after sign-in and the aggregation fill.
+- Sampling rule: an empty detail row means "no cached detail for this match"; the top of the list is
+  the newest matches, which have no cache entry while signed out — sample the whole list.
