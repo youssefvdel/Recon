@@ -17,8 +17,8 @@ Auth: `Riot Client\Config\lockfile` (port/password) for the loopback API;
 | `GET /entitlements/v1/token` | accessToken, entitlements JWT, subject | self (auth) | ✅ |
 | `POST /player-account/lookup/v2/namesets-for-puuids` | Riot IDs for arbitrary PUUIDs, batched 25 | any | ✅ |
 | `GET /chat/v4/presences` | presences; base64 `private` = live map, score, queue, `sessionLoopState`; partyId | all friends/party | ✅ **live score source** |
-| `GET /chat/v4/{presences,friends,friendrequests,blocked}`, `/chat/v5/participants`, `/chat/v6/{conversations,conversations/read,friendrequests/full,messages}` | region, conversations, social graph | self/all | ✅ |
-| `GET /name-service/v2/players` (POST batch) | Riot ID for arbitrary PUUIDs — `riot_resolve_names` | any | ✅ |
+| `GET /chat/v4/{presences,friends,friendrequests,blocked}`, `/chat/v5/participants`, `/chat/v6/{conversations,conversations/read,friendrequests/full,messages}` | conversations, social graph (region comes from the entitlements JWT, not chat) | self/all | ✅ |
+| `PUT /name-service/v2/players` (JSON body, batched PUUIDs) | Riot ID for arbitrary PUUIDs — `riot_resolve_names` | any | ✅ |
 | `POST pd.{shard}/store/v3/storefront/{puuid}` | shop (read-shaped POST) — `readStorefront` | self | ✅ |
 | `GET pd.{shard}/mmr/v1/players/{puuid}` | tier, RR, peak + per-season `SeasonalInfoBySeasonID`, `LatestCompetitiveUpdate` | **any puuid** (verified) | ✅ |
 | `GET pd.{shard}/mmr/v1/players/{puuid}/competitiveupdates` | last ~20 RR deltas | any | ✅ |
@@ -168,3 +168,6 @@ Verified against HEAD by upstream-api, then fixed here:
   still resolves `ready`. Reworded to "outside the readable pair".
 - Three line references had drifted (`trn.ts` throw, `noteTrnPrivacy`,
   `trnPlayerState`).
+- **Corrected again after re-verification:** the name-service call is **PUT** with a
+  JSON body (not GET/POST), and the chat endpoints do not return `region` — that
+  comes from decoding the entitlements access token.
