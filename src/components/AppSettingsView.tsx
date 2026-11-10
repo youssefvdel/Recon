@@ -533,7 +533,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
         </div>
 
         {/* Section 1: Software Updates */}
-        <div className="rounded-3xl bg-m3-surface-container border border-m3-outline-subtle p-5 sm:p-6 shadow-m3-1 flex flex-col space-y-4">
+        <div className="border-t border-m3-outline-subtle/40 p-5 sm:p-6 flex flex-col space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center space-x-3">
               <div className="w-10 h-10 rounded-2xl bg-m3-primary/10 border border-m3-primary/30 flex items-center justify-center text-m3-primary">
@@ -664,7 +664,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
                 <h3 className="text-xs font-bold text-m3-on-surface">
                   Recon {updateInfo.version}
                 </h3>
-                <div className="p-3 rounded-xl bg-m3-surface-container-lowest border border-m3-outline-subtle/70 custom-scrollbar max-h-36 overflow-y-auto text-xs text-m3-on-surface-variant font-mono whitespace-pre-wrap leading-relaxed">
+                <div className="border-l-2 border-m3-outline-subtle/60 pl-3 py-1 custom-scrollbar max-h-36 overflow-y-auto text-xs text-m3-on-surface-variant font-mono whitespace-pre-wrap leading-relaxed">
                   {updateInfo.notes || 'No release notes provided.'}
                 </div>
               </div>
@@ -757,7 +757,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
         </div>
 
         {/* Section 2: Windows Startup & Tray */}
-        <div className="rounded-3xl bg-m3-surface-container border border-m3-outline-subtle p-5 sm:p-6 shadow-m3-1 flex flex-col space-y-4">
+        <div className="border-t border-m3-outline-subtle/40 p-5 sm:p-6 flex flex-col space-y-4">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-2xl bg-m3-secondary/10 border border-m3-secondary/30 flex items-center justify-center text-m3-secondary">
               <Power className="w-5 h-5" />
@@ -860,7 +860,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
         </div>
 
         {/* Section 3: In-Game Preferences */}
-        <div className="rounded-3xl bg-m3-surface-container border border-m3-outline-subtle p-5 sm:p-6 shadow-m3-1 flex flex-col space-y-4">
+        <div className="border-t border-m3-outline-subtle/40 p-5 sm:p-6 flex flex-col space-y-4">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-2xl bg-m3-tertiary/10 border border-m3-tertiary/30 flex items-center justify-center text-m3-tertiary">
               <Layers className="w-5 h-5" />
@@ -1049,7 +1049,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
         </div>
 
         {/* Section 4: In-Game Overlay Monitor */}
-        <div className="rounded-3xl bg-m3-surface-container border border-m3-outline-subtle p-5 sm:p-6 shadow-m3-1 flex flex-col space-y-4">
+        <div className="border-t border-m3-outline-subtle/40 p-5 sm:p-6 flex flex-col space-y-4">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-2xl bg-m3-primary/10 border border-m3-primary/30 flex items-center justify-center text-m3-primary">
               <Monitor className="w-5 h-5" />
@@ -1092,7 +1092,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
         </div>
 
         {/* Section 5: Data & Privacy */}
-        <div className="rounded-3xl bg-m3-surface-container border border-m3-outline-subtle p-5 sm:p-6 shadow-m3-1 flex flex-col space-y-4">
+        <div className="border-t border-m3-outline-subtle/40 p-5 sm:p-6 flex flex-col space-y-4">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-2xl bg-m3-primary/10 border border-m3-primary/30 flex items-center justify-center text-m3-primary">
               <ShieldCheck className="w-5 h-5" />
@@ -1107,7 +1107,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
             </div>
           </div>
 
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-m3-surface-container-lowest border border-m3-outline-subtle flex items-center justify-between gap-4">
+          <div className="p-3.5 sm:p-4 border-b border-m3-outline-subtle/30 last:border-b-0 flex items-center justify-between gap-4">
             <div className="space-y-0.5">
               <div className="text-xs sm:text-sm font-semibold text-m3-on-surface">Usage heartbeat</div>
               <div className="text-[11px] text-m3-outline">
@@ -1132,7 +1132,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
             </button>
           </div>
 
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-m3-surface-container-lowest border border-m3-outline-subtle flex items-center justify-between gap-4">
+          <div className="p-3.5 sm:p-4 border-b border-m3-outline-subtle/30 last:border-b-0 flex items-center justify-between gap-4">
             <div className="space-y-0.5">
               <div className="text-xs sm:text-sm font-semibold text-m3-on-surface">Cached stats</div>
               <div className="text-[11px] text-m3-outline">
@@ -1154,7 +1154,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
         </div>
 
         {/* Section 6: About & Repository */}
-        <div className="rounded-3xl bg-m3-surface-container-low border border-m3-outline-subtle p-5 sm:p-6 flex flex-col space-y-3">
+        <div className="border-t border-m3-outline-subtle/40 p-5 sm:p-6 flex flex-col space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center space-x-2 text-xs font-semibold text-m3-on-surface">
               <Info className="w-4 h-4 text-m3-primary" />
