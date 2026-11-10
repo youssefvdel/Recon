@@ -1101,8 +1101,15 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   const trk = readFileSync(new URL('../src/utils/tracker.ts', import.meta.url), 'utf8');
   const src = readFileSync(new URL('../src/sources/riot.ts', import.meta.url), 'utf8');
 
-  check('riotGet is NOT exported', /export\s+async\s+function\s+riotGet/.test(trk), false);
-  check('tracker keeps it private', /^async function riotGet\(/m.test(trk), true);
+  // Step 1 of next-session.md: the transport moved to sources/riot.ts and
+  // tracker imports it. The temporary export is governed by the
+  // "does not outlive its reason" assertion further down.
+  check('the transport is not defined in tracker', /^async function riotGet\(/m.test(trk), false);
+  check(
+    'tracker imports the one implementation',
+    /import \{[^}]*riotGet[^}]*\} from '\.\.\/sources\/riot'/.test(trk),
+    true
+  );
   check('sources/riot.ts exists with a branded type', src.includes('declare const VALIDATED: unique symbol'), true);
   for (const fn of ['readMmr', 'readMatchDetails', 'readLiveMatch', 'readPlayer24h']) {
     check(`${fn} is exported`, new RegExp(`export async function ${fn}`).test(src), true);
@@ -1174,6 +1181,70 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
     /failed: true/.test(trk) && /failed\?: boolean/.test(trk),
     true
   );
+}
+
+// --- one transport, and the header it sends (step 1 of next-session.md) ----
+{
+  const { readFileSync } = await import('node:fs');
+  const { platformBlob } = await import('../src/sources/riot.ts');
+  const riotSrc = readFileSync(new URL('../src/sources/riot.ts', import.meta.url), 'utf8');
+  const trackerSrc2 = readFileSync(new URL('../src/utils/tracker.ts', import.meta.url), 'utf8');
+
+  // The expected string is written out on purpose: a future edit to the blob
+  // must be a deliberate change to this line, not a silent header drift.
+  // This is the exact encoding of
+  //   {"platformType":"PC","platformOS":"Windows",
+  //    "platformOSVersion":"10.0.19042.1.256.64bit","platformChipset":"Unknown"}
+  const EXPECTED_PLATFORM_BLOB =
+    'eyJwbGF0Zm9ybVR5cGUiOiJQQyIsInBsYXRmb3JtT1MiOiJXaW5kb3dzIiwicGxhdGZvcm1PU1ZlcnNpb24iOiIxMC4wLjE5MDQyLjEuMjU2LjY0Yml0IiwicGxhdGZvcm1DaGlwc2V0IjoiVW5rbm93biJ9';
+  check('the clientPlatform header is byte-identical', platformBlob(), EXPECTED_PLATFORM_BLOB);
+
+  // Exactly one implementation, and it is not in tracker.
+  let impls = 0;
+  for (const f of ['../src/sources/riot.ts', '../src/utils/tracker.ts']) {
+    impls += (readFileSync(new URL(f, import.meta.url), 'utf8').match(/function riotGet\(/g) ?? []).length;
+  }
+  check('exactly one riotGet implementation remains', impls, 1);
+  check('the transport is not defined in tracker', /^async function riotGet\(/m.test(trackerSrc2), false);
+  check(
+    'tracker imports the one transport',
+    /import \{[^}]*riotGet[^}]*\} from '\.\.\/sources\/riot'/.test(trackerSrc2),
+    true
+  );
+
+  // The status detail mapping is user-visible copy; losing it in a refactor
+  // would leave the banner saying something generic.
+  check(
+    'the status detail mapping survived the move',
+    riotSrc.includes("'Riot Client is not running'") &&
+      riotSrc.includes("'Riot Client is not responding'") &&
+      riotSrc.includes("'Riot Client is logged out'"),
+    true
+  );
+
+  // The header's number must equal the real number of raw call sites — the
+  // failure mode this whole refactor exists to remove is a comment nobody
+  // recomputes.
+  const rawSites = (trackerSrc2.match(/await riotGet\(/g) ?? []).length;
+  const stated = Number((riotSrc.match(/makes (\d+) raw `riotGet` calls/) ?? [])[1] ?? -1);
+  check('the header states the real number of raw call sites', stated, rawSites);
+
+  // Two states, both asserted. While sites remain, the header may not claim
+  // exclusivity; once they are gone the claim is REQUIRED and the "until
+  // step 2" escape wording must be gone with it.
+  if (rawSites > 0) {
+    check('the header does not overclaim while sites remain', riotSrc.includes('until step 2 of'), true);
+    check('the header does not yet claim exclusivity', /the ONLY place a raw/.test(riotSrc), false);
+  } else {
+    check('the header claims exclusivity once the last site is gone', /the ONLY place a raw/.test(riotSrc), true);
+    check('the temporary wording is gone with the last site', riotSrc.includes('until step 2 of'), false);
+  }
+
+  // Temporary escape hatch with a named expiry: it is exported ONLY while raw
+  // call sites remain, and marked as such.
+  const stillExported = /export async function riotGet/.test(riotSrc);
+  check('the raw transport export is marked temporary', /TEMPORARY EXPORT/.test(riotSrc), true);
+  check('the riotGet export does not outlive its reason', rawSites > 0 ? stillExported : !stillExported, true);
 }
 
 if (failures > 0) {
