@@ -59,6 +59,8 @@ function absent(rel: string, needle: string): void {
   check(`${rel} does not contain: ${needle}`, read(rel).includes(needle), false);
 }
 
+// 6. Unknown account level is not level 1.
+absent('src/components/LoadoutViewer.tsx', 'player.accountLevel || 1');
 // 5. A failed display read must not name 2560x1440@260 as this monitor.
 for (const f of [
   'src/components/Settings.tsx',
