@@ -1,4 +1,13 @@
-//! The HUD window: creation, visibility, input styles, edit mode, placement.
+//! The HUD's lifecycle and Tauri command surface: build the window, show and
+//! hide it, flip edit mode, report presence, pass monitor choices through.
+//!
+//! It owns no Win32 style, hit-test or placement state. Every style, hit-test
+//! and rect operation lives in `window_manager::overlay_window`; this file calls
+//! it and owns the ORDERING (what happens when), never the shaping (how the
+//! window is styled). A fix about a window flag, a click-through check or a
+//! monitor rect belongs in that module, not here — and
+//! `scripts/overlay-boundary-check.ts` fails the build if style code creeps
+//! back into `win/`.
 //!
 //! Split out of `lib.rs` by moving code only — same names, same bodies. The
 //! daemons that drive these still live in `setup`.
