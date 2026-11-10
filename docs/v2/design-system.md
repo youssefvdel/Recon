@@ -1,7 +1,7 @@
 # Recon v2 — design system
 
 Status: proposal for the v2 rebuild. Tokens first; components are derived from these rules, not from the
-old screens. The implementation contract is `src/v2/tokens.css` (Graphite default, Nocturne second set);
+old screens. The implementation contract is `src/v2/tokens.css` (**Nocturne is the chosen theme** — `data-theme='nocturne'` by default, persisted in `localStorage`; Graphite stays a second set, one attribute away);
 that is the only file allowed to contain raw colour literals. The engine (`src/sources/`, `src/live/`, `src/cache/`, Rust) is out of scope and unchanged.
 
 This file defines **roles**, not one palette. The three theme boards (`design/v2/board-a|b|c.html`) map
