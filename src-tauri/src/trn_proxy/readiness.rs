@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 //! (moved verbatim from `trn_proxy.rs`; split only.)
+#[cfg(debug_assertions)]
+use super::trace::trace_emit;
 use super::constants::{READINESS_POLL, READINESS_TIMEOUT};
 use super::state::{PROXY_FAIL_STREAK, PROXY_READY, ProxyState, set_proxy_state};
 use super::window::{eval_roundtrip};

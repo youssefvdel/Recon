@@ -43,6 +43,8 @@
 //! DevDashboard polls both and merges them by timestamp. The line types and
 //! the push helper can collapse into `trn_proxy`'s ring the moment that file is
 //! in scope.
+#[cfg(debug_assertions)]
+use self::trace::cache_emit;
 use self::constants::{MAX_BODY_BYTES};
 use self::model::{now_ms};
 use self::paths::{validate_cache_path};

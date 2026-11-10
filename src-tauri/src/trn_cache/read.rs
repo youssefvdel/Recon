@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 //! (moved verbatim from `trn_cache.rs`; split only.)
+#[cfg(debug_assertions)]
+use super::trace::cache_emit;
 use tauri::Manager;
 use super::model::{TrnCacheEntry, now_ms};
 use super::paths::{validate_cache_path};

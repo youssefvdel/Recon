@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 //! Tests moved verbatim from the former inline `mod tests`.
+#[cfg(debug_assertions)]
+use super::trace::TRACE_RING_CAP;
 use super::flight::{FOLLOWER_ABANDONED, FOLLOWER_TIMEOUT, FlightSlot, flight_remove};
 use super::memo::{TRN_MEMO_TTL_MS};
 use super::readiness::{has_cf_cookie, readiness_probe};

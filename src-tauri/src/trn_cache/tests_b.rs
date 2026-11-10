@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 //! Tests moved verbatim from the former inline `mod tests`.
+#[cfg(debug_assertions)]
+use super::trace::cache_emit;
 use super::constants::{ENTRY_EXT, MAX_READ_BYTES};
 use super::model::{resolved_entry_path, stats_for};
 use super::paths::{entry_path, header_line};

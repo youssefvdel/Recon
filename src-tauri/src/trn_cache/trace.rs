@@ -1,5 +1,9 @@
 #![allow(dead_code)]
 //! (moved verbatim from `trn_cache.rs`; split only.)
+#[cfg(debug_assertions)]
+use crate::trn_proxy::TRACE_RING_CAP;
+#[cfg(debug_assertions)]
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use std::collections::VecDeque;
 

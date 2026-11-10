@@ -1,5 +1,9 @@
 #![allow(dead_code)]
 //! (moved verbatim from `trn_proxy.rs`; split only.)
+#[cfg(debug_assertions)]
+use super::state::PROXY_SELF_HEAL_AFTER;
+#[cfg(debug_assertions)]
+use super::trace::trace_emit;
 use tauri::Manager;
 use super::ceiling::{now_ms};
 use super::constants::{PROXY_IDLE_TTL, PROXY_LABEL, PROXY_URL, WATCHDOG_TIMEOUT};
