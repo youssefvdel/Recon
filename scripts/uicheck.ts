@@ -90,7 +90,8 @@ const PROBE = String.raw`(() => {
     const bg = s.backgroundColor && s.backgroundColor !== 'transparent' && s.backgroundColor !== 'rgba(0, 0, 0, 0)';
     if (!border && !bg) continue;
     const tag = el.tagName;
-    if (tag === 'BUTTON' || tag === 'INPUT' || tag === 'A' || tag === 'SVG') continue;
+    // Controls are not cards: a <select> is an input control the rule already excludes.
+    if (tag === 'BUTTON' || tag === 'INPUT' || tag === 'SELECT' || tag === 'A' || tag === 'SVG') continue;
     cards++;
   }
 
