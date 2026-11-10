@@ -73,6 +73,8 @@ const V2_ROUTES: Route[] = [
   { id: 'matches', clicks: ['Matches'], marker: /Matches|Surface not built yet/i },
   { id: 'prep', clicks: ['Prep'], marker: /Prep|Surface not built yet/i },
   ...TOOL_ROUTES,
+  /* Settings is its own sheet, reached from the menu — not a Tools section. */
+  { id: 'settings', menu: 'Settings', marker: /Application Settings/i },
 ];
 
 const PASSES: Pass[] = [
