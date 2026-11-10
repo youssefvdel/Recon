@@ -15,11 +15,17 @@ server, not from memory.
 | Theme B — Graphite (near-black, lime, condensed) | http://192.168.100.2:8110/board-b.html |
 | Theme C — Ledger (warm paper, ink, red — the light one) | http://192.168.100.2:8110/board-c.html |
 
-**Latest installable build (verified, mirrored):**
-`http://192.168.100.2:8099/Recon_0.5.0-alpha33_x64-setup.exe` —
-sha256 `b1b9f753…25c225ce`, Authenticode + minisign checked against
-`77FD5160E2EB15E6`. This is the last checkpoint before the shell changes, so if
-v2 misbehaves you roll back here.
+**Install this one — the rebuild, verified and mirrored:**
+
+`http://192.168.100.2:8099/Recon_0.5.0-alpha35_x64-setup.exe`
+sha256 `383343c06193aaaeb43274f7ff52fb8af1e4cdbb653c74c27c3659da13ca5561`
+Authenticode signed + minisign verified against `77FD5160E2EB15E6`.
+
+`alpha34` never shipped — its tag was dropped after three red CI runs, all of them
+in the verification step rather than the app: `bun.exe`/`cargo.exe` could not be
+resolved, then `Path` vs `PATH`, then a `/D:/` pathname and a `grep` shell-out. The
+gate now runs on Linux (where those checks are actually proven) and the Windows job
+waits for it. Rollback point if v2 misbehaves: `alpha33`.
 
 The boards are served by `recon-v2-boards.service` (systemd user unit, enabled,
 serving `~/Services/recon-v2-boards`), so they survive a reboot. I removed my own
