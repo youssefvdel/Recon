@@ -9,7 +9,7 @@ export interface MetaTilesProps {
   showMetaPicks: boolean;
   personalScope: 'map' | 'all' | 'preview';
   personalListCount: number;
-  rankTierLabel: string;
+  rankTierLabel: string | null;
   activeMapName: string;
   thinMapSample: boolean;
   mapGames: number;
@@ -72,7 +72,7 @@ export const MetaTiles: React.FC<MetaTilesProps> = ({
         {showMetaPicks ? (
           <span>Your Agents ({personalListCount})</span>
         ) : (
-          <span>Meta ({rankTierLabel})</span>
+          <span>Meta{rankTierLabel ? ` (${rankTierLabel})` : ''}</span>
         )}
       </button>
     </div>
@@ -122,7 +122,7 @@ export const MetaTiles: React.FC<MetaTilesProps> = ({
     /* RECOMMENDED PICKS FOR THIS MAP AND RANK (NO TIPS) */
     <div className="flex flex-col gap-1.5">
       <div className="px-1 text-[9px] font-mono text-m3-on-surface-variant flex items-center justify-between border-b border-m3-outline-subtle/55 pb-1">
-        <span>Blitz Live Meta ({rankTierLabel})</span>
+        <span>Blitz Live Meta{rankTierLabel ? ` (${rankTierLabel})` : ''}</span>
         <span className="text-m3-on-surface-variant font-bold">Top 3 · Win% · Pick%</span>
       </div>
       {metaPicks.slice(0, 3).map((b) => {

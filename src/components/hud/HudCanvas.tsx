@@ -437,25 +437,29 @@ export const OverlayView: React.FC = () => {
 
   // 4. Live rank-tuned map meta from Blitz (this map, this rank). Replaces the
   //    hardcoded table, which was stale within a patch or two.
-  // One tier const for label + fetch + peek: the label must never claim a
-  // Diamond meta while the fetch runs the unranked slice (or vice versa).
-  const userTier = profile?.tier || 0;
-  const metaTier = userTier || 22;
-  const rankTierLabel = getRankTierLabel(metaTier);
+  // One tier const for label + fetch + peek. Unknown rank is NOT tier 22: the
+  // panel must never name a rank the player does not have. No tier -> no label,
+  // no fetch, no tiles.
+  const userTier = profile?.tier && profile.tier > 0 ? profile.tier : null;
+  const rankTierLabel = userTier != null ? getRankTierLabel(userTier) : null;
   const [metaPicks, setMetaPicks] = useState<BlitzAgentStat[]>(
-    () => peekBlitzAgentStats(activeMapName, metaTier) ?? []
+    () => (userTier != null ? peekBlitzAgentStats(activeMapName, userTier) ?? [] : [])
   );
 
   useEffect(() => {
+    if (userTier == null) {
+      setMetaPicks([]);
+      return;
+    }
     let alive = true;
-    fetchBlitzAgentStats(activeMapName, metaTier).then((rows) => {
+    fetchBlitzAgentStats(activeMapName, userTier).then((rows) => {
       // Keep the last good list if Blitz is unreachable or has no sample.
       if (alive && rows.length > 0) setMetaPicks(rows);
     });
     return () => {
       alive = false;
     };
-  }, [activeMapName, metaTier]);
+  }, [activeMapName, userTier]);
 
   // Agent select is the one moment a suggestion is actionable — and the HUD is
   // click-through while the overlay is locked, so a toggle the user has to click

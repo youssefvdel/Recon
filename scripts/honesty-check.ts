@@ -52,6 +52,8 @@ function absent(rel: string, needle: string): void {
   check(`${rel} does not contain: ${needle}`, read(rel).includes(needle), false);
 }
 
+// 2. Unknown rank must not become tier 22 and name a rank the player lacks.
+absent('src/components/hud/HudCanvas.tsx', 'userTier || 22');
 // 1. Math.max(1, rounds) inflating ACS/ADR 10-30x.
 absent('src/components/matches/MatchDetailBody.tsx', 'Math.max(1, teamBlueScore');
 absent('src/components/matches/MatchDetailBody.tsx', 'roundsCount * 105');
