@@ -1467,6 +1467,23 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('readSnapshot no longer discards a stale snapshot', /return null;\s*\}\s*\n\}/.test(parseBody) && !/SNAPSHOT_TTL/.test(parseBody), true);
 }
 
+// --- Overview: a failed act fetch cannot leave the old act on screen ------
+{
+  const { readFileSync } = await import('node:fs');
+  const ov = readFileSync(new URL('../src/components/Overview.tsx', import.meta.url), 'utf8');
+
+  // The fetch result is keyed by the act it was made for, so a previous act's
+  // numbers cannot render over a new selection — cleared by construction.
+  check('past-act numbers are keyed by their act', /selState && selState\.id === seasonId \? selState\.stats : null/.test(ov), true);
+  check('and cleared when the fetch fails', /setSelState\(null\);\s*\n\s*setSelError/.test(ov), true);
+
+  check('act history names the peak rank', /\$\{tierName\(h\.tier\)\}/.test(ov), true);
+  check('the act age ticks with the feed clock', /\[isDefault, trn, trnFetchedAt, now\]/.test(ov), true);
+  check('a closed client says "date unknown", not "as of date unknown"', /' \u00b7 date unknown'/.test(ov), true);
+  check('the eyebrow never renders a dangling separator', /actLabel \|\| \(isDefault/.test(ov), true);
+  check('a row with no detail opens nothing', ov.includes('detailsById?.[g.matchId] ? () => setOpenMatch(g) : undefined'), true);
+}
+
 // --- Overview: the judge's four blockers stay fixed -----------------------
 {
   const { existsSync, readFileSync } = await import('node:fs');
