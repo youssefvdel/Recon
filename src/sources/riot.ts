@@ -348,12 +348,12 @@ export interface LocalRank {
 /** Rank for ANY puuid. Validated: a Riot error throws, it never returns tier 0. */
 export async function readMmr(
   puuid: string,
-  shard: string,
+  host: string,
   parse: (j: Validated<unknown>, seasonOrder: string[]) => LocalRank,
   seasonOrder: string[] = []
 ): Promise<Validated<LocalRank>> {
   if (!puuid) throw new RiotError('NO_PUUID', 'readMmr: puuid is required');
-  const j = await riotGet(shard, `/mmr/v1/players/${puuid}`);
+  const j = await riotGet(host, `/mmr/v1/players/${puuid}`);
   assertRiotOk(j, 'mmr');
   return validated(parse(validated(j), seasonOrder));
 }
@@ -361,11 +361,11 @@ export async function readMmr(
 /** Match details. Validated the same way. */
 export async function readMatchDetails<T>(
   matchId: string,
-  shard: string,
+  host: string,
   parse: (j: Validated<unknown>) => T
 ): Promise<Validated<T>> {
   if (!matchId) throw new RiotError('NO_MATCH_ID', 'readMatchDetails: matchId is required');
-  const j = await riotGet(shard, `/match-details/v1/matches/${matchId}`);
+  const j = await riotGet(host, `/match-details/v1/matches/${matchId}`);
   assertRiotOk(j, 'match details');
   return validated(parse(validated(j)));
 }
@@ -373,11 +373,11 @@ export async function readMatchDetails<T>(
 /** Last-24h win/loss for a puuid, from match history + details. */
 export async function readPlayer24h(
   puuid: string,
-  shard: string,
+  host: string,
   page: (j: Validated<unknown>) => { id: string; at: number; queue: string }[]
 ): Promise<Validated<{ id: string; at: number; queue: string }[]>> {
   if (!puuid) throw new RiotError('NO_PUUID', 'readPlayer24h: puuid is required');
-  const j = await riotGet(shard, `/match-history/v1/history/${puuid}?startIndex=0&endIndex=20`);
+  const j = await riotGet(host, `/match-history/v1/history/${puuid}?startIndex=0&endIndex=20`);
   assertRiotOk(j, 'match history');
   return validated(page(validated(j)));
 }
@@ -475,13 +475,13 @@ function parseHistoryRows(j: unknown): MatchHistoryTimeRow[] {
 /** One page of match history, validated. Throws RiotError on an error payload. */
 export async function readMatchHistoryPage(
   puuid: string,
-  region: string,
+  host: string,
   start: number,
   end: number
 ): Promise<Validated<MatchHistoryRow[]>> {
   if (!puuid) throw new RiotError('NO_PUUID', 'readMatchHistoryPage: puuid is required');
   const j = await riotGet(
-    region,
+    host,
     `/match-history/v1/history/${puuid}?startIndex=${start}&endIndex=${end}`
   );
   assertRiotOk(j, 'match history');
@@ -492,13 +492,13 @@ export async function readMatchHistoryPage(
  *  `readMatchHistoryPage`; the timestamp is the only difference. */
 export async function readHistoryPageWithTime(
   puuid: string,
-  region: string,
+  host: string,
   start: number,
   end: number
 ): Promise<Validated<MatchHistoryTimeRow[]>> {
   if (!puuid) throw new RiotError('NO_PUUID', 'readHistoryPageWithTime: puuid is required');
   const j = await riotGet(
-    region,
+    host,
     `/match-history/v1/history/${puuid}?startIndex=${start}&endIndex=${end}`
   );
   assertRiotOk(j, 'match history');
@@ -510,13 +510,13 @@ export async function readHistoryPageWithTime(
  *  matches" rather than "we could not ask". */
 export async function readHistoryMeta(
   puuid: string,
-  region: string,
+  host: string,
   start: number,
   count: number
 ): Promise<Validated<{ total: number; queueById: Record<string, string> }>> {
   if (!puuid) throw new RiotError('NO_PUUID', 'readHistoryMeta: puuid is required');
   const j = await riotGet(
-    region,
+    host,
     `/match-history/v1/history/${puuid}?startIndex=${start}&endIndex=${start + count}`
   );
   assertRiotOk(j, 'match history');
@@ -611,11 +611,11 @@ export async function readLiveMatchById(
  *  LocalRank row (profile peaks, per-season buckets). */
 export async function readMmrProfile<T>(
   puuid: string,
-  shard: string,
+  host: string,
   parse: (j: Validated<unknown>) => T
 ): Promise<Validated<T>> {
   if (!puuid) throw new RiotError('NO_PUUID', 'readMmrProfile: puuid is required');
-  const j = await riotGet(shard, `/mmr/v1/players/${puuid}`);
+  const j = await riotGet(host, `/mmr/v1/players/${puuid}`);
   assertRiotOk(j, 'mmr');
   return validated(parse(validated(j)));
 }
@@ -636,14 +636,14 @@ export interface MmrUpdateRow {
  *  payload throws instead of parsing as "no games". */
 export async function readCompetitiveUpdates(
   puuid: string,
-  shard: string,
+  host: string,
   count: number,
   queue: string
 ): Promise<Validated<MmrUpdateRow[]>> {
   if (!puuid) throw new RiotError('NO_PUUID', 'readCompetitiveUpdates: puuid is required');
   const queueParam = queue ? `&queue=${encodeURIComponent(queue)}` : '';
   const j = await riotGet(
-    shard,
+    host,
     `/mmr/v1/players/${puuid}/competitiveupdates?startIndex=0&endIndex=${count}${queueParam}`
   );
   assertRiotOk(j, 'competitive updates');
