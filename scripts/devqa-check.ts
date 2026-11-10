@@ -1424,6 +1424,21 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('readSnapshot no longer discards a stale snapshot', /return null;\s*\}\s*\n\}/.test(parseBody) && !/SNAPSHOT_TTL/.test(parseBody), true);
 }
 
+// --- one line means one line ----------------------------------------------
+{
+  const { logger, getRecentLogs } = await import('../src/utils/logger.ts');
+  const before = getRecentLogs(500).length;
+  const msg = `duplicate probe ${Math.random()}`;
+  logger.warn('[probe] same event', msg);
+  logger.warn('[probe] same event', msg);
+  const after = getRecentLogs(500);
+  check('an identical line in the same moment is written once', after.length - before, 1);
+  check('the surviving line is the real one', after[after.length - 1].includes(msg), true);
+  // A different message is not swallowed.
+  logger.warn('[probe] other event', msg);
+  check('a different line still lands', getRecentLogs(500).length - before, 2);
+}
+
 // --- one round rail, and selection drives BOTH panes -----------------------
 {
   const { readFileSync } = await import('node:fs');

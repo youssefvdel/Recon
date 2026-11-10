@@ -43,9 +43,26 @@ function fmtArg(a: unknown): string {
   }
 }
 
+/* One line means one line. The same message arriving twice within a moment is
+ * the same event seen twice (two refresh passes, two realms, a re-run), not two
+ * events — and a doubled log halves its own value, because every count read
+ * off it is then wrong by a factor of two. Compare the message WITHOUT the
+ * timestamp: the duplicate differs only in the clock. */
+const DUP_WINDOW_MS = 500;
+let lastLine: { body: string; at: number } | null = null;
+
+function isDuplicate(body: string, now: number): boolean {
+  const dup = lastLine !== null && lastLine.body === body && now - lastLine.at <= DUP_WINDOW_MS;
+  lastLine = { body, at: now };
+  return dup;
+}
+
 function pushLine(level: string, args: LogArgs): void {
   try {
-    const formatted = `[${new Date().toISOString()}] ${level} ${args.map(fmtArg).join(' ')}`;
+    const now = Date.now();
+    const body = `${level} ${args.map(fmtArg).join(' ')}`;
+    if (isDuplicate(body, now)) return;
+    const formatted = `[${new Date(now).toISOString()}] ${body}`;
     logBuffer.push(formatted);
     if (logBuffer.length > LOG_BUFFER_MAX) logBuffer.splice(0, logBuffer.length - LOG_BUFFER_MAX);
     // warn+ also reaches Recon.log through the Rust sink; info/debug stay here.
