@@ -1,0 +1,760 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recon — Direction C · Ruled</title>
+<style>
+/* ============================================================
+   DIRECTION C — "RULED"
+   One page. Hairlines instead of cards. One accent, reserved
+   for "now". Numbers are mono and tabular. No blur, no shadows.
+   ============================================================ */
+
+:root{
+  /* paper — three steps, no fills beyond the hover step */
+  --paper:      #08090B;
+  --paper-2:    #0C0E11;
+  --paper-3:    #111418;
+
+  /* ink — three steps */
+  --ink:        #E9EBEE;
+  --ink-2:      #A2A8B0;
+  --ink-3:      #69707A;
+
+  /* rules — the only "border" the system owns */
+  --rule:       #1B1F25;
+  --rule-2:     #2A3038;
+
+  /* colour roles — each has exactly ONE meaning (see spec) */
+  --signal:     #FF4655;   /* now / live / the current thing */
+  --verified:   #46C46E;   /* a value read back and confirmed */
+  --unverified: #D9A441;   /* missing, hidden, unverifiable */
+
+  --gutter: 24px;
+  --pad:    clamp(28px, 3.2vw, 44px);
+
+  --t-display: clamp(40px, 3.6vw, 56px);
+  --t-hero:    34px;
+  --t-title:   24px;
+  --t-body:    15px;
+  --t-data:    13.5px;
+  --t-micro:   10.5px;
+
+  --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+*{ box-sizing:border-box; }
+html{ background:#050607; }
+body{
+  margin:0;
+  font-family:var(--sans);
+  font-size:var(--t-body);
+  line-height:1.55;
+  color:var(--ink);
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+}
+.num{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-feature-settings:"tnum" 1; }
+.micro{ font-size:var(--t-micro); letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3); font-weight:600; }
+.dim{ color:var(--ink-2); }
+.dimmer{ color:var(--ink-3); }
+a{ color:inherit; }
+
+/* ---------- board chrome (the presentation, not the app) ---------- */
+.board{ max-width:1560px; margin:0 auto; padding:56px 40px 120px; }
+.board__head{ display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:48px; align-items:end;
+  padding-bottom:28px; border-bottom:1px solid var(--rule-2); margin-bottom:56px; }
+.board__kicker{ display:flex; gap:14px; align-items:baseline; margin-bottom:18px; }
+.board__title{ margin:0; font-size:clamp(30px,3.4vw,46px); font-weight:560; letter-spacing:-.035em; line-height:1.05; }
+.board__title em{ font-style:normal; color:var(--ink-3); }
+.board__thesis{ margin:14px 0 0; max-width:62ch; color:var(--ink-2); font-size:16px; line-height:1.6; }
+.board__meta{ font-size:12.5px; color:var(--ink-3); line-height:1.9; }
+.board__meta b{ color:var(--ink-2); font-weight:550; }
+
+.screen{ margin:0 0 92px; }
+.screen__label{ display:flex; gap:16px; align-items:baseline; margin-bottom:14px; }
+.screen__label .idx{ font-family:var(--mono); font-size:11px; color:var(--ink-3); letter-spacing:.08em; }
+.screen__label .name{ font-size:12px; text-transform:uppercase; letter-spacing:.14em; font-weight:650; }
+.screen__label .hint{ font-size:12.5px; color:var(--ink-3); }
+.screen__note{ margin:14px 0 0; font-size:13px; color:var(--ink-3); max-width:88ch; }
+.screen__note b{ color:var(--ink-2); font-weight:560; }
+
+/* ---------- the app frame ---------- */
+.app{
+  display:grid; grid-template-columns:216px minmax(0,1fr);
+  background:var(--paper); border:1px solid var(--rule-2);
+  min-height:780px;
+}
+.app--tall{ min-height:860px; }
+
+/* ---------- rail ---------- */
+.rail{
+  border-right:1px solid var(--rule);
+  padding:28px 22px 24px;
+  display:flex; flex-direction:column; gap:34px;
+  position:relative;
+}
+.rail__mark{ display:flex; align-items:baseline; gap:9px; }
+.rail__mark .word{ font-size:13px; font-weight:700; letter-spacing:.24em; text-transform:uppercase; }
+.rail__mark .ver{ font-family:var(--mono); font-size:10px; color:var(--ink-3); letter-spacing:.04em; }
+.rail__nav{ display:flex; flex-direction:column; gap:2px; }
+.rail__item{
+  display:flex; align-items:baseline; gap:10px;
+  padding:9px 0; border:0; background:none; color:var(--ink-3);
+  font:inherit; font-size:14px; text-align:left; cursor:pointer;
+  border-bottom:1px solid transparent;
+}
+.rail__item .k{ font-family:var(--mono); font-size:10px; color:var(--ink-3); opacity:.7; }
+.rail__item:hover{ color:var(--ink); }
+.rail__item--on{ color:var(--ink); }
+.rail__item--on .k{ color:var(--signal); opacity:1; }
+.rail__item--on::after{ content:""; flex:1; height:1px; background:var(--rule); margin-left:6px; }
+.rail__foot{ margin-top:auto; display:flex; flex-direction:column; gap:10px; }
+.rail__foot .line{ display:flex; justify-content:space-between; font-size:11.5px; color:var(--ink-3); }
+.rail__foot .line .num{ color:var(--ink-2); }
+
+/* ---------- sheet ---------- */
+.sheet{ padding:var(--pad) var(--pad) 0; min-width:0; }
+.topline{ display:flex; justify-content:space-between; align-items:baseline; gap:20px;
+  padding-bottom:18px; border-bottom:1px solid var(--rule); }
+.who{ display:flex; align-items:baseline; gap:12px; min-width:0; }
+.who .id{ font-family:var(--mono); font-size:13.5px; letter-spacing:-.01em; white-space:nowrap; }
+.who .sep{ color:var(--ink-3); }
+.who .meta{ font-size:12.5px; color:var(--ink-2); white-space:nowrap; }
+.sync{ display:flex; align-items:center; gap:8px; font-size:11.5px; color:var(--ink-3); white-space:nowrap; }
+.dot{ width:5px; height:5px; border-radius:50%; background:var(--ink-3); display:inline-block; }
+.dot--ok{ background:var(--verified); }
+.dot--live{ background:var(--signal); }
+
+/* hero */
+.hero{ display:grid; grid-template-columns:minmax(0,1.4fr) minmax(0,1fr); gap:var(--gutter);
+  padding:34px 0 30px; border-bottom:1px solid var(--rule); align-items:end; }
+.hero__rank .micro{ margin-bottom:10px; }
+.display{ font-size:var(--t-display); line-height:1; letter-spacing:-.035em; font-weight:560; }
+.rr{ display:flex; align-items:baseline; gap:8px; margin-top:14px; }
+.rr .n{ font-family:var(--mono); font-size:var(--t-hero); letter-spacing:-.03em; }
+.rr .u{ font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3); }
+.rr .d{ margin-left:6px; font-family:var(--mono); font-size:13px; color:var(--ink-2); }
+.facts{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:0 18px; }
+.facts > div{ padding:0 0 0 14px; border-left:1px solid var(--rule); }
+.facts dt{ font-size:10.5px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3); margin-bottom:7px; }
+.facts dd{ margin:0; font-size:14px; color:var(--ink); }
+.facts dd.num{ font-size:15px; }
+
+/* live band */
+.live{ padding:26px 0 6px; border-bottom:1px solid var(--rule); }
+.live__bar{ display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+.tag-signal{
+  display:inline-flex; align-items:center; gap:7px;
+  font-size:10.5px; letter-spacing:.16em; font-weight:700; color:var(--signal);
+}
+.tag-signal::before{ content:""; width:22px; height:1px; background:var(--signal); }
+.live__map{ font-size:15px; }
+.live__score{ font-family:var(--mono); font-size:15px; margin-left:auto; }
+.live__score b{ font-weight:500; }
+.live__round{ font-size:11.5px; color:var(--ink-3); }
+.live__teams{ display:grid; grid-template-columns:1fr 1fr; gap:var(--gutter); padding-bottom:20px; }
+.team__head{ display:flex; justify-content:space-between; padding-bottom:8px; border-bottom:1px solid var(--rule); }
+.team__head .micro{ }
+.team__head .n{ font-family:var(--mono); font-size:12px; color:var(--ink-2); }
+.team__list{ list-style:none; margin:0; padding:0; }
+.p{ display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:10px; align-items:baseline;
+  padding:9px 0; border-bottom:1px solid var(--rule); }
+.p:last-child{ border-bottom:0; }
+.p__name{ font-family:var(--mono); font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.p__rank{ font-size:11.5px; color:var(--ink-3); white-space:nowrap; }
+.p__party{ font-family:var(--mono); font-size:10px; color:var(--ink-3); border-left:1px solid var(--rule-2); padding-left:7px; }
+.p--me .p__name{ color:var(--ink); }
+.p--me .p__name::before{ content:"›"; color:var(--signal); margin-right:7px; }
+.p--hidden .p__name{ color:var(--unverified); font-style:italic; }
+.p__flag{ font-size:10px; letter-spacing:.06em; color:var(--unverified); }
+.p__flag--muted{ color:var(--ink-3); }
+
+/* section head + table */
+.section{ padding:26px 0 0; }
+.section__head{ display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-bottom:4px; }
+.section__head h2{ margin:0; font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-2); font-weight:650; }
+.section__head .aside{ font-size:11.5px; color:var(--ink-3); }
+table{ width:100%; border-collapse:collapse; }
+thead th{
+  font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3);
+  font-weight:600; text-align:right; padding:10px 0 8px; border-bottom:1px solid var(--rule-2);
+  white-space:nowrap; background:var(--paper); position:sticky; top:0; z-index:2;
+}
+thead th:first-child{ text-align:left; }
+thead th.l{ text-align:left; }
+tbody td{ padding:11px 0; border-bottom:1px solid var(--rule); text-align:right; white-space:nowrap; font-size:var(--t-data); }
+tbody td:first-child{ text-align:left; }
+tbody td.l{ text-align:left; }
+tbody tr:hover{ background:var(--paper-3); }
+tbody tr:last-child td{ border-bottom:0; }
+.c-when{ font-family:var(--mono); color:var(--ink-3); font-size:12px; width:96px; }
+.c-res{ font-size:11px; letter-spacing:.1em; font-weight:650; width:64px; }
+.c-res--w{ color:var(--ink); }
+.c-res--l{ color:var(--ink-3); }
+.c-map{ color:var(--ink); }
+.c-agent{ color:var(--ink-2); }
+.c-score{ font-family:var(--mono); }
+.c-kda{ font-family:var(--mono); color:var(--ink-2); }
+.c-rr{ font-family:var(--mono); }
+.c-rr--pos{ color:var(--ink); }
+.c-rr--neg{ color:var(--ink-3); }
+.c-hs{ color:var(--ink-3); }
+
+/* matches screen */
+.query{ display:flex; align-items:center; gap:12px; padding:20px 0 22px; border-bottom:1px solid var(--rule); }
+.query__label{ font-size:10.5px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3); }
+.query__text{ font-family:var(--mono); font-size:13px; color:var(--ink); }
+.query__text .op{ color:var(--ink-3); }
+.query__hint{ margin-left:auto; font-size:11px; color:var(--ink-3); }
+.history__count{ padding:14px 0 0; display:flex; justify-content:space-between; font-size:11.5px; color:var(--ink-3); }
+
+/* match detail */
+.crumbs{ display:flex; gap:10px; align-items:baseline; font-size:11.5px; color:var(--ink-3); padding-bottom:16px; border-bottom:1px solid var(--rule); }
+.crumbs .here{ color:var(--ink-2); }
+.report{ padding:30px 0 0; }
+.report__head{ display:grid; grid-template-columns:minmax(0,1fr) auto; gap:20px; align-items:end; padding-bottom:22px; }
+.report__result{ font-size:var(--t-display); letter-spacing:-.035em; line-height:1; font-weight:560; }
+.report__result .score{ font-family:var(--mono); letter-spacing:-.04em; margin-left:16px; }
+.report__meta{ font-size:12.5px; color:var(--ink-3); margin-top:12px; display:flex; gap:12px; align-items:baseline; }
+.report__meta .sep{ color:var(--rule-2); }
+.strip{ display:flex; gap:4px; align-items:flex-end; padding:0 0 26px; border-bottom:1px solid var(--rule); }
+.round{ width:26px; }
+.round__mark{ height:6px; border:1px solid var(--rule-2); background:transparent; }
+.round--w .round__mark{ background:var(--ink-2); border-color:var(--ink-2); }
+.round--l .round__mark{ background:transparent; }
+.round--now .round__mark{ background:var(--signal); border-color:var(--signal); }
+.round__n{ font-family:var(--mono); font-size:9px; color:var(--ink-3); margin-top:6px; text-align:center; }
+.strips{ display:flex; gap:18px; align-items:center; padding:12px 0 0; }
+.legend{ display:flex; gap:16px; font-size:11px; color:var(--ink-3); }
+.legend i{ display:inline-block; width:10px; height:6px; margin-right:6px; vertical-align:middle; border:1px solid var(--rule-2); }
+.legend .w i{ background:var(--ink-2); border-color:var(--ink-2); }
+.legend .l i{ background:transparent; }
+.legend .n i{ background:var(--signal); border-color:var(--signal); }
+.report__body{ display:grid; grid-template-columns:minmax(0,1.55fr) minmax(0,1fr); gap:calc(var(--gutter) + 12px); padding-top:26px; }
+.board-table th, .board-table td{ font-size:12.5px; }
+.board-table td{ padding:9px 0; }
+.board-table tr.me td{ color:var(--ink); }
+.board-table tr.me td:first-child{ box-shadow:inset 1px 0 0 var(--signal); padding-left:10px; }
+.side h3{ margin:0 0 10px; font-size:10.5px; letter-spacing:.15em; text-transform:uppercase; color:var(--ink-3); font-weight:650; }
+.side section{ padding-bottom:22px; }
+.duels{ list-style:none; margin:0; padding:0; }
+.duel{ display:grid; grid-template-columns:34px minmax(0,1fr) auto; gap:10px; padding:8px 0; border-bottom:1px solid var(--rule); font-size:12px; }
+.duel:last-child{ border-bottom:0; }
+.duel__r{ font-family:var(--mono); color:var(--ink-3); }
+.duel__who{ font-family:var(--mono); font-size:11.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.duel__who .arrow{ color:var(--ink-3); margin:0 6px; }
+.duel__w{ font-size:10.5px; color:var(--ink-3); letter-spacing:.04em; }
+.econ{ display:flex; align-items:flex-end; gap:3px; height:56px; }
+.econ__bar{ flex:1; background:var(--rule-2); min-height:2px; }
+.econ__bar--pistol{ background:var(--ink-3); }
+.econ__labels{ display:flex; justify-content:space-between; font-size:10px; color:var(--ink-3); margin-top:6px; font-family:var(--mono); }
+
+/* seam — HUD + main, same tokens */
+.seam{ margin:0 0 92px; }
+.seam__grid{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:24px; }
+.hud{ background:var(--paper-2); border:1px solid var(--rule-2); padding:18px 20px; position:relative; }
+.hud::before{ content:"HUD · 380 × 220 · no blur, no shadow"; position:absolute; top:-10px; left:14px; background:#050607; padding:0 8px; font-size:10px; letter-spacing:.1em; color:var(--ink-3); text-transform:uppercase; }
+.hud__head{ display:flex; justify-content:space-between; align-items:baseline; padding-bottom:10px; border-bottom:1px solid var(--rule); }
+.hud__head .t{ font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-2); font-weight:650; }
+.hud__head .live{ color:var(--signal); font-size:10px; letter-spacing:.16em; font-weight:700; padding:26px 0 0; border:0; }
+.hud__row{ display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:8px; padding:7px 0; border-bottom:1px solid var(--rule); font-size:11.5px; }
+.hud__row:last-child{ border-bottom:0; }
+.hud__row .nm{ font-family:var(--mono); }
+.hud__row .rk{ color:var(--ink-3); font-size:10.5px; }
+.hud__row .rr{ font-family:var(--mono); color:var(--ink-2); }
+.panel{ background:var(--paper); border:1px solid var(--rule-2); padding:18px 20px; position:relative; }
+.panel::before{ content:"MAIN · same rules, different scale"; position:absolute; top:-10px; left:14px; background:#050607; padding:0 8px; font-size:10px; letter-spacing:.1em; color:var(--ink-3); text-transform:uppercase; }
+.panel .rule-eg{ display:flex; justify-content:space-between; padding:9px 0; border-bottom:1px solid var(--rule); font-size:12.5px; }
+.panel .rule-eg:last-child{ border-bottom:0; }
+.panel .rule-eg .num{ color:var(--ink-2); }
+
+/* spec */
+.spec{ border-top:1px solid var(--rule-2); padding-top:34px; }
+.spec h2{ margin:0 0 6px; font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-2); }
+.spec p.lead{ margin:0 0 28px; color:var(--ink-3); font-size:13.5px; max-width:76ch; }
+.spec__grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:36px 48px; }
+.spec__block h3{ margin:0 0 10px; font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3); font-weight:650; }
+.spec__block ul{ margin:0; padding:0; list-style:none; }
+.spec__block li{ padding:7px 0; border-bottom:1px solid var(--rule); font-size:13px; color:var(--ink-2); display:grid; grid-template-columns:110px minmax(0,1fr); gap:14px; }
+.spec__block li:last-child{ border-bottom:0; }
+.spec__block li b{ color:var(--ink); font-weight:550; }
+.swatch{ display:inline-block; width:9px; height:9px; margin-right:7px; vertical-align:-1px; }
+.role-signal{ background:var(--signal); } .role-verified{ background:var(--verified); } .role-unverified{ background:var(--unverified); }
+.type-row{ display:flex; align-items:baseline; justify-content:space-between; gap:16px; padding:7px 0; border-bottom:1px solid var(--rule); }
+.type-row:last-child{ border-bottom:0; }
+.type-row .tg{ font-size:12px; color:var(--ink-2); font-family:var(--mono); }
+.type-row .tx{ color:var(--ink-3); font-size:12px; }
+
+@media (max-width:1100px){
+  .board{ padding:32px 18px 80px; }
+  .board__head{ grid-template-columns:1fr; gap:18px; }
+  .app{ grid-template-columns:1fr; }
+  .rail{ flex-direction:row; align-items:center; gap:20px; border-right:0; border-bottom:1px solid var(--rule); padding:14px 18px; }
+  .rail__nav{ flex-direction:row; gap:14px; }
+  .rail__foot{ margin:0 0 0 auto; flex-direction:row; gap:14px; align-items:center; }
+  .hero, .live__teams, .report__body, .seam__grid, .spec__grid{ grid-template-columns:1fr; }
+}
+</style>
+</head>
+<body>
+<div class="board">
+
+  <!-- ======================= header ======================= -->
+  <header class="board__head">
+    <div>
+      <div class="board__kicker">
+        <span class="micro">Direction C</span>
+        <span class="micro" style="color:var(--ink-2)">independent proposal</span>
+      </div>
+      <h1 class="board__title">Ruled <em>— one page per question</em></h1>
+      <p class="board__thesis">
+        The app is a document you read top to bottom, not a dashboard you scan. Cards are deleted:
+        content sits on the page and hairline rules separate it. One accent, and it is only ever
+        allowed to mean <em>now</em>. Tools stop being pages — they become sections of one sheet.
+      </p>
+    </div>
+    <div class="board__meta">
+      <div><b>For</b> the complaint: too many cards, tabs, pages</div>
+      <div><b>Data</b> TrackerProfile · TrackerMatch · TrackerMatchDetail · LiveMatchState</div>
+      <div><b>Sampled</b> 2026-11-10 · alpha24 build</div>
+    </div>
+  </header>
+
+  <!-- ======================= 01 · NOW ======================= -->
+  <section class="screen" id="now">
+    <div class="screen__label">
+      <span class="idx">01</span><span class="name">Now</span>
+      <span class="hint">the session, one page — rank, live lobby, last five</span>
+    </div>
+
+    <div class="app">
+      <aside class="rail">
+        <div class="rail__mark"><span class="word">Recon</span><span class="ver">0.5.0</span></div>
+        <nav class="rail__nav" aria-label="Primary">
+          <button class="rail__item rail__item--on"><span class="k">1</span>Now</button>
+          <button class="rail__item"><span class="k">2</span>Matches</button>
+          <button class="rail__item"><span class="k">3</span>Machine</button>
+        </nav>
+        <div class="rail__foot">
+          <div class="line"><span>synced</span><span class="num">12s</span></div>
+          <div class="line"><span>sources</span><span class="num">4 / 4</span></div>
+          <div class="line"><span>settings</span><span class="num">⌘,</span></div>
+        </div>
+      </aside>
+
+      <div class="sheet">
+        <div class="topline">
+          <div class="who">
+            <span class="id">youssefvdel#EUW</span>
+            <span class="sep">·</span>
+            <span class="meta">EUW · Act 3 · Diamond 3</span>
+          </div>
+          <div class="sync"><span class="dot dot--ok"></span>synced 12s ago</div>
+        </div>
+
+        <section class="hero">
+          <div class="hero__rank">
+            <div class="micro">Current</div>
+            <div class="display">Diamond 3</div>
+            <div class="rr">
+              <span class="n">62</span><span class="u">RR</span>
+              <span class="d">+29 today · 5 rated</span>
+            </div>
+          </div>
+          <dl class="facts">
+            <div><dt>Peak</dt><dd>Ascendant 1</dd></div>
+            <div><dt>Season</dt><dd><span class="num">97</span> games · <span class="num">58</span> won</dd></div>
+            <div><dt>Win rate</dt><dd class="num">59.8%</dd></div>
+          </dl>
+        </section>
+
+        <section class="live">
+          <div class="live__bar">
+            <span class="tag-signal">Live</span>
+            <span class="live__map">Lotus <span class="dim">· Competitive</span></span>
+            <span class="live__round">round 11 · attack side · 1:48</span>
+            <span class="live__score"><b>6</b> — 4</span>
+          </div>
+          <div class="live__teams">
+            <div>
+              <div class="team__head"><span class="micro">Ally</span><span class="n">10 — 4</span></div>
+              <ul class="team__list">
+                <li class="p p--me"><span class="p__name">youssefvdel#EUW</span><span class="p__rank">D3 · 62</span><span class="p__party">me</span></li>
+                <li class="p"><span class="p__name">sova.exe#1337</span><span class="p__rank">A2 · 74</span><span class="p__party">P2</span></li>
+                <li class="p"><span class="p__name">Kuro#LOL</span><span class="p__rank">D1 · 38</span><span class="p__party">P2</span></li>
+                <li class="p p--hidden"><span class="p__name">Player 4</span><span class="p__rank">D2 · 51</span><span class="p__flag">name hidden</span></li>
+                <li class="p"><span class="p__name">nats#7777</span><span class="p__rank">P3 · 91</span><span class="p__party">P3</span></li>
+              </ul>
+            </div>
+            <div>
+              <div class="team__head"><span class="micro">Enemy</span><span class="n">4 — 10</span></div>
+              <ul class="team__list">
+                <li class="p"><span class="p__name">ph4ntom#EUW</span><span class="p__rank">A1 · 88</span><span class="p__party">P2</span></li>
+                <li class="p"><span class="p__name">raze#0000</span><span class="p__rank">D2 · 44</span><span class="p__party">P2</span></li>
+                <li class="p"><span class="p__name">—</span><span class="p__rank">D1 · —</span><span class="p__flag">451 private</span></li>
+                <li class="p"><span class="p__name">velvet#hush</span><span class="p__rank">A1 · —</span><span class="p__flag p__flag--muted">incognito</span></li>
+                <li class="p"><span class="p__name">Player 9</span><span class="p__rank">P2 · 33</span><span class="p__flag">name hidden</span></li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section__head">
+            <h2>Recent</h2>
+            <span class="aside">6 of 97 · <span class="num">p95 289 ACS</span></span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th class="l">When</th><th class="l">Result</th><th class="l">Map</th><th class="l">Agent</th>
+                <th>Score</th><th>K / D / A</th><th>ACS</th><th>HS</th><th>RR</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td class="c-when">21:14</td><td class="c-res c-res--w">WIN</td><td class="c-map">Ascent</td><td class="c-agent">Jett</td><td class="c-score">13—9</td><td class="c-kda">24/16/5</td><td>268</td><td class="c-hs">31%</td><td class="c-rr c-rr--pos">+21</td></tr>
+              <tr><td class="c-when">20:31</td><td class="c-res c-res--w">WIN</td><td class="c-map">Lotus</td><td class="c-agent">Raze</td><td class="c-score">13—11</td><td class="c-kda">21/19/4</td><td>241</td><td class="c-hs">27%</td><td class="c-rr c-rr--pos">+19</td></tr>
+              <tr><td class="c-when">19:46</td><td class="c-res c-res--l">LOSS</td><td class="c-map">Haven</td><td class="c-agent">Omen</td><td class="c-score">9—13</td><td class="c-kda">17/18/9</td><td>205</td><td class="c-hs">22%</td><td class="c-rr c-rr--neg">−16</td></tr>
+              <tr><td class="c-when">18:58</td><td class="c-res c-res--w">WIN</td><td class="c-map">Bind</td><td class="c-agent">Jett</td><td class="c-score">13—7</td><td class="c-kda">26/12/3</td><td>289</td><td class="c-hs">34%</td><td class="c-rr c-rr--pos">+23</td></tr>
+              <tr><td class="c-when">18:12</td><td class="c-res c-res--l">LOSS</td><td class="c-map">Split</td><td class="c-agent">Sova</td><td class="c-score">11—13</td><td class="c-kda">15/17/7</td><td>198</td><td class="c-hs">19%</td><td class="c-rr c-rr--neg">−18</td></tr>
+              <tr><td class="c-when">17:29</td><td class="c-res c-res--w">WIN</td><td class="c-map">Sunset</td><td class="c-agent">Raze</td><td class="c-score">5—3</td><td class="c-kda">14/9/2</td><td>233</td><td class="c-hs">25%</td><td class="c-rr">—</td></tr>
+            </tbody>
+          </table>
+        </section>
+      </div>
+    </div>
+
+    <p class="screen__note">
+      <b>One surface.</b> Rank, live lobby and recent matches share one column — no card grid, no
+      per-widget chrome. The live lobby is not a card among cards; when a match starts it becomes
+      the page's second band, full width. Swiftplay has no RR, so its cell is a dash, not a zero.
+    </p>
+  </section>
+
+  <!-- ======================= 02 · MATCHES ======================= -->
+  <section class="screen" id="matches">
+    <div class="screen__label">
+      <span class="idx">02</span><span class="name">Matches</span>
+      <span class="hint">history as a ledger — sortable, one query line, no filters-as-chips</span>
+    </div>
+
+    <div class="app app--tall">
+      <aside class="rail">
+        <div class="rail__mark"><span class="word">Recon</span><span class="ver">0.5.0</span></div>
+        <nav class="rail__nav" aria-label="Primary">
+          <button class="rail__item"><span class="k">1</span>Now</button>
+          <button class="rail__item rail__item--on"><span class="k">2</span>Matches</button>
+          <button class="rail__item"><span class="k">3</span>Machine</button>
+        </nav>
+        <div class="rail__foot">
+          <div class="line"><span>stored</span><span class="num">97</span></div>
+          <div class="line"><span>window</span><span class="num">30d</span></div>
+          <div class="line"><span>export</span><span class="num">⌘E</span></div>
+        </div>
+      </aside>
+
+      <div class="sheet">
+        <div class="topline">
+          <div class="who">
+            <span class="id">Matches</span>
+            <span class="sep">·</span>
+            <span class="meta">competitive · act 3 · EUW</span>
+          </div>
+          <div class="sync"><span class="dot dot--ok"></span>all local · 0 pending</div>
+        </div>
+
+        <div class="query">
+          <span class="query__label">filter</span>
+          <span class="query__text">competitive <span class="op">·</span> won <span class="op">·</span> 30d</span>
+          <span class="query__hint">type to narrow · ⌘K</span>
+        </div>
+
+        <table style="margin-top:10px">
+          <thead>
+            <tr>
+              <th class="l">When</th><th class="l">Result</th><th class="l">Map</th><th class="l">Agent</th>
+              <th>Score</th><th>K / D / A</th><th>ACS</th><th>HS</th><th>DMG</th><th>RR</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td class="c-when">today 21:14</td><td class="c-res c-res--w">WIN</td><td class="c-map">Ascent</td><td class="c-agent">Jett</td><td class="c-score">13—9</td><td class="c-kda">24/16/5</td><td>268</td><td class="c-hs">31%</td><td class="c-kda">4 812</td><td class="c-rr c-rr--pos">+21</td></tr>
+            <tr><td class="c-when">today 20:31</td><td class="c-res c-res--w">WIN</td><td class="c-map">Lotus</td><td class="c-agent">Raze</td><td class="c-score">13—11</td><td class="c-kda">21/19/4</td><td>241</td><td class="c-hs">27%</td><td class="c-kda">4 106</td><td class="c-rr c-rr--pos">+19</td></tr>
+            <tr><td class="c-when">today 18:58</td><td class="c-res c-res--w">WIN</td><td class="c-map">Bind</td><td class="c-agent">Jett</td><td class="c-score">13—7</td><td class="c-kda">26/12/3</td><td>289</td><td class="c-hs">34%</td><td class="c-kda">5 240</td><td class="c-rr c-rr--pos">+23</td></tr>
+            <tr><td class="c-when">today 17:29</td><td class="c-res c-res--w">WIN</td><td class="c-map">Sunset</td><td class="c-agent">Raze</td><td class="c-score">5—3</td><td class="c-kda">14/9/2</td><td>233</td><td class="c-hs">25%</td><td class="c-kda">2 908</td><td class="c-rr">—</td></tr>
+            <tr><td class="c-when">today 19:46</td><td class="c-res c-res--l">LOSS</td><td class="c-map">Haven</td><td class="c-agent">Omen</td><td class="c-score">9—13</td><td class="c-kda">17/18/9</td><td>205</td><td class="c-hs">22%</td><td class="c-kda">3 774</td><td class="c-rr c-rr--neg">−16</td></tr>
+            <tr><td class="c-when">today 18:12</td><td class="c-res c-res--l">LOSS</td><td class="c-map">Split</td><td class="c-agent">Sova</td><td class="c-score">11—13</td><td class="c-kda">15/17/7</td><td>198</td><td class="c-hs">19%</td><td class="c-kda">3 421</td><td class="c-rr c-rr--neg">−18</td></tr>
+            <tr><td class="c-when">wed 22:40</td><td class="c-res c-res--w">WIN</td><td class="c-map">Icebox</td><td class="c-agent">Jett</td><td class="c-score">13—10</td><td class="c-kda">23/15/6</td><td>262</td><td class="c-hs">29%</td><td class="c-kda">4 655</td><td class="c-rr c-rr--pos">+20</td></tr>
+            <tr><td class="c-when">wed 21:55</td><td class="c-res c-res--l">LOSS</td><td class="c-map">Pearl</td><td class="c-agent">Raze</td><td class="c-score">10—13</td><td class="c-kda">19/16/3</td><td>244</td><td class="c-hs">26%</td><td class="c-kda">4 020</td><td class="c-rr c-rr--neg">−14</td></tr>
+            <tr><td class="c-when">wed 20:12</td><td class="c-res c-res--w">WIN</td><td class="c-map">Fracture</td><td class="c-agent">Killjoy</td><td class="c-score">13—8</td><td class="c-kda">16/13/11</td><td>219</td><td class="c-hs">21%</td><td class="c-kda">3 512</td><td class="c-rr c-rr--pos">+17</td></tr>
+            <tr><td class="c-when">wed 19:03</td><td class="c-res c-res--w">WIN</td><td class="c-map">Ascent</td><td class="c-agent">Jett</td><td class="c-score">13—6</td><td class="c-kda">25/11/4</td><td>297</td><td class="c-hs">33%</td><td class="c-kda">5 388</td><td class="c-rr c-rr--pos">+24</td></tr>
+          </tbody>
+        </table>
+        <div class="history__count">
+          <span>97 matches stored · showing 10</span>
+          <span>click a row → report sheet</span>
+        </div>
+      </div>
+    </div>
+
+    <p class="screen__note">
+      <b>No card grid, no filter bar.</b> One query line you type into, one table that sorts on click.
+      Ten rows fit without scrolling; the rest is the same table. Every column is a field the
+      backend already returns; DMG is <span class="num">TrackerMatch.damage</span>, ACS is
+      <span class="num">TrackerMatch.acs</span>.
+    </p>
+  </section>
+
+  <!-- ======================= 03 · REPORT ======================= -->
+  <section class="screen" id="report">
+    <div class="screen__label">
+      <span class="idx">03</span><span class="name">Match report</span>
+      <span class="hint">detail as a sheet, not a modal — the table above opens in place</span>
+    </div>
+
+    <div class="app app--tall">
+      <aside class="rail">
+        <div class="rail__mark"><span class="word">Recon</span><span class="ver">0.5.0</span></div>
+        <nav class="rail__nav" aria-label="Primary">
+          <button class="rail__item"><span class="k">1</span>Now</button>
+          <button class="rail__item rail__item--on"><span class="k">2</span>Matches</button>
+          <button class="rail__item"><span class="k">3</span>Machine</button>
+        </nav>
+        <div class="rail__foot">
+          <div class="line"><span>match</span><span class="num">a41f…9c</span></div>
+          <div class="line"><span>duration</span><span class="num">32m</span></div>
+          <div class="line"><span>back</span><span class="num">esc</span></div>
+        </div>
+      </aside>
+
+      <div class="sheet">
+        <div class="crumbs">
+          <span>Matches</span><span class="dimmer">/</span><span class="here">Ascent · Competitive</span>
+          <span class="dimmer" style="margin-left:auto">2026-11-09 21:14</span>
+        </div>
+
+        <div class="report">
+          <div class="report__head">
+            <div>
+              <div class="report__result">VICTORY<span class="score">13—9</span></div>
+              <div class="report__meta">
+                <span>Ascent</span><span class="sep">/</span>
+                <span>Competitive</span><span class="sep">/</span>
+                <span>32m</span><span class="sep">/</span>
+                <span>attack first</span>
+              </div>
+            </div>
+            <div class="sync" style="padding-bottom:4px"><span class="dot dot--ok"></span>verified from match data</div>
+          </div>
+
+          <div class="strip" aria-label="Round results">
+            <div class="round round--w"><div class="round__mark"></div><div class="round__n">1</div></div>
+            <div class="round round--w"><div class="round__mark"></div><div class="round__n">2</div></div>
+            <div class="round round--l"><div class="round__mark"></div><div class="round__n">3</div></div>
+            <div class="round round--w"><div class="round__mark"></div><div class="round__n">4</div></div>
+            <div class="round round--l"><div class="round__mark"></div><div class="round__n">5</div></div>
+            <div class="round round--w"><div class="round__mark"></div><div class="round__n">6</div></div>
+            <div class="round round--w"><div class="round__mark"></div><div class="round__n">7</div></div>
+            <div class="round round--l"><div class="round__mark"></div><div class="round__n">8</div></div>
+            <div class="round round--w"><div class="round__mark"></div><div class="round__n">9</div></div>
+            <div class="round round--w"><div class="round__mark"></div><div class="round__n">10</div></div>
+            <div class="round round--l"><div class="round__mark"></div><div class="round__n">11</div></div>
+            <div class="round round--w"><div class="round__mark"></div><div class="round__n">12</div></div>
+            <div class="round round--l"><div class="round__mark"></div><div class="round__n">13</div></div>
+            <div class="round round--w"><div class="round__mark"></div><div class="round__n">14</div></div>
+            <div class="round round--l"><div class="round__mark"></div><div class="round__n">15</div></div>
+            <div class="round round--w"><div class="round__mark"></div><div class="round__n">16</div></div>
+            <div class="round round--w"><div class="round__mark"></div><div class="round__n">17</div></div>
+            <div class="round round--l"><div class="round__mark"></div><div class="round__n">18</div></div>
+            <div class="round round--w"><div class="round__mark"></div><div class="round__n">19</div></div>
+            <div class="round round--l"><div class="round__mark"></div><div class="round__n">20</div></div>
+            <div class="round round--w"><div class="round__mark"></div><div class="round__n">21</div></div>
+            <div class="round round--w"><div class="round__mark"></div><div class="round__n">22</div></div>
+          </div>
+          <div class="strips">
+            <div class="legend"><span class="w"><i></i>won</span><span class="l"><i></i>lost</span><span class="n"><i></i>live round</span></div>
+            <span class="dimmer" style="font-size:11px;margin-left:auto">colour is not the outcome — fill is</span>
+          </div>
+
+          <div class="report__body">
+            <div>
+              <section class="side" style="padding-bottom:0">
+                <h3>Scoreboard</h3>
+                <table class="board-table">
+                  <thead>
+                    <tr><th class="l">Agent</th><th class="l">Player</th><th>K</th><th>D</th><th>A</th><th>ACS</th><th>HS</th><th>ADR</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr class="me"><td class="l">Jett</td><td class="l">youssefvdel#EUW</td><td>24</td><td>16</td><td>5</td><td>268</td><td class="c-hs">31%</td><td>171</td></tr>
+                    <tr><td class="l">Raze</td><td class="l">sova.exe#1337</td><td>21</td><td>17</td><td>4</td><td>244</td><td class="c-hs">28%</td><td>158</td></tr>
+                    <tr><td class="l">Omen</td><td class="l">Kuro#LOL</td><td>18</td><td>18</td><td>9</td><td>212</td><td class="c-hs">24%</td><td>139</td></tr>
+                    <tr><td class="l">Sova</td><td class="l">nats#7777</td><td>14</td><td>19</td><td>11</td><td>186</td><td class="c-hs">22%</td><td>121</td></tr>
+                    <tr><td class="l">Killjoy</td><td class="l">Player 4</td><td>12</td><td>20</td><td>7</td><td>164</td><td class="c-hs">18%</td><td>108</td></tr>
+                    <tr><td class="l">Phoenix</td><td class="l">ph4ntom#EUW</td><td>22</td><td>17</td><td>3</td><td>251</td><td class="c-hs">30%</td><td>162</td></tr>
+                    <tr><td class="l">Viper</td><td class="l">raze#0000</td><td>19</td><td>16</td><td>6</td><td>228</td><td class="c-hs">26%</td><td>147</td></tr>
+                    <tr><td class="l">Fade</td><td class="l">—</td><td>16</td><td>18</td><td>8</td><td>201</td><td class="c-hs">24%</td><td>133</td></tr>
+                    <tr><td class="l">Cypher</td><td class="l">velvet#hush</td><td>11</td><td>21</td><td>10</td><td>158</td><td class="c-hs">17%</td><td>101</td></tr>
+                    <tr><td class="l">Neon</td><td class="l">Player 9</td><td>13</td><td>22</td><td>4</td><td>142</td><td class="c-hs">15%</td><td>96</td></tr>
+                  </tbody>
+                </table>
+              </section>
+            </div>
+
+            <div class="side">
+              <section>
+                <h3>First bloods</h3>
+                <ul class="duels">
+                  <li class="duel"><span class="duel__r">R2</span><span class="duel__who">youssefvdel<span class="arrow">›</span>ph4ntom</span><span class="duel__w">Vandal · 1.02s</span></li>
+                  <li class="duel"><span class="duel__r">R5</span><span class="duel__who">Kuro<span class="arrow">›</span>raze</span><span class="duel__w">Phantom · 0.84s</span></li>
+                  <li class="duel"><span class="duel__r">R5</span><span class="duel__who">velvet<span class="arrow">›</span>nats</span><span class="duel__w">Sheriff · 1.31s</span></li>
+                  <li class="duel"><span class="duel__r">R9</span><span class="duel__who">youssefvdel<span class="arrow">›</span>Fade</span><span class="duel__w">Operator · 0.61s</span></li>
+                  <li class="duel"><span class="duel__r">R14</span><span class="duel__who">sova.exe<span class="arrow">›</span>Neon</span><span class="duel__w">Vandal · 1.14s</span></li>
+                  <li class="duel"><span class="duel__r">R21</span><span class="duel__who">youssefvdel<span class="arrow">›</span>Cypher</span><span class="duel__w">Vandal · 0.92s</span></li>
+                </ul>
+              </section>
+              <section>
+                <h3>Loadout value · your rounds</h3>
+                <div class="econ" aria-label="Loadout value by round">
+                  <div class="econ__bar econ__bar--pistol" style="height:20%"></div>
+                  <div class="econ__bar" style="height:78%"></div>
+                  <div class="econ__bar" style="height:64%"></div>
+                  <div class="econ__bar econ__bar--pistol" style="height:16%"></div>
+                  <div class="econ__bar" style="height:88%"></div>
+                  <div class="econ__bar" style="height:72%"></div>
+                  <div class="econ__bar" style="height:96%"></div>
+                  <div class="econ__bar econ__bar--pistol" style="height:18%"></div>
+                  <div class="econ__bar" style="height:82%"></div>
+                  <div class="econ__bar" style="height:54%"></div>
+                  <div class="econ__bar" style="height:91%"></div>
+                  <div class="econ__bar" style="height:66%"></div>
+                </div>
+                <div class="econ__labels"><span>R1</span><span>R6</span><span>R12</span></div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="screen__note">
+      <b>Outcome is shape, not colour.</b> The round strip fills a win and leaves a loss hollow, so
+      the accent stays free for its one job — marking the live round. The scoreboard is a table with
+      your row ruled, not a highlighted card; missing players keep the amber "hidden / 451" mark
+      the live lobby uses, because the same honesty states must survive into the report.
+    </p>
+  </section>
+
+  <!-- ======================= seam ======================= -->
+  <section class="seam">
+    <div class="screen__label">
+      <span class="idx">04</span><span class="name">The seam</span>
+      <span class="hint">HUD and main window as one product — same rules, same numerals, same one accent</span>
+    </div>
+    <div class="seam__grid">
+      <div class="hud">
+        <div class="hud__head">
+          <span class="t">Lotus · competitive</span>
+          <span class="live">Live 6—4</span>
+        </div>
+        <div class="hud__row"><span class="nm">sova.exe#1337</span><span class="rk">A2</span><span class="rr">74</span></div>
+        <div class="hud__row"><span class="nm">Kuro#LOL</span><span class="rk">D1</span><span class="rr">38</span></div>
+        <div class="hud__row"><span class="nm" style="color:var(--unverified);font-style:italic">Player 4</span><span class="rk">D2</span><span class="rr">51</span></div>
+        <div class="hud__row"><span class="nm">nats#7777</span><span class="rk">P3</span><span class="rr">91</span></div>
+      </div>
+      <div class="panel">
+        <div class="rule-eg"><span>Main window · same hairline</span><span class="num">1px</span></div>
+        <div class="rule-eg"><span>Numbers · same mono</span><span class="num">13.5 / tnum</span></div>
+        <div class="rule-eg"><span>Accent surface · only "now"</span><span class="num">#FF4655</span></div>
+        <div class="rule-eg"><span>Elevation levels</span><span class="num">1 · rule + paper step</span></div>
+        <div class="rule-eg"><span>Backdrop blur</span><span class="num">never</span></div>
+      </div>
+    </div>
+    <p class="screen__note">
+      The HUD is the same system at a smaller scale: rules instead of borders, mono numerals, one
+      signal colour for the live state, amber only where a value could not be read. Nothing carries
+      a blur or a shadow, so the transparent overlay and the opaque window are the same drawing at
+      two opacities.
+    </p>
+  </section>
+
+  <!-- ======================= spec ======================= -->
+  <section class="spec">
+    <h2>The one-page rationale</h2>
+    <p class="lead">
+      Ruled is a subtraction, not a reskin: it removes the card as a unit, removes tabs inside pages,
+      removes whole pages from the nav, and spends the saved structure on rules, space and type that
+      make one number readable at a glance.
+    </p>
+    <div class="spec__grid">
+      <div class="spec__block">
+        <h3>Name &amp; intent</h3>
+        <ul>
+          <li><b>Ruled</b><span>The page is a ruled sheet: content separated by hairlines and space, never boxed.</span></li>
+          <li><b>Read, not scan</b><span>One primary number per sheet, read top-to-bottom in under 30 seconds.</span></li>
+          <li><b>Fewer places</b><span>Three destinations. Every former page is a section of one of them.</span></li>
+        </ul>
+      </div>
+      <div class="spec__block">
+        <h3>Type scale</h3>
+        <ul>
+          <li><b>Display</b><span>56/1 · −0.035em · 560 — rank, result, never two per screen</span></li>
+          <li><b>Hero</b><span>34 mono · RR, score, the number the page is about</span></li>
+          <li><b>Title</b><span>24/1.15 · section headlines, match name</span></li>
+          <li><b>Body</b><span>15/1.55 · prose, labels</span></li>
+          <li><b>Data</b><span>13.5 mono · tabular-nums, right-aligned in tables</span></li>
+          <li><b>Micro</b><span>10.5 · .13em uppercase · section marks, dt labels</span></li>
+        </ul>
+      </div>
+      <div class="spec__block">
+        <h3>Colour roles — one meaning each</h3>
+        <ul>
+          <li><b><i class="swatch role-signal"></i>Signal</b><span>now / live / the current round, page or row. Never decoration, never "important".</span></li>
+          <li><b><i class="swatch role-verified"></i>Verified</b><span>a value read back and confirmed (sync OK, GPU state, config read-back).</span></li>
+          <li><b><i class="swatch role-unverified"></i>Unverified</b><span>missing, hidden, private, unreadable — a gap that must stay visible.</span></li>
+          <li><b>Ink ×3 + paper ×3</b><span>everything else. Wins, losses, deltas and ranks are ink; outcome is encoded by position and fill.</span></li>
+        </ul>
+      </div>
+      <div class="spec__block">
+        <h3>Card policy</h3>
+        <ul>
+          <li><b>Zero cards</b><span>no boxed widgets in the main window. Separation = 1px rule + 24px space.</span></li>
+          <li><b>One filled surface</b><span>the HUD panel, and transient overlays (⌘K, dialogs). Nothing else gets a background step.</span></li>
+          <li><b>Elevation</b><span>one level: rule + paper step. No shadows, no glass, no backdrop blur anywhere.</span></li>
+          <li><b>Radius</b><span>0. No pills; the party marker is a mono glyph, not a chip.</span></li>
+        </ul>
+      </div>
+      <div class="spec__block">
+        <h3>Nav / tab model</h3>
+        <ul>
+          <li><b>Now</b><span>rank, live lobby, last five. The default landing sheet.</span></li>
+          <li><b>Matches</b><span>one ledger; detail opens in place with a breadcrumb, no modal.</span></li>
+          <li><b>Machine</b><span>display, stretch, config editor, GPU, crosshair, sensitivity — all sections of one sheet, anchored.</span></li>
+          <li><b>Settings</b><span>a dialog on ⌘,, not a page. ⌘K reaches any section by name.</span></li>
+        </ul>
+      </div>
+      <div class="spec__block">
+        <h3>Build cost</h3>
+        <ul>
+          <li><b>Tokens + rail</b><span>1 day — CSS variables, delete the card components.</span></li>
+          <li><b>Now sheet</b><span>2 days — live band reuses the existing lobby rows.</span></li>
+          <li><b>Matches ledger</b><span>1.5 days — one table, client-side sort; no virtualisation needed under 500 rows.</span></li>
+          <li><b>Report sheet</b><span>3 days — round strip, scoreboard, duels, economy (data already in TrackerMatchDetail).</span></li>
+          <li><b>Machine consolidation</b><span>3 days — move 8 existing views into anchored sections, delete page wrappers.</span></li>
+          <li><b>Total</b><span>≈ 10.5 dev-days, no new dependencies, no new IPC fields.</span></li>
+        </ul>
+      </div>
+    </div>
+    <p class="screen__note" style="margin-top:34px">
+      Every field rendered here exists in <span class="num">src/types.ts</span>: TrackerProfile (rank, rr,
+      peak, wins, games), TrackerMatch (map, mode, agent, result, score, k/d/a, acs, hsPct, damage,
+      startedAt), TrackerMatchDetail (players, rounds, kills, roundDetails.economy), LiveMatchState
+      (tier/rank/rr, partyIndex, isIncognito, nameResolved, isTrnPrivate, trnState). No number is
+      invented for this board; the values are samples of those fields.
+    </p>
+  </section>
+
+</div>
+</body>
+</html>
