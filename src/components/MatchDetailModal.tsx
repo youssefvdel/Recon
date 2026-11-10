@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { X, Swords, Clock, Copy, Check } from 'lucide-react';
+import { matchVerdict } from '../utils/matchVerdict';
 import type { TrackerMatchDetail, TrackerMmrPoint } from '../types';
 import { tierName, resolvePlayerNames, gameData } from '../utils/tracker';
 import { getPartyStyle } from '../utils/playerDisplay';
@@ -12,13 +13,9 @@ import { calculateTrsFallback, fetchTrnMatchDetails } from '../utils/trn';
 import { useTrackerData } from '../hooks/useTrackerData';
 
 import defuseWin from '../assets/round-icons/defuse-win.png';
-import defuseLoss from '../assets/round-icons/defuse-loss.png';
 import elimWin from '../assets/round-icons/elimination-win.png';
-import elimLoss from '../assets/round-icons/elimination-loss.png';
 import detonateWin from '../assets/round-icons/detonate-win.png';
-import detonateLoss from '../assets/round-icons/detonate-loss.png';
 import timeWin from '../assets/round-icons/time-win.png';
-import timeLoss from '../assets/round-icons/time-loss.png';
 
 interface MatchDetailModalProps {
   isOpen: boolean;
@@ -63,6 +60,7 @@ const formatMatchDate = (ms: number): string => {
     hour12: true,
   });
 };
+
 
 export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
   isOpen,
@@ -172,6 +170,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
   const teamBlueScore = detail?.teamScore['Blue'] ?? 0;
   const teamRedScore = detail?.teamScore['Red'] ?? 0;
   const roundsCount = Math.max(1, teamBlueScore + teamRedScore);
+
   const matchDurationMs =
     detail?.durationMs && detail.durationMs > 0
       ? detail.durationMs
@@ -299,6 +298,8 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
 
   const ffaPlayers = useMemo(() => {
     return [...playerStats].sort((a, b) => (b.kills !== a.kills ? b.kills - a.kills : b.score - a.score));
+
+
   }, [playerStats]);
 
   // Overall Match MVP and Team MVPs
@@ -325,13 +326,6 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
     return { count, pairs, top, mism };
   }, [detail, teamBlue, teamRed]);
 
-  const getRoundOutcomeIcon = (result?: string, isWin = true): string => {
-    const r = (result || '').toLowerCase();
-    if (r.includes('defuse')) return isWin ? defuseWin : defuseLoss;
-    if (r.includes('detonate') || r.includes('bomb') || r.includes('exploded')) return isWin ? detonateWin : detonateLoss;
-    if (r.includes('time')) return isWin ? timeWin : timeLoss;
-    return isWin ? elimWin : elimLoss;
-  };
 
   // Personal Duels (You vs Opponents)
   const personalDuels = useMemo(() => {
@@ -459,6 +453,27 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
 
   if (!isOpen || !detail) return null;
 
+  /* A score is only real when the payload carries it: `?? 0` is fine for
+   * arithmetic and wrong for display, so the header reads the raw values.
+   * The verdict needs BOTH numbers and a known side; with either missing it is
+   * omitted, never guessed. */
+  const rawBlue = detail?.teamScore?.['Blue'];
+  const rawRed = detail?.teamScore?.['Red'];
+  const scoresKnown = typeof rawBlue === 'number' && typeof rawRed === 'number';
+  const meRow = playerStats.find((p) => p.isMe);
+  const mySide = meRow?.team;
+  const myScore = !scoresKnown || !mySide ? undefined : mySide === 'Blue' ? rawBlue : rawRed;
+  const otherScore = !scoresKnown || !mySide ? undefined : mySide === 'Blue' ? rawRed : rawBlue;
+  const verdict = matchVerdict(myScore, otherScore);
+  /* Deathmatch has no sides: player count only, no verdict, no win/loss. */
+  const scoreLine = isDeathmatch
+    ? `${ffaPlayers.length} players`
+    : myScore !== undefined && otherScore !== undefined
+      ? `${myScore}–${otherScore}`
+      : scoresKnown
+        ? `${rawBlue}–${rawRed}`
+        : '';
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
       {/* Blurred Backdrop */}
@@ -471,121 +486,57 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
         aria-modal="true"
         aria-labelledby="mdm-title"
         className="relative w-full max-w-[96vw] h-[94vh] max-h-[94vh] bg-m3-surface-container-low border border-m3-outline-subtle rounded-3xl shadow-m3-3 flex flex-col overflow-hidden text-m3-on-surface z-10">
-        {/* Header */}
-        <div className="px-4 py-2.5 bg-m3-surface-container border-b border-m3-outline-subtle flex items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center gap-3 shrink-0 min-w-0">
-            {/* Map & Mode & Date */}
-            <div>
-              <div className="flex items-center gap-2">
-                <span id="mdm-title" className="font-display font-black text-xl text-m3-on-surface tracking-tight leading-none">
-                  {mapName}
+        {/* Header — the verdict is the largest thing in the modal.
+            Honesty: the word WIN/LOSS/DRAW needs BOTH a score and a known side;
+            with either missing the verdict is omitted, never guessed. */}
+        <div className="px-4 py-3 bg-m3-surface-container border-b border-m3-outline-subtle flex items-center justify-between gap-3 shrink-0">
+          <div className="min-w-0">
+            <div className="flex items-baseline gap-2 min-w-0">
+              {verdict && (
+                <span
+                  className={`font-display font-black text-[26px] tracking-tight leading-none ${
+                    verdict === 'WIN'
+                      ? 'text-m3-mint'
+                      : verdict === 'LOSS'
+                        ? 'text-m3-coral'
+                        : 'text-m3-on-surface'
+                  }`}
+                >
+                  {verdict}
                 </span>
-                <span className="px-2 py-0.5 rounded text-micro font-bold uppercase tracking-wider bg-m3-surface-container-highest text-m3-outline border border-m3-outline-subtle">
-                  {queue || 'Competitive'}
-                </span>
-              </div>
-              <div className="text-[11px] font-medium text-m3-outline mt-1 flex items-center gap-1.5">
-                <Clock className="w-3 h-3 text-m3-outline shrink-0" />
-                <span>{formatMatchDate(detail.when)}</span>
-                <span>•</span>
-                <span className="font-mono">{formatDuration(matchDurationMs)}</span>
-              </div>
+              )}
+              <span
+                id="mdm-title"
+                className="font-mono tabular-nums font-black text-[26px] leading-none text-m3-on-surface"
+              >
+                {scoreLine}
+              </span>
+              <span className="px-2 py-0.5 rounded text-micro font-bold uppercase tracking-wider bg-m3-surface-container-highest text-m3-outline border border-m3-outline-subtle whitespace-nowrap">
+                {isDeathmatch ? 'Deathmatch' : queue || 'Competitive'}
+              </span>
             </div>
-
-            {/* Match Score (M3 Semantic Tones) */}
-            {isDeathmatch ? (
-              <div className="flex items-center gap-2 bg-m3-surface-container-high border border-m3-outline-subtle px-3 py-1.5 rounded-2xl shrink-0">
-                <span className="font-display font-black text-sm text-amber-300">
-                  Free For All
-                </span>
-                <span className="text-m3-outline text-xs">•</span>
-                <span className="text-xs font-mono font-bold text-m3-outline">
-                  {ffaPlayers.length} Players
-                </span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 bg-m3-surface-container-high border border-m3-outline-subtle px-3 py-1.5 rounded-2xl shrink-0">
-                <span className="font-display font-black text-base text-m3-mint">
-                  Team Blue {teamBlueScore}
-                </span>
-                <span className="text-m3-outline font-bold text-sm">:</span>
-                <span className="font-display font-black text-base text-m3-coral">
-                  {teamRedScore} Team Red
-                </span>
-              </div>
-            )}
+            <div className="text-[11px] font-medium text-m3-outline mt-1 flex items-center gap-1.5 min-w-0">
+              <span className="truncate">{mapName}</span>
+              {!isDeathmatch && <span>·</span>}
+              {!isDeathmatch && <span className="uppercase tracking-wider">{queue || 'Competitive'}</span>}
+              <span>·</span>
+              <Clock className="w-3 h-3 text-m3-outline shrink-0" />
+              <span className="whitespace-nowrap">{formatMatchDate(detail.when)}</span>
+              <span>·</span>
+              <span className="font-mono whitespace-nowrap">{formatDuration(matchDurationMs)}</span>
+            </div>
           </div>
 
-          {/* Right side: Round Timeline Strip + Close Button (Timeline scrolls, controls NEVER get pushed off) */}
-          <div className="flex items-center gap-2.5 min-w-0 flex-1 justify-end">
-            {detail.rounds && detail.rounds.length > 0 && (
-              <div className="flex flex-col gap-0.5 bg-m3-surface-container-high border border-m3-outline-subtle px-2 py-1 rounded-xl max-w-[360px] sm:max-w-[440px] md:max-w-[560px] lg:max-w-[660px] overflow-x-auto custom-scrollbar shrink">
-                {/* Team Blue Row */}
-                <div className="flex items-center gap-1 min-w-max">
-                  <span className="w-7 text-micro font-bold text-m3-mint shrink-0">
-                    Blue
-                  </span>
-                  <div className="flex items-center gap-0.5">
-                    {detail.rounds.map((r, i) => {
-                      const isWin = r.winningTeam === 'Blue';
-                      const outcomeIcon = getRoundOutcomeIcon(r.roundResult, true);
-                      return (
-                        <div
-                          key={i}
-                          data-tip={`Round ${i + 1}: ${r.winningTeam} won (${r.roundResult || 'Eliminated'})`}
-                          className="w-3.5 h-3.5 flex items-center justify-center shrink-0"
-                        >
-                          {isWin ? (
-                            <img src={outcomeIcon} alt="" className="w-3 h-3 object-contain" />
-                          ) : (
-                            <span className="text-[8px] text-white/15 leading-none select-none">·</span>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Team Red Row */}
-                <div className="flex items-center gap-1 min-w-max">
-                  <span className="w-7 text-micro font-bold text-m3-coral shrink-0">
-                    Red
-                  </span>
-                  <div className="flex items-center gap-0.5">
-                    {detail.rounds.map((r, i) => {
-                      const isWin = r.winningTeam === 'Red';
-                      const outcomeIcon = getRoundOutcomeIcon(r.roundResult, false);
-                      return (
-                        <div
-                          key={i}
-                          data-tip={`Round ${i + 1}: ${r.winningTeam} won (${r.roundResult || 'Eliminated'})`}
-                          className="w-3.5 h-3.5 flex items-center justify-center shrink-0"
-                        >
-                          {isWin ? (
-                            <img src={outcomeIcon} alt="" className="w-3 h-3 object-contain" />
-                          ) : (
-                            <span className="text-[8px] text-white/15 leading-none select-none">·</span>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Persistent Close Button — shrink-0 so X NEVER disappears */}
-            <button
-              ref={closeRef}
-              type="button"
-              onClick={onClose}
-              data-tip="Close"
-              aria-label="Close match details"
-              className="w-8 h-8 rounded-xl bg-m3-surface-container-high hover:bg-rose-600 hover:text-white text-m3-outline flex items-center justify-center transition-colors cursor-pointer shrink-0 border border-m3-outline-subtle shadow-xs"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
+          <button
+            ref={closeRef}
+            type="button"
+            onClick={onClose}
+            data-tip="Close"
+            aria-label="Close match details"
+            className="w-8 h-8 rounded-xl bg-m3-surface-container-high hover:bg-rose-600 hover:text-white text-m3-outline flex items-center justify-center transition-colors cursor-pointer shrink-0 border border-m3-outline-subtle shadow-xs"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
         {/* Modal Navigation Tabs */}
@@ -654,10 +605,10 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                 </div>
 
                 {/* Table */}
-                <div className="flex-1 overflow-x-auto min-h-0">
+                <div className="flex-1 overflow-x-auto sm:overflow-x-visible min-h-0">
                   <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="border-b border-m3-outline-subtle/60 bg-m3-surface-container-highest/40 text-micro font-bold uppercase tracking-wider text-m3-outline select-none">
+                    <thead className="sticky top-0 z-10 bg-m3-surface-container-highest border-b border-m3-outline-subtle">
+                      <tr className="border-b border-m3-outline-subtle/60 bg-m3-surface-container-highest text-micro font-bold uppercase tracking-wider text-m3-outline select-none">
                         <th className="py-2 px-3 min-w-[36px]">#</th>
                         <th className="py-2 px-3 min-w-[44px]">Agent</th>
                         <th className="py-2 px-3 min-w-[140px]">Player</th>
@@ -797,7 +748,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                 </div>
 
                 {/* Table */}
-                <div className="flex-1 overflow-x-auto min-h-0">
+                <div className="flex-1 overflow-x-auto sm:overflow-x-visible min-h-0">
                   <table className="w-full h-full table-fixed text-left text-xs border-collapse">
                     <colgroup>
                       <col className="w-[52px]" />
@@ -815,8 +766,8 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                       <col className="w-[38px]" />
                       <col className="w-[38px]" />
                     </colgroup>
-                    <thead>
-                      <tr className="border-b border-m3-outline-subtle/60 bg-m3-surface-container-highest/40 text-micro font-bold uppercase tracking-wider text-m3-outline select-none">
+                    <thead className="sticky top-0 z-10 bg-m3-surface-container-highest border-b border-m3-outline-subtle">
+                      <tr className="border-b border-m3-outline-subtle/60 bg-m3-surface-container-highest text-micro font-bold uppercase tracking-wider text-m3-outline select-none">
                         <th className="py-2 px-3">Agent</th>
                         <th className="py-2 px-3">Player</th>
                         <th className="py-2 px-1 text-center">TRS</th>
@@ -999,7 +950,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                 </div>
 
                 {/* Table */}
-                <div className="flex-1 overflow-x-auto min-h-0">
+                <div className="flex-1 overflow-x-auto sm:overflow-x-visible min-h-0">
                   <table className="w-full h-full table-fixed text-left text-xs border-collapse">
                     <colgroup>
                       <col className="w-[52px]" />
@@ -1017,8 +968,8 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                       <col className="w-[38px]" />
                       <col className="w-[38px]" />
                     </colgroup>
-                    <thead>
-                      <tr className="border-b border-m3-outline-subtle/60 bg-m3-surface-container-highest/40 text-micro font-bold uppercase tracking-wider text-m3-outline select-none">
+                    <thead className="sticky top-0 z-10 bg-m3-surface-container-highest border-b border-m3-outline-subtle">
+                      <tr className="border-b border-m3-outline-subtle/60 bg-m3-surface-container-highest text-micro font-bold uppercase tracking-wider text-m3-outline select-none">
                         <th className="py-2 px-3">Agent</th>
                         <th className="py-2 px-3">Player</th>
                         <th className="py-2 px-1 text-center">TRS</th>
@@ -1246,7 +1197,7 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
               <div className="rounded-2xl border border-m3-outline-subtle bg-m3-surface-container overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-max text-xs border-collapse">
-                    <thead>
+                    <thead className="sticky top-0 z-10 bg-m3-surface-container-highest border-b border-m3-outline-subtle">
                       <tr className="border-b border-m3-outline-subtle/60 bg-m3-surface-container-high/60">
                         <th className="p-2 text-left min-w-[150px]">
                           <span className="inline-flex items-center gap-1.5 text-[11px] font-black">
