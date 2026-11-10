@@ -67,12 +67,37 @@ type Snapshot = {
   detailsReady: number;
 };
 
+/** TTL governs FRESHNESS, never AVAILABILITY.
+ *
+ * This used to `return null` once a snapshot was older than SNAPSHOT_TTL,
+ * which turned "this snapshot is a day old" into "this account never existed".
+ * A user signed out for a day lost act names (seasonNames lives here) and every
+ * cached match row, and saw raw act UUIDs and six dashes — while the data was
+ * on disk the whole time. Age is reported, not enforced. */
 function parseSnapshot(raw: string | null): Snapshot | null {
   if (!raw) return null;
-  const s = JSON.parse(raw) as Snapshot;
-  if (!s?.savedAt || !s?.profile) return null;
-  if (Date.now() - s.savedAt > SNAPSHOT_TTL) return null;
-  return s;
+  try {
+    const s = JSON.parse(raw) as Snapshot;
+    if (!s?.savedAt || !s?.profile) return null;
+    return s;
+  } catch {
+    return null;
+  }
+}
+
+/** True when the snapshot is past its freshness horizon. It is still USED —
+ *  this only marks it, so the banner and the log can say so. */
+export function snapshotIsStale(savedAt: number, now: number = Date.now()): boolean {
+  return now - savedAt > SNAPSHOT_TTL;
+}
+
+/** How old the cached board is, for the banner. Empty string when recent.
+ *  Pure so the rule can be checked without a store. */
+export function snapshotAgeLabel(savedAt: number, now: number = Date.now()): string {
+  const ms = now - savedAt;
+  if (!Number.isFinite(ms) || ms < 3_600_000) return '';
+  const hours = Math.floor(ms / 3_600_000);
+  return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
 }
 
 function readSnapshot(puuid?: string): Snapshot | null {
@@ -678,7 +703,9 @@ async function runRefresh(): Promise<void> {
         detailsTotal: cachedSnap.games?.length ?? 0,
         ready: true,
         hasCached: true,
-        banner: 'Riot client not signed in — showing cached results',
+        banner: `Riot client not signed in — showing cached results${
+          snapshotAgeLabel(cachedSnap.savedAt) ? ` from ${snapshotAgeLabel(cachedSnap.savedAt)}` : ''
+        }`,
       });
       // Merge whatever match details are already on disk: aggregateDetails
       // reads the recon_match_v7_* cache per id and only fetches what is
@@ -706,7 +733,11 @@ async function runRefresh(): Promise<void> {
             detailsById: { ...ensureStore().detailsById, ...fromCache },
             detailsReady: Math.max(ensureStore().detailsReady, cacheReady),
           });
-          logCachedMerge('from-cache', { ids: cachedIds.length, ready: cacheReady });
+          logCachedMerge('from-cache', {
+            ids: cachedIds.length,
+            ready: cacheReady,
+            stale: snapshotIsStale(cachedSnap.savedAt),
+          });
         }
         // A second refresh (mount + "Refresh all data") must not start a second
         // merge over the same ids.

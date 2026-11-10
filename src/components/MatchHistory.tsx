@@ -219,18 +219,28 @@ const MatchRow: React.FC<{
           )}
         </div>
 
+        {!hasDetail ? (
+          /* ONE honest state instead of six independent dashes: an uncached row
+             reads as "not cached", not as a broken table. Map, date and rank
+             are real cached facts and stay in the row above. */
+          <div
+            className="flex-1 flex items-center justify-end pr-2"
+            data-tip="No cached detail for this match — the Riot client is not signed in"
+          >
+            <span className="text-micro font-bold uppercase tracking-wider text-m3-outline">
+              Not cached
+            </span>
+          </div>
+        ) : (
+          <>
         {/* Score */}
         <div className="flex flex-col items-center shrink-0 w-16">
           <span className="text-micro font-bold uppercase tracking-wider text-m3-outline">Score</span>
-          {hasDetail ? (
-            <span className="text-[15px] font-mono font-extrabold tabular-nums whitespace-nowrap">
+          {<span className="text-[15px] font-mono font-extrabold tabular-nums whitespace-nowrap">
               <span className="text-m3-mint">{r.us}</span>
               <span className="text-m3-outline"> : </span>
               <span className="text-m3-coral">{r.them}</span>
-            </span>
-          ) : (
-            <StatValue reason="Score not fetched yet" className="text-[15px]" />
-          )}
+            </span>}
         </div>
 
         {/* TRS */}
@@ -270,49 +280,32 @@ const MatchRow: React.FC<{
         {/* Stat columns */}
         <div className="hidden sm:flex items-center gap-2 md:gap-3 lg:gap-4 shrink-0">
           <Stat label="K/D" width="w-12">
-            {hasDetail ? (
-              <span className={kd >= 1 ? 'text-m3-mint' : 'text-m3-coral'}>{formatKd(kd)}</span>
-            ) : (
-              <StatValue reason="Match detail not fetched yet" />
-            )}
+            {<span className={kd >= 1 ? 'text-m3-mint' : 'text-m3-coral'}>{formatKd(kd)}</span>}
           </Stat>
           <Stat label="K/D/A" width="w-[84px]">
-            {hasDetail ? (
-              <span className="text-m3-on-surface">
+            {<span className="text-m3-on-surface">
                 {r.k} <span className="text-m3-outline">/</span> {r.d} <span className="text-m3-outline">/</span> {r.a}
-              </span>
-            ) : (
-              <StatValue reason="Match detail not fetched yet" />
-            )}
+              </span>}
           </Stat>
           <Stat label="DDΔ" width="w-14">
-            {hasDetail ? (
-              <span className={r.dd >= 0 ? 'text-m3-mint' : 'text-m3-coral'}>
+            {<span className={r.dd >= 0 ? 'text-m3-mint' : 'text-m3-coral'}>
                 {r.dd > 0 ? `+${r.dd}` : r.dd}
-              </span>
-            ) : (
-              <StatValue reason="Match detail not fetched yet" />
-            )}
+              </span>}
           </Stat>
           <Stat label="HS%" width="w-12" className="hidden lg:flex">
-            {hasDetail ? (
-              r.hsPct > 0 ? (
+            {r.hsPct > 0 ? (
                 <span className="text-m3-on-surface">{formatPct(r.hsPct, 1)}</span>
               ) : (
                 <StatValue reason="No hit data recorded for this match" />
-              )
-            ) : (
-              <StatValue reason="Match detail not fetched yet" />
-            )}
+              )}
           </Stat>
           <Stat label="ACS" width="w-12">
-            {hasDetail ? (
-              <span className="text-m3-on-surface">{r.acs}</span>
-            ) : (
-              <StatValue reason="Match detail not fetched yet" />
-            )}
+            {<span className="text-m3-on-surface">{r.acs}</span>}
           </Stat>
         </div>
+
+          </>
+        )}
 
         {/* Mobile compact */}
         <div className="sm:hidden ml-auto shrink-0 text-right">
