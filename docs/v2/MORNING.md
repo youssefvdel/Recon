@@ -108,6 +108,24 @@ Replaced with the four-way definition, with the number change called out in the
 commit body — a silently corrected stat is worse than the wrong one, because
 screenshots get compared across versions.
 
+## The rebuild has a pass/fail command now
+
+`bun run uicheck` drives every route in headless Chromium and asserts: no error
+boundary, the landmark renders, **no `NaN`/`undefined`/`Infinity`/bare `—` in any
+cell**, and no page taller than one viewport.
+
+```
+PASS overview  900/900px   (allowed: the feed is the page)
+FAIL matches   1825/900px
+PASS prep / store / crosshair / resolution / chat / prepicker / accounts / settings
+9/10 routes pass
+```
+
+**That one FAIL is the whole reason for the rebuild**, stated as a number: the
+Matches route is 1152 px wide, carries **21** rounded bordered containers, and is
+**1825 px tall — 2× a viewport**. The old app's other nine routes are fine; Matches
+is the one that was never designed.
+
 ## The honesty sweep found 18 more, and 8 of them you would believe
 
 125 files, 38,261 lines (`docs/v2/honesty-audit.md`). The worst three:
