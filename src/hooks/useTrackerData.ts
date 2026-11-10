@@ -657,8 +657,15 @@ async function runRefresh(): Promise<void> {
         trnPrev: cachedSnap.trnPrev ?? {},
         trnMatchTrs: cachedSnap.trnMatchTrs ?? {},
         trnFetchedAt: cachedSnap.trnFetchedAt,
-        detailsById: cachedSnap.detailsById ?? {},
-        detailsReady: cachedSnap.detailsReady ?? 0,
+        // MERGE, never replace: a second refresh hits this branch again and
+        // used to write the snapshot's (possibly empty) map over the details
+        // the merge had just produced — rows survived, details vanished, and
+        // nothing logged because nothing threw.
+        detailsById: { ...ensureStore().detailsById, ...(cachedSnap.detailsById ?? {}) },
+        detailsReady: Math.max(
+          ensureStore().detailsReady,
+          cachedSnap.detailsReady ?? 0
+        ),
         detailsTotal: cachedSnap.games?.length ?? 0,
         ready: true,
         hasCached: true,
@@ -674,22 +681,56 @@ async function runRefresh(): Promise<void> {
         logCachedMerge('no-puuid', { ids: cachedIds.length });
       } else if (cachedIds.length === 0) {
         logCachedMerge('no-ids', { hasGames: (cachedSnap.games ?? []).length });
-      } else {
+      } else if (!cachedMergeRunning) {
+        /* QA's hypothesis, and it is the true one: aggregateDetails awaits
+         * EVERY id through Promise.all, so nine uncached ids behind the Riot
+         * gate hold the eleven cached ones hostage for a minute or more — a
+         * park, not a loss, and silent because nothing throws.
+         *
+         * So the disk cache is applied FIRST, synchronously, with no await and
+         * no network. "Some details" beats "none" while Riot is unreachable;
+         * the network pass below only fills in what is missing. */
+        const fromCache = cachedDetailsFor(cachedIds, (k) => localStorage.getItem(k));
+        const cacheReady = Object.keys(fromCache).length;
+        if (cacheReady > 0) {
+          updateStore({
+            detailsById: { ...ensureStore().detailsById, ...fromCache },
+            detailsReady: Math.max(ensureStore().detailsReady, cacheReady),
+          });
+          logCachedMerge('from-cache', { ids: cachedIds.length, ready: cacheReady });
+        }
+        // A second refresh (mount + "Refresh all data") must not start a second
+        // merge over the same ids.
+        cachedMergeRunning = true;
         void detectRegion()
           .catch(() => 'eu')
           .then((region) => aggregateDetails(region, cachedIds, cachedPuuid))
           .then(({ agg: a, byId }) => {
             const ready = Object.keys(byId).length;
-            // A merge that produced nothing is a failure, not a quiet no-op.
-            if (ready === 0) logCachedMerge('merged-nothing', { ids: cachedIds.length });
-            updateStore({ agg: a, detailsById: byId, detailsReady: ready });
+            // Log the RESULT too: the absence of a line is what made this bug
+            // invisible for two builds.
+            logCachedMerge(ready === 0 ? 'merged-nothing' : 'merged', {
+              ids: cachedIds.length,
+              ready,
+            });
+            updateStore({
+              agg: a,
+              // Same rule as above: merge into what is already there.
+              detailsById: { ...ensureStore().detailsById, ...byId },
+              detailsReady: Math.max(ensureStore().detailsReady, ready),
+            });
           })
           .catch((err) => {
             logCachedMerge('threw', {
               ids: cachedIds.length,
               error: String(err instanceof Error ? err.message : err).slice(0, 160),
             });
+          })
+          .finally(() => {
+            cachedMergeRunning = false;
           });
+      } else {
+        logCachedMerge('already-running', { ids: cachedIds.length });
       }
     } else {
       updateStore({
@@ -707,6 +748,8 @@ async function runRefresh(): Promise<void> {
  * distinct reason per minute, so a stub run names the branch without flooding
  * the log. */
 const CACHED_MERGE_LOG_WINDOW_MS = 60_000;
+/** One cached merge at a time — a second refresh joins nothing, it waits. */
+let cachedMergeRunning = false;
 const cachedMergeLoggedAt = new Map<string, number>();
 
 function logCachedMerge(reason: string, detail: Record<string, unknown> = {}): void {
@@ -719,6 +762,26 @@ function logCachedMerge(reason: string, detail: Record<string, unknown> = {}): v
   } catch {
     /* never throw from a diagnostic */
   }
+}
+
+/** Read the cached match details for these ids, skipping anything unreadable.
+ *  Pure over its reader so a check can drive it without localStorage, and
+ *  deliberately synchronous: while Riot is unreachable these are the only
+ *  details we will get, and they must not wait behind uncached ids. */
+export function cachedDetailsFor(
+  ids: string[],
+  read: (key: string) => string | null
+): Record<string, TrackerMatchDetail> {
+  const out: Record<string, TrackerMatchDetail> = {};
+  for (const id of ids) {
+    try {
+      const raw = read(`recon_match_v7_${id}`);
+      if (raw) out[id] = JSON.parse(raw) as TrackerMatchDetail;
+    } catch {
+      /* one unreadable entry must not cost the others */
+    }
+  }
+  return out;
 }
 
 /** Single shared tracker hook. Returns synchronous state from module ensureStore(). */
