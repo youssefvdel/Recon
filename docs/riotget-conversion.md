@@ -40,7 +40,7 @@ present but insufficient, or must one be written.
 | 2 | 697 | `/mmr/v1/players/{puuid}/competitiveupdates` | local `assertRiotOk` throws; empty `Matches` → `[]` | throws `RiotError` | **write** — no reader for competitive-update rows |
 | 3 | 1087 | loadout routes, pregame/coregame × 3 names | never throws: per-route `catch` + outer `catch` → `[]`; 404 is an expected phase miss | would throw on 404 unless the catch stays; same `[]` if kept | **write** — `readMatchLoadouts`, 404→null per route |
 | 4 | 1261 | `/match-details/v1/matches/{matchId}` | `try/catch` → `null`; FFA/draw → `null` | `readMatchDetails` throws `RiotError`, caller catch → `null` | **exists** — `readMatchDetails` |
-| 5 | 1494 | `/match-history/v1/history/{puuid}?start…` (5 pages) | outer catch → previous record + `failed: true` | `readMatchHistoryPage` throws `RiotError`, same catch | **exists but insufficient** — row has no `at` (`GameStartTime`), needed for cutoff paging |
+| 5 | 1494 | `/match-history/v1/history/{puuid}?start…` (5 pages) | outer catch → previous record + `failed: true` | `readMatchHistoryPage` throws `RiotError`, same catch | **exists but insufficient** — no `at` (`GameStartTime`); see decision record, recommend dedicated reader |
 | 6 | 1933/1934 | `/core-game/v1/players/{puuid}` → `/coregame/…` | 404 payload has no `MatchID` → skip; transport error → fallback; both fail → outer catch → idle | throws on 404 → an exception on every menu tick unless the reader maps 404→null | **write** — `readLivePlayer(phase, puuid)`, 404→null |
 | 7 | 1938/1939 | `/core-game/v1/matches/{id}` → `/coregame/…` | same; phase entered only when `!matchData.httpStatus` | validation replaces the `httpStatus` sniff | **write** — `readLiveMatchById(phase, matchId)`, 404→null |
 | 8 | 1950 | `/pregame/v1/players/{puuid}` | 404 → no `MatchID` → skip; transport error → outer catch | same as #6 | **write** — `readLivePlayer('pregame', puuid)` |
@@ -79,12 +79,9 @@ write stays in the caller.
 
 **5 — `fetchPlayer24hRecord`.** Pages 0–100 in steps of 20, needs
 `GameStartTime` to stop at the 24h cutoff and to sort. `MatchHistoryRow` is
-`{ id, queue }` only, so the typed reader cannot serve this today. Options:
-(a) add `at: number` to `MatchHistoryRow` and update the three existing callers
-(`src/live/actStats.ts:130`, `scripts/act-aggregate-check.ts:136,166`) — a
-behaviour-preserving additive change; or (b) add `readHistoryPageWithTime`.
-Prefer (a) only if ts-client owns those call sites; otherwise (b) keeps step 2 a
-swap.
+`{ id, queue }` only, so the typed reader cannot serve this today. Decision and
+corrected cost: **Decision record — #5** below; the recommendation is the
+dedicated reader, not widening the shared row.
 
 **6/7/8/9 — live match probing.** These are the 404-as-control-flow sites. Today
 a 404 payload is an object without `MatchID` (player routes) or with `httpStatus`
@@ -114,6 +111,20 @@ traced instead of swallowed.
 
 ## Readers to write (in `src/sources/riot.ts`, same style)
 
+### The no-match contract belongs in the signature
+
+404 is **control flow**, not an error, at the live-probe and loadout sites
+(#3, #6, #7, #8, #9). That fact must live in the type, not a comment: a shared
+alias makes the contract visible at every call site and hard to "helpfully"
+change into a throw later.
+
+```ts
+/** Riot said 404 — "nothing here", not "the read failed". Every other error
+ *  (403/451/5xx included) throws RiotError. Only by-id lookups return this;
+ *  list endpoints never return null. */
+export type NoMatch<T> = Validated<T> | null;
+```
+
 ```ts
 // 1 — generic MMR payload (or generalize readMmr<T>)
 export async function readMmrProfile<T>(
@@ -129,30 +140,80 @@ export async function readCompetitiveUpdates(
   puuid: string, shard: string, count: number, queue: string,
 ): Promise<Validated<MmrUpdateRow[]>>
 
-// 3 — loadouts, 404→null per route (caller keeps the three-name loop)
+// 3 — loadouts: one route per call, no-match per route (caller keeps the
+//     three-name loop and its per-route catch)
 export async function readMatchLoadouts(
   host: string, route: string,
-): Promise<Validated<unknown[]> | null>
+): Promise<NoMatch<unknown[]>>
 
-// 6/8 — live player, 404→null
+// 6/8 — live player
 export async function readLivePlayer(
   phase: 'pregame' | 'coregame', puuid: string,
-): Promise<Validated<{ MatchID?: string }> | null>
+): Promise<NoMatch<{ MatchID?: string }>>
 
-// 7/9 — live match by id, 404→null (caller keeps the coregame fallback name)
+// 7/9 — live match by id (caller keeps the legacy `/coregame/` fallback name)
 export async function readLiveMatchById(
   phase: 'pregame' | 'coregame', matchId: string,
-): Promise<Validated<unknown> | null>
+): Promise<NoMatch<unknown>>
+
+// 5 — timestamped history page (see decision record; option B)
+export type MatchHistoryTimeRow = MatchHistoryRow & { at: number };
+export async function readHistoryPageWithTime(
+  puuid: string, region: string, start: number, end: number,
+): Promise<Validated<MatchHistoryTimeRow[]>>
 ```
 
-All of them must call `assertRiotOk` after the 404 check, and wrap the parsed
-value in `validated()`, exactly like the existing readers.
+Each reader checks `httpStatus === 404` **before** `assertRiotOk` and returns
+`null` for it; every other error status throws `RiotError`; the parsed value is
+wrapped in `validated()`. `readLiveMatch` already implements exactly this
+contract — the new readers mirror it rather than reinvent it. `readLivePlayer`
+and `readLiveMatchById` must also keep the 404 rule when the caller retries the
+legacy `/coregame/` spelling: a 404 there is still "not in a match", never a
+failure.
+
+## Decision record — #5, the 24h record needs `GameStartTime`
+
+**The choice:** extend the shared `MatchHistoryRow` with `at`, or add a
+dedicated reader.
+
+**Corrected cost of option A (extend the row):** the compile-level cost is lower
+than the first draft claimed — `MatchHistoryRow` has **no object literals
+anywhere** (only `riot.ts` constructs it; `src/live/actStats.ts:130` reads only
+`id`/`queue`, and both scripts source-text match the call rather than the
+shape). Adding `at: number` is two lines (`interface` + one field in
+`readMatchHistoryPage`) and breaks no caller. The real cost is semantic: `at`
+becomes part of a shared row type used by act-stats and the checks, with a
+`GameStartTime ?? 0` fallback for rows that do not carry it — and the 24h pager
+today treats a missing timestamp as the oldest possible row and stops paging.
+Widening a shared type for one consumer also invites the next reader to assume
+`at` is always meaningful.
+
+**Cost of option B (dedicated reader):** ~20–25 lines: `MatchHistoryTimeRow =
+MatchHistoryRow & { at: number }` plus `readHistoryPageWithTime`, with both
+history readers delegating to one private `parseHistoryRows(j)` so the two
+cannot drift. No shared type changes, no act-stats or script edits, and the
+`GameStartTime ?? 0` semantics stay documented at the one caller that needs
+them.
+
+**Recommendation: B.** It keeps step 2 a pure swap for `tracker.ts`, adds no
+cross-owner edit to `live/actStats.ts` or the check scripts, and keeps the
+"timestamped row" contract local to the feature that needs it. A is only right
+if a second consumer of `at` appears later — then fold the field into
+`MatchHistoryRow` in its own commit.
+
+**Acceptance criteria:** `readHistoryPageWithTime` returns
+`Validated<MatchHistoryTimeRow[]>`; `at` is documented as `GameStartTime` with
+`0` = unknown; the 24h pager keeps its current break rule (`oldest < cutoff`)
+and its `failed: true` last-good catch; the scripts' `readMatchHistoryPage(`
+text checks stay untouched.
 
 ## Suggested order for step 2
 
 1. **One-line swaps, zero new code:** #12 (`readMmr`), #13
    (`readMatchHistoryPage`), #4 (`readMatchDetails`).
-2. **Extend then swap:** #5 (add `at` to `MatchHistoryRow` or new reader).
+2. **Decision then swap:** #5 — the recommendation above is the dedicated
+   reader; once `readHistoryPageWithTime` exists, the tracker site is a
+   one-line swap.
 3. **Escape-hatch batch:** #10, #11 (`readRiotValidated`, keep `.catch(() => null)`).
 4. **Write readers then swap:** #6, #7, #8, #9 (404→null), #2 (typed rows),
    #1 (generic MMR payload).
