@@ -163,6 +163,21 @@ called `.toFixed` on `undefined`, the error boundary replaced the whole view, an
 a literal `NaN` was printed in one column. Both fixed, verified in the DOM (0 NaN
 cells), asserted.
 
+## The eight believable lies are fixed
+
+Merged with **27 assertions** that now run inside `bun run verify`:
+
+| Was | Now |
+| --- | --- |
+| ACS/ADR divided by 1 when rounds were missing → **10–30× inflation** | absent |
+| K/D became the raw kill count when deaths were 0 | absent |
+| unknown rank → **tier 22**, naming a rank you don't have | no label |
+| failed display read → claimed **2560×1440@260** | UNVERIFIED, Apply disabled |
+| unknown level rendered as **level 1** | chip hidden |
+| match duration invented as rounds × 105 s | absent |
+| win % = 0% with zero matches | absent |
+| same `Math.max(1, rounds)` inflation in Prep | absent |
+
 ## Decisions I made overnight (all reversible)
 
 1. **Engine stays, presentation is rebuilt.** `src/sources/`, `src/live/`,
