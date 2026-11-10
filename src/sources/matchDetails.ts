@@ -7,7 +7,7 @@
 
 import type { MatchRoundDetail, MatchRoundPlayer, TrackerDuel, TrackerMatchDetail, TrackerPlayer } from '../types';
 import { gameData } from './gameData';
-import { normTeam, readMatchDetailsRaw, rememberPlayerNames, resolvePlayerNames } from './riot';
+import { normTeam, readMatchDetailsRaw, rememberPlayerNames, resolvePlayerNames, shardFor } from './riot';
 
 /**
  * Full match straight from Riot via the SAME endpoint TRN/Blitz call locally
@@ -128,7 +128,7 @@ export async function fetchMatchDetailDirect(region: string, matchId: string): P
   } catch {}
   // Validated reader: a Riot error payload throws instead of parsing into a
   // detail with zero players and then being CACHED under recon_match_v7_.
-  const j = await readMatchDetailsRaw(matchId, region);
+  const j = await readMatchDetailsRaw(matchId, shardFor(region));
   const { agents: amap } = await gameData();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const players: TrackerPlayer[] = ((Array.isArray(j?.players) ? j.players : []) as any[]).map((p) => {

@@ -992,7 +992,15 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   // being parsed into zero players and cached under the v7 key.
   check(
     'match details come from the validated reader',
-    mdSrc.includes('readMatchDetailsRaw(matchId, region)'),
+    mdSrc.includes('readMatchDetailsRaw(matchId, shardFor(region))'),
+    true
+  );
+  // The transport takes a hostname. A bare `region` here dials https://eu and
+  // the per-match catch in tracker.ts turns that into an empty board, so the
+  // call shape is asserted rather than trusted.
+  check(
+    'the match-details read passes the shard, never a bare region',
+    !/readMatchDetailsRaw\([^)]*,\s*region\)/.test(mdSrc),
     true
   );
   check(

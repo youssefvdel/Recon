@@ -484,10 +484,10 @@ export async function readHistoryMeta(
 /** Match details, validated, returned raw for the caller's own parser. */
 export async function readMatchDetailsRaw(
   matchId: string,
-  region: string
+  host: string
 ): Promise<Validated<Record<string, unknown>>> {
   if (!matchId) throw new RiotError('NO_MATCH_ID', 'readMatchDetailsRaw: matchId is required');
-  const j = await riotGet(region, `/match-details/v1/matches/${matchId}`);
+  const j = await riotGet(host, `/match-details/v1/matches/${matchId}`);
   assertRiotOk(j, 'match details');
   return validated(j as Record<string, unknown>);
 }
