@@ -48,10 +48,11 @@ check('pctile 30 and 35 both grade C (same tone)', tierColor(gradeFor(30)) === t
 
 // --- wiring: Overview uses the tier tone at both sites, hardcoded hexes gone ---
 const overview = await Bun.file('src/components/Overview.tsx').text();
-check('Overview imports tierColor', overview.includes("import { ScoreBadge, gradeFor, scoreTier, tierColor } from './ScoreBadge'"), true);
-check('Overview derives tone from the grade', overview.includes('const g = gradeFor(s.p);') && overview.includes('const tone = tierColor(g);'), true);
-check('underline tinted by tone', overview.includes('borderBottomColor: tone'), true);
-check('grade letter tinted by tone', overview.includes('style={{ color: tone }}'), true);
+/* The Tracker Score card is retired from Overview (direction B), so the wiring
+ * assertions here became retirement assertions: the mapping function above is
+ * still guarded, and Overview must no longer carry the card at all. */
+check('Overview no longer imports the grade/tier tone', !/gradeFor|tierColor|scoreTier/.test(overview), true);
+check('the retired Tracker Score card is gone', !/Tracker Score/.test(overview), true);
 check('old per-stat hexes gone', !/#2cd5f6|#3ae374|#ff7675|#f5b041/.test(overview), true);
 
 if (failures > 0) {

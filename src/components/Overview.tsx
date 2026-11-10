@@ -1,815 +1,292 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
-import {AlertTriangle, Gamepad2, Lock, RefreshCw} from 'lucide-react';
-import { tierName, type RiotClientStatus } from '../utils/tracker';
-import { StatValue } from './StatValue';
-import { formatKd, formatPct } from '../utils/format';
-import { ScoreBadge, gradeFor, scoreTier, tierColor } from './ScoreBadge';
-import {
-  fetchTrnActStats,
-  fetchTrnAgents,
-  resetTrnCooldown,
-  type TrnActStats,
-  type TrnAgentStat,
-} from '../utils/trn';
-import killsIcon from '../assets/icons/kills.png';
-import firstbloodsIcon from '../assets/icons/firstbloods.png';
-import acesIcon from '../assets/icons/aces.png';
 import { useTrackerData } from '../hooks/useTrackerData';
-import { useCountUp } from '../hooks/useCountUp';
-import { OverviewSkeletons } from './TrackerSkeletons';
-import { CustomDropdown } from './ValorantConfig';
+import { fetchTrnActStats, type TrnActStats } from '../utils/trn';
+import type { TrackerMatchDetail, TrackerMmrPoint } from '../types';
+import { Skeleton } from './primitives/Skeleton';
+import { ActHeader, type ActMetric } from './primitives/ActHeader';
+import { FeedRow } from './primitives/FeedRow';
+import { Sparkline } from './primitives/Sparkline';
+import { StatusLine } from './primitives/StatusLine';
+import { MatchDetailModal } from './MatchDetailModal';
+import type { Outcome } from './primitives/colors';
 
-const rise = {
-  hidden: { opacity: 0, y: 12 },
-  show: (i: number) => ({
-    opacity: 1,
-    y: 0,
-    transition: { delay: i * 0.04, duration: 0.3, ease: 'easeOut' as const },
-  }),
-};
-
-/** Hit-zone body figure: head/body/legs glow with their share of hits. */
-const BodyFigure: React.FC<{ head: number; body: number; legs: number }> = ({ head, body, legs }) => {
-  const max = Math.max(head, body, legs, 1);
-  const o = (v: number): number => +(0.22 + 0.78 * (v / max)).toFixed(2);
-  const fill = '#00c3ff';
-  return (
-    <svg width="48" height="92" viewBox="0 0 48 92" className="shrink-0" aria-label="Hit zones">
-      {/* head */}
-      <circle cx="24" cy="9" r="7.5" fill={fill} opacity={o(head)} />
-      {/* arms */}
-      <rect x="6" y="22" width="6" height="26" rx="3" fill={fill} opacity={o(body)} />
-      <rect x="36" y="22" width="6" height="26" rx="3" fill={fill} opacity={o(body)} />
-      {/* torso */}
-      <rect x="15" y="20" width="18" height="32" rx="6" fill={fill} opacity={o(body)} />
-      {/* legs */}
-      <rect x="15.5" y="54" width="7.5" height="32" rx="3.5" fill={fill} opacity={o(legs)} />
-      <rect x="25" y="54" width="7.5" height="32" rx="3.5" fill={fill} opacity={o(legs)} />
-    </svg>
-  );
-};
+/* Overview, direction B ("Season Stream"): one 940px column, no cards.
+ * The act record is the hero, the season is a feed, the history is a list.
+ *
+ * Every number here comes from the store or from a cached match detail. A
+ * segment with no source is OMITTED — never a zero, a dash or an ellipsis —
+ * and there is no per-day series anywhere: `games` is one entry per match, so
+ * the feed is a list of matches, not a trend curve. */
 
 export const shortAct = (label: string): string => {
-  const m = label.match(/(?:V|Season\s*)(\d+)[\s:·]*ACT\s*([IVXLCDM]+|\d+)/i);
-  if (m) {
-    const ep = m[1];
-    const act = m[2];
-    const romans: Record<string, string> = { I: '1', II: '2', III: '3', IV: '4', V: '5', VI: '6' };
-    const num = romans[act.toUpperCase()] ?? act;
-    return `V${ep}:A${num}`;
-  }
-  return label
-    .replace('Episode', 'E')
-    .replace(/V(\d+)/, 'V$1')
-    .replace('ACT', 'A')
-    .replace(/\s*·\s*/g, ':');
+  const m = label.match(/episode\s*(\d+).*?act\s*(\d+)/i);
+  if (m) return `E${m[1]}A${m[2]}`;
+  const a = label.match(/act\s*(\d+)/i);
+  return a ? `A${a[1]}` : label;
 };
 
-const pctLabel = (p: number): string => (p >= 50 ? `Top ${Math.round(100 - p)}%` : `Bottom ${Math.round(p)}%`);
-
-const BigTile: React.FC<{
-  label: string;
-  numeric?: number;
-  format?: (n: number) => string;
-  index: number;
-  pending?: boolean;
-  emptyReason?: string;
-}> = ({
-  label,
-  numeric,
-  format = (n) => String(Math.round(n)),
-  index,
-  pending = false,
-  emptyReason = 'Not loaded yet',
-}) => {
-  // Round to displayed precision: recomputed floats (51.05 vs 51.0500001)
-  // across background refreshes must not replay the 0-to-target tween.
-  const stable = numeric === undefined ? undefined : Math.round(numeric * 1000) / 1000;
-  const v = useCountUp(stable ?? 0, 900, stable !== undefined);
-  return (
-    <motion.div variants={rise} custom={index}
-      className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 flex flex-col gap-1 min-w-0">
-      <span className="text-micro font-bold uppercase tracking-wider text-m3-outline flex items-center gap-1">
-        {label}
-      </span>
-      <span className="font-display font-black text-2xl sm:text-3xl text-m3-on-surface tabular-nums truncate mt-0.5">
-        {stable !== undefined ? format(v) : pending ? '…' : <StatValue reason={emptyReason} />}
-      </span>
-    </motion.div>
-  );
+const HOUR = 3_600_000;
+const relAge = (when: number): string => {
+  const d = Date.now() - when;
+  if (!Number.isFinite(d) || d < 0) return '';
+  if (d < HOUR) return `${Math.max(1, Math.round(d / 60_000))}m`;
+  if (d < 24 * HOUR) return `${Math.round(d / HOUR)}h`;
+  return `${Math.round(d / (24 * HOUR))}d`;
 };
 
-const SmallStat: React.FC<{ label: string; value: React.ReactNode; tone?: 'win' | 'loss' }> = ({ label, value, tone }) => (
-  <div className="flex flex-col gap-0.5 min-w-0">
-    <span className="text-micro font-bold uppercase tracking-[0.12em] text-m3-outline flex items-center gap-1">
-      {label}
-    </span>
-    <span className={`font-display font-extrabold text-base sm:text-lg tabular-nums truncate ${tone === 'win' ? 'text-m3-mint' : tone === 'loss' ? 'text-m3-coral' : 'text-m3-on-surface'}`}>{value}</span>
-  </div>
-);
+const myTeamIn = (detail: TrackerMatchDetail | undefined, puuid: string): string | null =>
+  detail?.players?.find((p) => p.puuid?.toLowerCase() === puuid?.toLowerCase())?.team ?? null;
 
-/** "The client is not usable" state: the TRUE reason plus a retry, instead of
- *  endless skeletons when the Riot client is logged out or crashed
- *  (ux-gaps #2). `riotClientDetail` comes from the tracker probe. */
-const RiotClientNotice: React.FC<{
-  status: RiotClientStatus;
-  detail: string;
-  busy: boolean;
-  onRetry: () => void;
-}> = ({ status, detail, busy, onRetry }) => {
-  const action =
-    status === 'locked-out'
-      ? 'Sign in to Riot Client, then retry.'
-      : status === 'crashed'
-        ? 'Restart Riot Client, then retry.'
-        : status === 'not-running'
-          ? 'Start Riot Client or VALORANT, then retry.'
-          : 'Open Riot Client, then retry.';
-  return (
-    <div className="h-full min-h-0 max-w-6xl mx-auto w-full px-4 sm:px-6 py-3.5 pb-8 flex items-center justify-center">
-      <div className="rounded-3xl bg-m3-surface-container border border-m3-outline-subtle p-8 flex flex-col items-center text-center gap-3 max-w-sm shadow-m3-1">
-        <span className="w-14 h-14 rounded-3xl bg-m3-primary-container/50 border border-m3-primary/30 flex items-center justify-center">
-          <Gamepad2 className="w-7 h-7 text-m3-primary" />
-        </span>
-        <h2 className="font-display font-black text-lg text-m3-on-surface">{detail || (status === 'ok' ? 'Riot Client is closed' : 'Riot Client is unavailable')}</h2>
-        <p className="text-xs text-m3-outline leading-relaxed">
-          {action} Cached stats come back as soon as it answers.
-        </p>
-        <button
-          onClick={onRetry}
-          disabled={busy}
-          className="h-9 px-5 rounded-xl bg-m3-primary text-m3-on-primary text-xs font-bold flex items-center gap-2 cursor-pointer disabled:opacity-50 hover:brightness-110"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${busy ? 'animate-spin' : ''}`} />
-          <span>Retry</span>
-        </button>
-      </div>
-    </div>
-  );
-};
-
-/* tracker.gg has been unavailable since 2026-11-02, but the store can still
- * hold its last act blob. Seven days is where "recent stats" stops being true
- * for a competitive tracker, so anything older renders as archived. The
- * reference time is captured once at module load — a session never runs long
- * enough for that to change the verdict, and it keeps render pure. */
-const TRN_STALE_MS = 7 * 24 * 60 * 60 * 1000;
-const APP_STARTED_AT = Date.now();
-
-const PLAYLISTS = [
-  { value: 'competitive', label: 'Competitive' },
-  { value: 'unrated', label: 'Unrated' },
-];
+const PLAYLISTS = [{ value: 'competitive', label: 'Competitive' }];
 
 export const Overview: React.FC = () => {
-  const { profile, seasonNames, seasonOrder, tierIcons, agentInfo, agg, trn, trnAgents, trnPrev, trnFetchedAt, games, detailsById, isLoading, clientClosed, riotClient, riotClientDetail, refresh } =
+  const { profile, seasonNames, seasonOrder, agentInfo, agg, trn, trnPrev, trnAgents, games, mapById, detailsById, isLoading, clientClosed, refresh } =
     useTrackerData();
 
-  const [playlist, setPlaylist] = useState('competitive');
+  const [playlist] = useState('competitive');
   const [seasonId, setSeasonId] = useState('');
   const [selStats, setSelStats] = useState<TrnActStats | null>(null);
-  const [selAgents, setSelAgents] = useState<TrnAgentStat[] | null>(null);
-  const [selLoading, setSelLoading] = useState(false);
   const [selError, setSelError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-  // True only for the live act + competitive — the one case where the store's
-  // `trn`/`agg` snapshots describe the selection.
+  const [selLoading, setSelLoading] = useState(false);
+  const [openMatch, setOpenMatch] = useState<TrackerMmrPoint | null>(null);
+
   const isDefault = playlist === 'competitive' && !seasonId;
+  const S = isDefault ? trn : selStats;
+
+  /* A past act is fetched on demand, exactly as before. While it loads the page
+   * shows no numbers for it rather than zeros, and a failure is one line. */
+  useEffect(() => {
+    if (isDefault || !profile?.name) return;
+    let alive = true;
+    setSelLoading(true);
+    setSelError(null);
+    fetchTrnActStats(profile.name, profile.tag, seasonId, playlist)
+      .then((r) => alive && setSelStats(r.stats))
+      .catch((e) => alive && setSelError(String(e?.message ?? e)))
+      .finally(() => alive && setSelLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [isDefault, seasonId, playlist, profile?.name, profile?.tag]);
 
   const seasonOptions = useMemo(() => {
     if (!profile) return [];
-    const played = new Set(profile.seasons.filter((s) => s.games > 0).map((s) => s.id.toLowerCase()));
-    const order = seasonOrder.length > 0 ? seasonOrder : [...played];
-    const ids = [profile.currentSeasonId.toLowerCase(), ...order.filter((id) => id !== profile.currentSeasonId.toLowerCase() && played.has(id))];
-    return [
-      { value: '', label: seasonNames[profile.currentSeasonId.toLowerCase()] ?? 'Current Act' },
-      ...ids.slice(1).map((id) => ({ value: id, label: seasonNames[id] ?? shortAct(id) })),
-    ];
+    const current = profile.currentSeasonId?.toLowerCase();
+    const played = new Set(profile.seasons?.filter((s) => s.games > 0).map((s) => s.id.toLowerCase()) ?? []);
+    const order = (seasonOrder?.length ? seasonOrder : [...played]).filter((id) => id !== current && played.has(id));
+    return order.map((id) => ({ value: id, label: seasonNames?.[id] ?? shortAct(id) }));
   }, [profile, seasonOrder, seasonNames]);
 
-  useEffect(() => {
-    if (isDefault || !profile) {
-      setSelStats(null);
-      setSelAgents(null);
-      setSelError(null);
-      setSelLoading(false);
-      return;
-    }
-    let live = true;
-    setSelLoading(true);
-    // Drop the previous act's numbers the moment the selection changes. Holding
-    // them would show act A's stats under act B's label, which is exactly how
-    // switching acts appeared to do nothing.
-    setSelStats(null);
-    setSelAgents(null);
-    setSelError(null);
-    const sid = seasonId || profile.currentSeasonId;
-    Promise.all([
-      fetchTrnActStats(profile.name, profile.tag, sid, playlist).then((r) => r.stats).catch(() => null),
-      fetchTrnAgents(profile.name, profile.tag, sid, playlist).catch(() => []),
-    ]).then(([st, ag]) => {
-      if (!live) return;
-      if (!st) {
-        // Plain empty state — no countdowns, no jargon. Data appears silently
-        // when the cooldown expires; Retry just refetches.
-        setSelError('tracker.gg did not return stats for this act.');
-        setSelLoading(false);
-        return;
-      }
-      setSelStats(st);
-      setSelAgents(ag);
-      setSelLoading(false);
+  const actLabel = isDefault
+    ? seasonNames?.[profile?.currentSeasonId?.toLowerCase() ?? ''] ?? 'Current Act'
+    : seasonNames?.[seasonId] ?? shortAct(seasonId);
+
+  /* Record: the act blob when we have it, else the profile's own totals. */
+  const wins = isDefault ? S?.wins ?? profile?.wins : S?.wins;
+  const losses = isDefault ? S?.losses ?? (profile ? profile.games - profile.wins : undefined) : S?.losses;
+  const record = wins !== undefined && losses !== undefined ? `${wins}–${losses}` : undefined;
+  const winPct = isDefault
+    ? S?.winPct ?? (profile && profile.games > 0 ? Math.round((profile.wins / profile.games) * 100) : undefined)
+    : S?.winPct;
+
+  const metrics: ActMetric[] = [];
+  if (S?.acs !== undefined) metrics.push({ label: 'ACS', value: String(Math.round(S.acs)) });
+  const kd = S?.kd ?? agg?.kd;
+  if (kd !== undefined && kd > 0) metrics.push({ label: 'K/D', value: kd.toFixed(2) });
+  const adr = S?.adr ?? agg?.adr;
+  if (adr !== undefined && adr > 0) metrics.push({ label: 'ADR', value: String(Math.round(adr)) });
+  if (S?.hsPct !== undefined && S.hsPct > 0) metrics.push({ label: 'HS', value: `${Math.round(S.hsPct)}%` });
+
+  const rankLine = profile?.rank ? (
+    <>
+      {profile.rank}
+      {profile.tier > 2 && profile.rr > 0 ? ` · ${profile.rr} RR` : ''}
+    </>
+  ) : undefined;
+
+  const topAgent = isDefault ? trnAgents?.[0] : undefined;
+  const agentLine = topAgent ? (
+    <span className="inline-flex items-center gap-1.5">
+      {agentInfo?.[topAgent.agent]?.icon && (
+        <img src={agentInfo[topAgent.agent].icon} alt="" className="w-5 h-5 object-contain" />
+      )}
+      <span>
+        {topAgent.agent} · {topAgent.matches} games
+        {topAgent.winPct > 0 ? ` · ${Math.round(topAgent.winPct)}% win` : ''}
+      </span>
+    </span>
+  ) : undefined;
+
+  /* Feed: one row per match, newest first. A row without a cached detail shows
+   * its map and age and nothing else — no verdict, no score, no placeholder. */
+  const feed = useMemo(() => {
+    const list = [...(games ?? [])].sort((a, b) => (b.when ?? 0) - (a.when ?? 0)).slice(0, 5);
+    return list.map((g) => {
+      const detail = detailsById?.[g.matchId];
+      const team = myTeamIn(detail, profile?.puuid ?? '');
+      const mine = team && detail ? detail.teamScore?.[team] : undefined;
+      const theirs = team && detail ? detail.teamScore?.[team === 'Blue' ? 'Red' : 'Blue'] : undefined;
+      const me = detail?.players?.find((p) => p.puuid?.toLowerCase() === profile?.puuid?.toLowerCase());
+      const score = mine !== undefined && theirs !== undefined ? `${mine}–${theirs}` : undefined;
+      const verdict: Outcome | null =
+        mine !== undefined && theirs !== undefined
+          ? mine > theirs
+            ? 'win'
+            : mine < theirs
+              ? 'loss'
+              : 'draw'
+          : null;
+      const kda = me ? `${me.kills}/${me.deaths}/${me.assists}` : '';
+      /* ACS is combat score per round — computed from the detail, never stored. */
+      const acs = me && me.rounds > 0 ? Math.round(me.score / me.rounds) : undefined;
+      const sub = [me?.agent, kda, acs !== undefined ? `${acs} ACS` : ''].filter(Boolean).join(' · ') || undefined;
+      const rounds = detail?.rounds;
+      const spark = rounds && team ? rounds.map((r) => (r.winningTeam === team ? 2 : 1)) : [];
+      return { g, map: mapById?.[g.matchId], age: g.when ? relAge(g.when) : undefined, verdict, score, sub, spark };
     });
-    return () => {
-      live = false;
-    };
-  }, [isDefault, playlist, seasonId, profile, reloadKey]);
+  }, [games, detailsById, mapById, profile?.puuid]);
 
-  // `trn` and `agg` describe the CURRENT act only, so they may only be used when
-  // the selection IS the current act. A past act that has not loaded reads as
-  // "not loaded" — never as the live act's numbers.
-  const S = isDefault ? trn : selStats;
-  const agents = isDefault ? trnAgents : selAgents ?? [];
-  const statsReady = isDefault || !!selStats;
-  const losses = S ? S.losses : isDefault && profile ? Math.max(0, profile.games - profile.wins) : 0;
-  const wins = S ? S.wins : isDefault ? profile?.wins ?? 0 : 0;
-  const winPct = S ? S.winPct : isDefault && profile && profile.games > 0 ? (profile.wins / profile.games) * 100 : 0;
-  const kdTile = S?.kd ?? (isDefault ? agg?.kd : undefined);
-  const adrTile = S?.adr ?? (isDefault ? agg?.adr : undefined);
-  const kills = S?.kills ?? (isDefault ? agg?.kills : undefined);
-  const deaths = S?.deaths ?? (isDefault ? agg?.deaths : undefined);
-  const assists = S?.assists ?? (isDefault ? agg?.assists : undefined);
-  const kpiReady = !selLoading && statsReady;
-  /* Only the CURRENT act's trn blob is timestamped; past-act fetches are
-     per-selection and self-evidently fresh. */
-  const trnAsOf = trnFetchedAt ? new Date(trnFetchedAt) : null;
-  const trnStale =
-    !!trn && (!trnFetchedAt || APP_STARTED_AT - trnFetchedAt > TRN_STALE_MS);
-  const trnAsOfLabel = trnAsOf
-    ? `${trnAsOf.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${trnAsOf.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-      })}`
-    : null;
-  /* One placeholder rule for the whole page: a number, an ellipsis while a
-     fetch is in flight, or the house dash with a reason (docs/audit #1). */
-  const statText = (v: number | undefined, reason: string): React.ReactNode =>
-    v !== undefined ? v.toLocaleString('en-US') : isLoading || selLoading ? '…' : <StatValue reason={reason} />;
-
-  const recentActs = useMemo(() => {
-    if (!profile) return [];
-    const getOrderIdx = (id: string): number => {
-      const i = seasonOrder.indexOf(id.toLowerCase());
-      return i === -1 ? Number.MAX_SAFE_INTEGER : i;
-    };
-    return (profile.seasons ?? [])
+  const history = useMemo(() => {
+    if (!profile?.seasons) return [];
+    const current = profile.currentSeasonId?.toLowerCase();
+    return profile.seasons
+      .filter((s) => s.id.toLowerCase() !== current)
       .filter((s) => s.games > 0)
-      .sort((a, b) => getOrderIdx(a.id) - getOrderIdx(b.id))
-      .slice(0, 3);
-  }, [profile, seasonOrder]);
+      .map((s) => ({
+        id: s.id,
+        label: seasonNames?.[s.id.toLowerCase()] ?? shortAct(s.id),
+        games: s.games,
+        kd: trnPrev?.[s.id]?.kd,
+      }));
+  }, [profile, seasonNames, trnPrev]);
 
-  const topAgent = agents[0] ?? null;
-  const topAgentMeta = topAgent
-    ? Object.values(agentInfo).find((a) => a.name.toLowerCase() === topAgent.agent.toLowerCase())
-    : null;
-
-  // Accuracy over the LAST 20 MATCHES (real hit-location data from match details),
-  // not the act-wide TRN aggregate. Matches whose cached detail has no hit
-  // breakdown are skipped so a stale/empty cache can't drag the numbers down.
-  const recentHit = useMemo(() => {
-    const puuid = profile?.puuid;
-    if (!puuid) return null;
-    const ordered =
-      (games ?? []).map((g) => g.matchId).filter(Boolean).length > 0
-        ? (games ?? []).map((g) => g.matchId).filter(Boolean)
-        : Object.keys(detailsById ?? {});
-
-    let head = 0;
-    let body = 0;
-    let legs = 0;
-    let used = 0;
-    for (const id of ordered) {
-      if (used >= 20) break;
-      const d = detailsById?.[id];
-      if (!d?.players) continue;
-      const me = d.players.find((p) => p.puuid === puuid);
-      if (!me) continue;
-      const h = me.headshots || 0;
-      const b = me.bodyshots || 0;
-      const l = me.legshots || 0;
-      if (h + b + l === 0) continue; // hit data unavailable for this match
-      head += h;
-      body += b;
-      legs += l;
-      used++;
-    }
-    if (used === 0) return null;
-    return { head, body, legs, used, total: head + body + legs };
-  }, [games, detailsById, profile]);
-
-  // Prefer the last-20 sample; fall back to the act-wide TRN aggregate when no
-  // local match details carry hit data yet.
-  const accHead = recentHit ? recentHit.head : S?.headHits ?? 0;
-  const accBody = recentHit ? recentHit.body : S?.bodyHits ?? 0;
-  const accLegs = recentHit ? recentHit.legs : S?.legHits ?? 0;
-  const accHeadPct = recentHit ? (recentHit.head / recentHit.total) * 100 : S?.hsPct ?? 0;
-  const hitTotal = accHead + accBody + accLegs;
-  const bodyPct = hitTotal > 0 ? (accBody / hitTotal) * 100 : 0;
-  const legPct = hitTotal > 0 ? (accLegs / hitTotal) * 100 : 0;
-  const accLabel = recentHit ? `Last ${recentHit.used}` : 'Act-wide';
+  const status = selError
+    ? `Could not load ${actLabel}: ${selError}`
+    : clientClosed
+      ? 'Riot Client closed — showing cached results'
+      : undefined;
 
   if (!profile) {
-    // Any client state other than "ok" gets the real reason and a retry, never
-    // skeletons forever (a stale lockfile used to look identical to a load).
-    if (riotClient !== 'ok' || clientClosed) {
-      return (
-        <RiotClientNotice
-          status={riotClient}
-          detail={riotClientDetail}
-          busy={isLoading}
-          onRetry={() => void refresh()}
-        />
-      );
-    }
     return (
-      <div className="h-full min-h-0 max-w-6xl mx-auto w-full overflow-hidden px-6 pt-3 pb-6">
-        <OverviewSkeletons />
+      <div className="max-w-[940px] mx-auto w-full px-6 pt-6 pb-10">
+        {isLoading || clientClosed ? (
+          <Skeleton lines={3} />
+        ) : (
+          <div className="flex flex-col items-start gap-3 text-xs text-m3-outline font-mono">
+            <span>No Riot profile yet — open Riot Client and refresh.</span>
+            <button type="button" onClick={() => refresh()} className="text-m3-primary hover:underline cursor-pointer">
+              Retry
+            </button>
+          </div>
+        )}
       </div>
     );
   }
 
   return (
-    <motion.div initial="hidden" animate="show" className="h-full min-h-0 flex flex-col justify-start gap-2 max-w-6xl mx-auto w-full px-6 pt-3 pb-3 overflow-y-auto custom-scrollbar">
-      <header className="shrink-0 px-1">
-        <h2 className="font-display font-black text-xl text-m3-on-surface tracking-tight">Overview</h2>
-        <p className="text-xs text-m3-outline mt-0.5">Your competitive profile at a glance</p>
-      </header>
-      {trn && trnStale && (
-        <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/40 flex items-start gap-2 shrink-0">
-          <AlertTriangle className="w-3.5 h-3.5 text-amber-300 shrink-0 mt-0.5" />
-          <span className="text-xs text-amber-200 font-medium leading-snug">
-            Tracker.gg stats are archived — last fetched{' '}
-            {trnAsOfLabel ?? 'on an unknown date'}. tracker.gg has been unavailable since 2 Nov;
-            these numbers are not live.
-          </span>
-        </div>
-      )}
-      {(riotClient !== 'ok' || clientClosed) && (
-        <div className="p-2.5 rounded-xl bg-m3-surface-container-high border border-m3-outline-subtle text-m3-on-surface-variant text-xs font-medium flex items-center justify-between shrink-0">
-          <div className="flex items-center space-x-2">
-            <Gamepad2 className="w-3.5 h-3.5 text-m3-outline shrink-0" />
-            <span>{riotClientDetail || 'Riot Client is closed'} — showing cached stats</span>
-          </div>
-          <button onClick={() => void refresh()} disabled={isLoading} className="text-m3-primary hover:underline text-xs ml-3 cursor-pointer font-bold shrink-0">
-            Retry
-          </button>
-        </div>
-      )}
-      {/* Header filter bar */}
-      <div className="flex items-center justify-between gap-3 shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-40">
-            <div className="text-micro font-bold uppercase tracking-[0.14em] text-m3-outline mb-1 px-1">Playlist</div>
-            <CustomDropdown value={playlist} options={PLAYLISTS} onChange={(v) => setPlaylist(v)} />
-          </div>
-          <div className="w-48">
-            <div className="text-micro font-bold uppercase tracking-[0.14em] text-m3-outline mb-1 px-1">Act</div>
-            <CustomDropdown value={seasonId} options={seasonOptions} onChange={(v) => setSeasonId(v)} />
-          </div>
+    <div className="max-w-[940px] mx-auto w-full px-6 pt-6 pb-10 flex flex-col">
+      <div className="flex items-start justify-between gap-4">
+        <ActHeader
+          eyebrow={`${actLabel} · ${PLAYLISTS[0].label}`}
+          record={selLoading ? undefined : record}
+          winPct={selLoading ? undefined : winPct !== undefined ? `${Math.round(winPct)}%` : undefined}
+          metrics={selLoading ? [] : metrics}
+          rankLine={rankLine}
+          agentLine={agentLine}
+        />
+        <div className="flex items-center gap-3 shrink-0 pt-1 text-micro font-mono text-m3-outline">
+          <select
+            aria-label="Playlist"
+            value={playlist}
+            disabled
+            className="bg-transparent appearance-none cursor-default uppercase tracking-wider"
+          >
+            <option value="competitive">Competitive</option>
+          </select>
+          {seasonOptions.length > 0 && (
+            <select
+              aria-label="Act"
+              value={seasonId}
+              onChange={(e) => setSeasonId(e.target.value)}
+              className="bg-transparent appearance-none cursor-pointer uppercase tracking-wider hover:text-m3-on-surface"
+            >
+              <option value="">Current</option>
+              {seasonOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 
-      {/* Act fetch failed — say so instead of silently showing the live act. */}
-      {selError && !isDefault && (
-        <div className="p-2.5 rounded-xl bg-m3-coral/10 border border-m3-coral/40 text-xs flex items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <AlertTriangle className="w-3.5 h-3.5 text-m3-coral shrink-0" />
-            <span className="text-m3-on-surface font-medium leading-snug">
-              {selError} Nothing is shown rather than the current act's numbers.
-            </span>
+      <StatusLine
+        reason={status}
+        onRetry={() => {
+          setSelError(null);
+          refresh();
+        }}
+      />
+
+      <section className="mt-8">
+        <h2 className="text-micro font-mono uppercase tracking-[0.18em] text-m3-outline flex items-baseline justify-between">
+          <span>Matches</span>
+          {games?.length ? <span className="tabular-nums">{games.length}</span> : null}
+        </h2>
+        {feed.length === 0 ? (
+          <p className="mt-3 text-micro font-mono text-m3-outline">
+            No matches cached — open Riot Client to refresh.
+          </p>
+        ) : (
+          <div className="mt-1">
+            {feed.map(({ g, map, age, verdict, score, sub, spark }) => (
+              <FeedRow
+                key={g.matchId}
+                age={age}
+                map={map}
+                verdict={verdict}
+                score={score}
+                sub={sub}
+                spark={<Sparkline values={spark} />}
+                onOpen={() => setOpenMatch(g)}
+              />
+            ))}
           </div>
-          <button
-            onClick={() => {
-              resetTrnCooldown();
-              setReloadKey((k) => k + 1);
-            }}
-            className="shrink-0 px-2.5 py-1 rounded-lg bg-m3-coral/20 hover:bg-m3-coral/30 border border-m3-coral/40 text-m3-coral font-bold cursor-pointer transition-colors"
-          >
-            Retry
-          </button>
-        </div>
-      )}
+        )}
+      </section>
 
-      {profile && (
-        <>
-          {/* Primary KPI Tiles */}
-          <section className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 shrink-0">
-            <BigTile index={2} label="Win %" numeric={kpiReady ? winPct : undefined} format={(n) => formatPct(n, 0)} pending={selLoading} emptyReason="Stats for this act have not loaded yet" />
-            <BigTile index={3} label="K/D" numeric={kpiReady ? kdTile : undefined} format={(n) => formatKd(n)} pending={selLoading || isLoading} emptyReason="K/D has not loaded yet" />
-            <BigTile
-              index={4}
-              label="Headshot %"
-              numeric={S ? S.hsPct : recentHit ? accHeadPct : undefined}
-              format={(n) => formatPct(n, 1)}
-              pending={selLoading || isLoading}
-              emptyReason="No hit data recorded yet"
-            />
-            <BigTile index={5} label="Damage/Round" numeric={kpiReady ? adrTile : undefined} format={(n) => String(Math.round(n))} pending={selLoading || isLoading} emptyReason="Damage per round has not loaded yet" />
-          </section>
-
-          {/* Secondary stats row */}
-          <motion.section variants={rise} custom={6}
-            className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 shadow-m3-1 shrink-0">
-            <div className="grid grid-cols-4 sm:grid-cols-8 gap-3">
-              <SmallStat label="Wins" value={String(wins)} tone="win" />
-              <SmallStat label="Losses" value={String(losses)} tone="loss" />
-              <SmallStat label="Kills" value={statText(kills, 'Kills have not loaded yet')} />
-              <SmallStat label="Deaths" value={statText(deaths, 'Deaths have not loaded yet')} />
-              <SmallStat label="Assists" value={statText(assists, 'Assists have not loaded yet')} />
-              <SmallStat label="Headshots" value={statText(S?.headshots ?? recentHit?.head, 'Headshots have not loaded yet')} />
-              <SmallStat label="Flawless" value={statText(S?.flawless ?? (isDefault ? agg?.flawless : undefined), 'Flawless rounds have not loaded yet')} />
-              <SmallStat label="Clutches" value={statText(S?.clutches ?? (isDefault ? agg?.clutches : undefined), 'Clutches have not loaded yet')} />
-            </div>
-          </motion.section>
-
-          {/* Middle Row: Combat Highlights | Top Agent | Accuracy */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 shrink-0">
-            {/* Combat Highlights */}
-            <motion.section variants={rise} custom={7}
-              className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 flex flex-col justify-between shadow-m3-1">
-              <h3 className="font-display font-bold text-sm text-m3-on-surface mb-2">Combat Highlights</h3>
-              <div className="flex flex-col gap-3 flex-1 justify-around">
-                <div className="flex items-center gap-3">
-                  <img src={killsIcon} alt="" aria-hidden="true" className="w-10 h-10 rounded-full shrink-0 shadow-sm" />
-                  <div>
-                    <div className="text-[11px] font-medium text-m3-outline">Match Kills (Best)</div>
-                    <div className="font-display font-extrabold text-lg text-m3-on-surface tabular-nums leading-tight">
-                      {statText(S?.bestKills, 'Combat highlights have not loaded yet')}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <img src={firstbloodsIcon} alt="" aria-hidden="true" className="w-10 h-10 rounded-full shrink-0 shadow-sm" />
-                  <div>
-                    <div className="text-[11px] font-medium text-m3-outline">First Kills / Deaths</div>
-                    <div className="font-display font-extrabold text-lg text-m3-on-surface tabular-nums leading-tight">
-                      {S
-                        ? `${S.firstKills} / ${S.firstDeaths}`
-                        : isDefault && agg
-                          ? `${agg.firstKills} / ${agg.firstDeaths}`
-                          : statText(undefined, 'Combat highlights have not loaded yet')}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <img src={acesIcon} alt="" aria-hidden="true" className="w-10 h-10 rounded-full shrink-0 shadow-sm" />
-                  <div>
-                    <div className="text-[11px] font-medium text-m3-outline">Aces</div>
-                    <div className="font-display font-extrabold text-lg text-m3-on-surface tabular-nums leading-tight">
-                      {statText(S?.aces ?? (isDefault ? agg?.aces : undefined), 'Combat highlights have not loaded yet')}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </motion.section>
-
-            {/* Top Agent (matches reference layout) */}
-            <motion.section variants={rise} custom={8}
-              className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 flex flex-col justify-between shadow-m3-1">
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-display font-bold text-sm text-m3-on-surface">Top Agent</h3>
-                  {topAgentMeta?.role ? (
-                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-m3-surface-container-high border border-m3-outline-subtle text-[11px] font-medium text-m3-outline">
-                      {topAgentMeta.roleIcon && (
-                        <img src={topAgentMeta.roleIcon} alt="" aria-hidden="true" className="w-3 h-3 object-contain opacity-80" />
-                      )}
-                      <span>{topAgentMeta.role}</span>
-                    </div>
-                  ) : null}
-                </div>
-                {topAgent ? (
-                  <div className="flex items-center gap-3">
-                    {topAgentMeta?.icon ? (
-                      <img
-                        src={topAgentMeta.icon}
-                        alt={topAgent.agent}
-                        className="w-12 h-12 rounded-lg object-cover bg-m3-mint/10 border border-m3-outline-subtle shrink-0"
-                      />
-                    ) : (
-                      <div className="w-12 h-12 rounded-lg bg-m3-surface-container-high shrink-0" />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="font-display font-extrabold text-lg text-m3-on-surface leading-tight truncate">
-                        {topAgent.agent}
-                      </div>
-                      <div className="text-xs text-m3-outline mt-0.5 truncate">
-                        {topAgent.hours > 0 ? `${topAgent.hours} hrs, ` : ''}{topAgent.matches} Matches
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  /* Shape-holding placeholder: icon slot + name lines, same
-                     heights as a filled agent row, so the card never shrinks
-                     to a one-liner while agent stats load. */
-                  <div className="flex items-center gap-3" aria-hidden="true">
-                    <div className="w-12 h-12 rounded-lg bg-m3-surface-container-high shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-display font-extrabold text-lg text-m3-outline/40 leading-tight">
-                        —
-                      </div>
-                      <div className="text-xs text-m3-outline/40 mt-0.5">— Matches</div>
-                    </div>
-                  </div>
-                )}
-              </div>
-              {topAgent ? (
-                <div className="grid grid-cols-4 gap-2 pt-3 mt-3 border-t border-m3-outline-subtle/50">
-                  <div>
-                    <div className="text-[11px] font-semibold text-m3-outline">Win %</div>
-                    <div className="font-display font-bold text-base sm:text-lg text-m3-on-surface tabular-nums mt-0.5">
-                      {formatPct(topAgent.winPct, 0)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[11px] font-semibold text-m3-outline">K/D</div>
-                    <div className="font-display font-bold text-base sm:text-lg text-m3-on-surface tabular-nums mt-0.5">
-                      {formatKd(topAgent.kd)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[11px] font-semibold text-m3-outline">ADR</div>
-                    <div className="font-display font-bold text-base sm:text-lg text-m3-on-surface tabular-nums mt-0.5">
-                      {Math.round(topAgent.adr)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[11px] font-semibold text-m3-outline">ACS</div>
-                    <div className="font-display font-bold text-base sm:text-lg text-m3-on-surface tabular-nums mt-0.5">
-                      {Math.round(topAgent.acs)}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-4 gap-2 pt-3 mt-3 border-t border-m3-outline-subtle/50" aria-hidden="true">
-                  {['Win %', 'K/D', 'ADR', 'ACS'].map((label) => (
-                    <div key={label}>
-                      <div className="text-[11px] font-semibold text-m3-outline/40">{label}</div>
-                      <div className="font-display font-bold text-base sm:text-lg text-m3-outline/40 tabular-nums mt-0.5">
-                        —
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </motion.section>
-
-            {/* Accuracy */}
-            <motion.section variants={rise} custom={9}
-              className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 flex flex-col justify-between shadow-m3-1">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="font-display font-bold text-sm text-m3-on-surface">Accuracy</h3>
-                <span className="text-xs text-m3-outline font-medium" data-tip={recentHit ? `Last ${recentHit.used} matches` : 'Act-wide from Tracker.gg'}>
-                  {accLabel}
+      {history.length > 0 && (
+        <section className="mt-8">
+          <h2 className="text-micro font-mono uppercase tracking-[0.18em] text-m3-outline">Act history</h2>
+          <div className="mt-1">
+            {history.map((h) => (
+              <div
+                key={h.id}
+                className="grid grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-4 py-2.5 border-b border-m3-outline-subtle/50"
+              >
+                <span className="text-micro font-mono text-m3-outline tabular-nums">{h.games}</span>
+                <span className="text-xs text-m3-on-surface truncate">{h.label}</span>
+                <span className="text-micro font-mono text-m3-outline tabular-nums">
+                  {h.games} games{h.kd ? ` · ${h.kd.toFixed(2)} K/D` : ''}
                 </span>
               </div>
-              {hitTotal > 0 ? (
-                <div className="flex gap-4 items-center flex-1 py-1">
-                  <BodyFigure head={accHeadPct} body={bodyPct} legs={legPct} />
-                  <div className="flex-1 flex flex-col justify-around h-full gap-2 text-[12px] min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-m3-outline font-medium w-10">Head</span>
-                      <span className="font-mono font-bold text-base text-m3-primary">{formatPct(accHeadPct, 1)}</span>
-                      <span className="font-mono text-xs text-m3-outline tabular-nums ml-auto">{accHead.toLocaleString()} hits</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-m3-outline font-medium w-10">Body</span>
-                      <span className="font-mono font-bold text-base text-m3-on-surface">{formatPct(bodyPct, 1)}</span>
-                      <span className="font-mono text-xs text-m3-outline tabular-nums ml-auto">{accBody.toLocaleString()} hits</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-m3-outline font-medium w-10">Legs</span>
-                      <span className="font-mono font-bold text-base text-m3-on-surface">{formatPct(legPct, 1)}</span>
-                      <span className="font-mono text-xs text-m3-outline tabular-nums ml-auto">{accLegs.toLocaleString()} hits</span>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-xl bg-m3-surface-container-low/60 border border-m3-outline-subtle/60 p-3 text-xs text-m3-outline flex items-start gap-2">
-                  <Lock className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                  <span>
-                    {isLoading || selLoading
-                      ? 'Hit data loading…'
-                      : 'No hit-location data yet — play a match with the Riot Client open.'}
-                  </span>
-                </div>
-              )}
-            </motion.section>
+            ))}
           </div>
-
-          {/* Lower Row: Previous Acts & Tracker Score sharing 50/50.
-              Both cards always render: when their data is missing (Riot
-              downtime, fresh account) placeholder columns hold the exact
-              geometry so the grid never collapses or reflows. */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 shrink-0">
-            {/* Previous Acts (3 compact columns) */}
-            <motion.section variants={rise} custom={10}
-              className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 flex flex-col justify-between shadow-m3-1">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="font-display font-bold text-sm text-m3-on-surface">Previous Acts</h3>
-                <span className="text-micro text-m3-outline uppercase tracking-wider font-semibold">Competitive History</span>
-              </div>
-              <div className="grid grid-cols-3 gap-2 flex-1 items-center text-center py-1">
-                {recentActs.length > 0 ? (
-                  recentActs.map((s) => {
-                    const isCurrent = s.id.toLowerCase() === profile?.currentSeasonId.toLowerCase();
-                    const prev = trnPrev[s.id.toLowerCase()];
-                    // "Peak Rating" means the HIGHEST tier reached in that act —
-                    // including the live act, where the current tier can sit below
-                    // the peak (e.g. peaked Ascendant 3, now Ascendant 2).
-                    const rankTier = s.tier;
-                    const rName = tierName(s.tier);
-                    const kdVal = isCurrent ? (S?.kd ?? agg?.kd ?? prev?.kd) : prev?.kd;
-                    const matchesCount = isCurrent
-                      ? (S ? S.wins + S.losses + S.ties : profile.games)
-                      : (prev?.matches ?? s.games);
-                    const icon = tierIcons[rankTier];
-
-                    return (
-                      <div key={s.id} className="flex flex-col items-center justify-between h-full py-1">
-                        <span className="text-[11px] font-bold text-m3-outline uppercase tracking-wider">
-                          {(() => {
-                            // Never render the raw act id: a UUID on screen is
-                            // internal data leaking into the UI, the same class
-                            // as a raw hostname. Unknown acts get a neutral
-                            // label until seasonNames hydrates.
-                            const label = seasonNames[s.id.toLowerCase()];
-                            return label ? shortAct(label) : 'Act';
-                          })()}
-                        </span>
-                        <div className="my-1.5 flex items-center justify-center">
-                          {icon ? (
-                            <img src={icon} alt={rName} className="w-11 h-11 object-contain drop-shadow-sm" />
-                          ) : (
-                            <div className="w-11 h-11 rounded-full bg-m3-surface-container-high" />
-                          )}
-                        </div>
-                        <span className="text-micro font-bold uppercase tracking-wider text-m3-outline/70">
-                          Peak Rating
-                        </span>
-                        <div className="font-display font-bold text-xs sm:text-sm text-m3-on-surface leading-tight mt-0.5 truncate max-w-full">
-                          {rName}
-                        </div>
-                        <div className="text-micro text-m3-outline mt-1 font-medium truncate max-w-full">
-                          K/D{' '}
-                          {kdVal !== undefined ? (
-                            <strong className="text-m3-on-surface font-mono font-bold">{formatKd(kdVal)}</strong>
-                          ) : (
-                            <StatValue reason="K/D has not loaded for this act" />
-                          )}{' '}
-                          Matches <strong className="text-m3-on-surface font-mono font-bold">{matchesCount}</strong>
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  /* Shape-holding placeholders: same geometry as a filled
-                     column (label, 44px emblem slot, caption, name, K/D
-                     line) so missing history never collapses the card. */
-                  [0, 1, 2].map((i) => (
-                    <div key={`prev-ph-${i}`} className="flex flex-col items-center justify-between h-full py-1" aria-hidden="true">
-                      <span className="text-[11px] font-bold text-m3-outline/40 uppercase tracking-wider">—</span>
-                      <div className="my-1.5 flex items-center justify-center">
-                        <div className="w-11 h-11 rounded-full bg-m3-surface-container-high" />
-                      </div>
-                      <span className="text-micro font-bold uppercase tracking-wider text-m3-outline/40">
-                        Peak Rating
-                      </span>
-                      <div className="font-display font-bold text-xs sm:text-sm text-m3-outline/40 leading-tight mt-0.5">
-                        —
-                      </div>
-                      <div className="text-micro text-m3-outline/40 mt-1 font-medium">
-                        K/D — Matches —
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </motion.section>
-
-            {/* Tracker Score — always rendered; the placeholder mirrors the
-                filled geometry (header, 44px badge + score row, 4 stat
-                columns) so a missing TRN payload never reflows the grid. */}
-            <motion.section variants={rise} custom={11}
-              className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-3.5 flex flex-col justify-between shadow-m3-1"
-              style={trn ? {
-                borderColor: `${scoreTier(trn.trnScore).color}44`,
-                background: `linear-gradient(180deg, ${scoreTier(trn.trnScore).color}15 0%, transparent 60%)`,
-              } : undefined}>
-              {trn ? (
-                <>
-                <div>
-                  <div className="flex items-baseline justify-between gap-2 mb-2">
-                    <h3 className="font-display font-bold text-sm text-m3-on-surface">Tracker Score</h3>
-                    <span
-                      className={`text-micro font-mono ${trnStale ? 'text-amber-300' : 'text-m3-outline'}`}
-                      data-tip={trnStale ? 'Cached tracker.gg data — not live' : undefined}
-                    >
-                      {trnAsOfLabel
-                        ? `${trnStale ? 'cached · ' : ''}as of ${trnAsOfLabel}`
-                        : 'cached · age unknown'}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2.5 my-1">
-                    <ScoreBadge tier={scoreTier(trn.trnScore).tier} size={44} />
-                    <div className="font-display font-black text-3xl text-m3-on-surface tabular-nums leading-none">
-                      {trn.trnScore}
-                    </div>
-                    <div className="text-micro font-bold text-m3-outline px-2 py-0.5 rounded-md bg-m3-surface-container-high border border-m3-outline-subtle ml-1">
-                      Tracker Score - Tier {scoreTier(trn.trnScore).tier}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between gap-1 mt-3 pt-2">
-                  {[
-                    { label: 'Round Win %', v: formatPct(trn.roundWinPct, 1), p: trn.roundWinPctile },
-                    { label: 'KAST', v: formatPct(trn.kast, 1), p: trn.kastPctile },
-                    { label: 'ACS', v: trn.acs.toFixed(1), p: trn.acsPctile },
-                    { label: 'DDΔ/Round', v: String(Math.round(trn.damageDelta / Math.max(1, trn.rounds))), p: trn.ddPctile },
-                  ].map((s, i) => {
-                    const g = gradeFor(s.p);
-                    const tone = tierColor(g);
-                    return (
-                      <React.Fragment key={s.label}>
-                        {i > 0 && <span className="text-m3-outline-subtle font-bold text-xs px-0.5 select-none">+</span>}
-                        <div
-                          className="flex-1 text-center pb-1.5 border-b-2"
-                          style={{ borderBottomColor: tone }}
-                        >
-                          <div className="text-micro font-bold uppercase tracking-wider text-m3-outline truncate">
-                            {s.label}
-                          </div>
-                          <div className="text-[15px] font-mono font-bold text-m3-on-surface mt-0.5 tabular-nums">
-                            {s.v}
-                          </div>
-                          <div className="text-micro font-mono font-bold truncate mt-0.5" style={{ color: tone }}>
-                            <span>{g}</span> <span className="text-m3-outline font-normal">· {pctLabel(s.p)}</span>
-                          </div>
-                        </div>
-                      </React.Fragment>
-                    );
-                  })}
-                </div>
-                </>
-              ) : (
-                /* Shape-holding placeholder: header + 44px badge slot + score
-                   row, then the 4 stat columns with identical text sizes,
-                   margins, and separators. */
-                <>
-                  <div aria-hidden="true">
-                    <h3 className="font-display font-bold text-sm text-m3-on-surface mb-2">Tracker Score</h3>
-                    <div className="flex items-center gap-2.5 my-1">
-                      <div className="w-[44px] h-[44px] rounded-full bg-m3-surface-container-high shrink-0" />
-                      <div className="font-display font-black text-3xl text-m3-outline/40 tabular-nums leading-none">
-                        —
-                      </div>
-                      <div className="text-micro font-bold text-m3-outline/40 px-2 py-0.5 rounded-md bg-m3-surface-container-high border border-m3-outline-subtle ml-1">
-                        No score yet
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between gap-1 mt-3 pt-2" aria-hidden="true">
-                    {['Round Win %', 'KAST', 'ACS', 'DDΔ/Round'].map((label, i) => (
-                      <React.Fragment key={label}>
-                        {i > 0 && <span className="text-m3-outline-subtle font-bold text-xs px-0.5 select-none">+</span>}
-                        <div className="flex-1 text-center pb-1.5 border-b-2 border-m3-outline-subtle/40">
-                          <div className="text-micro font-bold uppercase tracking-wider text-m3-outline/40 truncate">
-                            {label}
-                          </div>
-                          <div className="text-[15px] font-mono font-bold text-m3-outline/40 mt-0.5 tabular-nums">
-                            —
-                          </div>
-                          <div className="text-micro font-mono font-bold truncate mt-0.5 text-m3-outline/40">
-                            —
-                          </div>
-                        </div>
-                      </React.Fragment>
-                    ))}
-                  </div>
-                </>
-              )}
-            </motion.section>
-          </div>
-        </>
+        </section>
       )}
-      {/* Floating notice toast: fixed overlay with zero layout impact.
-          The countdown ring around the icon depletes over TOAST_MS, then
-          the toast dismisses itself. */}
-    </motion.div>
+
+      <MatchDetailModal
+        isOpen={!!openMatch}
+        onClose={() => setOpenMatch(null)}
+        detail={openMatch ? detailsById?.[openMatch.matchId] ?? null : null}
+        game={openMatch}
+        mapName={openMatch ? mapById?.[openMatch.matchId] ?? '' : ''}
+        queue={openMatch?.queueId ?? 'competitive'}
+        puuid={profile.puuid}
+        tierIcons={{}}
+        agentInfo={agentInfo ?? {}}
+      />
+    </div>
   );
 };
-
-
