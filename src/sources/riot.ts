@@ -462,12 +462,7 @@ export async function mapLimit<T, R>(
   return out;
 }
 
-export const normTeam = (t: unknown): string => {
-  const s = String(t ?? '').toLowerCase();
-  if (s === 'blue') return 'Blue';
-  if (s === 'red') return 'Red';
-  return String(t ?? '');
-};
+export { normTeam } from './roundMap';
 
 /* ------------------------------------------------------------------ *
  * Typed readers for the act-stats cluster (added for the act-stats split).
