@@ -241,3 +241,25 @@ local `assertRiotOk` (`tracker.ts:548`), keep the function private (its step-1
 note at `tracker.ts:350` says exactly that), and let `readRiotValidated` be the
 only door into the transport. That commit is tracker's "no raw reads left"
 receipt — build it from the table above, not from grep.
+
+## What an empty match row means (A23-1, settled)
+
+An empty row means **there is no cached detail for this match** — not that the
+read failed and not that the board is broken. The signed-out board shows 20
+rows because the snapshot holds 20 games; the newest 9 have never been fetched,
+so they are placeholders by design while the client is unreachable. The 11 with
+a `recon_match_v7_*` entry carry real scores.
+
+The log states it explicitly, which is the point:
+
+```
+[tracker] cached merge {"reason":"from-cache","ids":20,"ready":11}
+```
+
+`ids=20, ready=11` is the honest description: twenty rows known, eleven with
+details. QA's first read sampled the top of the list (the 9 newest) and
+concluded the whole board was empty; the fiber audit showed `rows=20 ·
+withDetail=11 · cachedWithDetail=11`.
+
+If you are chasing this again: read `ready` from that line before assuming a
+render bug, and remember that the merge runs **before** any network attempt.
