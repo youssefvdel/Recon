@@ -46,12 +46,14 @@ const Def: React.FC<{ label: string; value?: string | number | null }> = ({ labe
 export interface AgentTableProps {
   rows: TrnAgentStat[];
   agentInfo: Record<string, { name: string; icon: string; role: string; roleIcon: string }>;
+  /* One expansion across BOTH sections, so the state lives in Prep. */
+  openKey: string | null;
+  onOpenChange: (key: string | null) => void;
 }
 
-export const AgentTable: React.FC<AgentTableProps> = ({ rows, agentInfo }) => {
+export const AgentTable: React.FC<AgentTableProps> = ({ rows, agentInfo, openKey, onOpenChange }) => {
   const [sortKey, setSortKey] = useState<SortKey>('hours');
   const [sortAsc, setSortAsc] = useState(false);
-  const [open, setOpen] = useState<string | null>(null);
 
   const sorted = useMemo(() => {
     const val = (a: TrnAgentStat): number | string =>
@@ -101,12 +103,12 @@ export const AgentTable: React.FC<AgentTableProps> = ({ rows, agentInfo }) => {
       </thead>
       <tbody>
         {sorted.map((a) => {
-          const isOpen = open === a.agentKey;
+          const isOpen = openKey === a.agentKey;
           const meta = Object.values(agentInfo).find((x) => x.name.toLowerCase() === a.agent.toLowerCase());
           return (
             <React.Fragment key={a.agentKey}>
               <tr
-                onClick={() => setOpen(isOpen ? null : a.agentKey)}
+                onClick={() => onOpenChange(isOpen ? null : a.agentKey)}
                 className={`border-b border-m3-outline-subtle/50 cursor-pointer text-xs ${
                   isOpen ? 'bg-m3-surface-container-low/40' : 'hover:bg-m3-surface-container-high/25'
                 }`}

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { CustomDropdown } from './ValorantConfig';
 import { Skeleton } from './primitives/Skeleton';
 import { usePrepData } from './prep/usePrepData';
@@ -13,6 +13,9 @@ import { MapTable } from './prep/MapTable';
 export const Prep: React.FC = () => {
   const { actId, setActId, actOptions, actLoading, agents, maps, isLoading, agentInfo } = usePrepData();
   const loading = isLoading || actLoading;
+  /* ONE expansion across both sections: opening a map row collapses an agent
+   * row, and vice versa. The spec calls this out explicitly. */
+  const [open, setOpen] = useState<{ section: 'agents' | 'maps'; key: string } | null>(null);
 
   return (
     <div className="max-w-[940px] mx-auto w-full px-6 pt-6 pb-10 flex flex-col">
@@ -29,7 +32,12 @@ export const Prep: React.FC = () => {
           {loading && agents.length === 0 ? (
             <Skeleton lines={4} />
           ) : (
-            <AgentTable rows={agents} agentInfo={agentInfo} />
+            <AgentTable
+              rows={agents}
+              agentInfo={agentInfo}
+              openKey={open?.section === 'agents' ? open.key : null}
+              onOpenChange={(key) => setOpen(key ? { section: 'agents', key } : null)}
+            />
           )}
         </div>
       </section>
@@ -39,7 +47,11 @@ export const Prep: React.FC = () => {
           Maps · {maps.length}
         </h3>
         <div className="mt-1">
-          {loading && maps.length === 0 ? <Skeleton lines={4} /> : <MapTable rows={maps} />}
+          {loading && maps.length === 0 ? <Skeleton lines={4} /> : <MapTable
+              rows={maps}
+              openKey={open?.section === 'maps' ? open.key : null}
+              onOpenChange={(key) => setOpen(key ? { section: 'maps', key } : null)}
+            />}
         </div>
       </section>
     </div>

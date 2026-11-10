@@ -151,7 +151,9 @@ export function usePrepData() {
       e.score += me.score;
       e.headshots += me.headshots;
       e.hits += me.headshots + me.bodyshots + me.legshots;
-      e.timeMs += me.playtimeMs || me.rounds * 100 * 1000;
+      /* Only measured playtime counts. `rounds * 100s` was a plausible-looking
+       * estimate presented as Time Played — the twelfth fabricated value. */
+      if (me.playtimeMs > 0) e.timeMs += me.playtimeMs;
 
       byAgent.set(me.agent, e);
     }
@@ -285,7 +287,9 @@ export function usePrepData() {
         e.score += me.score;
         e.headshots += me.headshots;
         e.hits += me.headshots + me.bodyshots + me.legshots;
-        e.timeMs += me.playtimeMs || me.rounds * 100 * 1000;
+        /* Only measured playtime counts. `rounds * 100s` was a plausible-looking
+       * estimate presented as Time Played — the twelfth fabricated value. */
+      if (me.playtimeMs > 0) e.timeMs += me.playtimeMs;
 
         if (me.agent && me.agent !== '?') {
           const a = e.agentCounts.get(me.agent) ?? { matches: 0, wins: 0 };

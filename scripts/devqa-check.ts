@@ -2103,6 +2103,22 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('no invented KAST fallback', /kast:\s*72\b/.test(agents), false);
   check('no overall K/D under a side label (defense)', /defenseKd\s*\|\|\s*a?\.?kd/.test(agents), false);
   check('no overall K/D under a side label (attack)', /attackKd\s*\|\|\s*a?\.?kd/.test(agents), false);
+  {
+    const prep = readFileSync(new URL('../src/components/Prep.tsx', import.meta.url), 'utf8');
+    const agentT = readFileSync(new URL('../src/components/prep/AgentTable.tsx', import.meta.url), 'utf8');
+    const mapT = readFileSync(new URL('../src/components/prep/MapTable.tsx', import.meta.url), 'utf8');
+    const data = readFileSync(new URL('../src/components/prep/usePrepData.ts', import.meta.url), 'utf8');
+    /* ONE expansion across both sections: Prep owns it, the tables receive it. */
+    check('Prep owns the single expansion', /useState<\{ section: 'agents' \| 'maps'; key: string \} \| null>\(null\)/.test(prep), true);
+    check('AgentTable takes the key', /openKey: string \| null/.test(agentT), true);
+    check('MapTable takes the key', /openKey: string \| null/.test(mapT), true);
+    check('AgentTable keeps no private open state', /const \[open, setOpen\]/.test(agentT), false);
+    check('MapTable keeps no private open state', /const \[open, setOpen\]/.test(mapT), false);
+    /* The twelfth fabrication: a duration invented from the round count. */
+    check('no invented duration from rounds', /rounds \* 100 \* 1000/.test(data), false);
+    check('playtime is only counted when measured', /if \(me\.playtimeMs > 0\) e\.timeMs \+= me\.playtimeMs/.test(data), true);
+  }
+
   check('no fake map playtime', /return '0m'/.test(maps), false);
 }
 

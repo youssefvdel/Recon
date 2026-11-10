@@ -35,12 +35,14 @@ const Def: React.FC<{ label: string; value?: string | number | null }> = ({ labe
 
 export interface MapTableProps {
   rows: TrnMapStat[];
+  /* One expansion across BOTH sections, so the state lives in Prep. */
+  openKey: string | null;
+  onOpenChange: (key: string | null) => void;
 }
 
-export const MapTable: React.FC<MapTableProps> = ({ rows }) => {
+export const MapTable: React.FC<MapTableProps> = ({ rows, openKey, onOpenChange }) => {
   const [sortKey, setSortKey] = useState<SortKey>('winPct');
   const [sortAsc, setSortAsc] = useState(false);
-  const [open, setOpen] = useState<string | null>(null);
 
   const sorted = useMemo(() => {
     const val = (m: TrnMapStat): number | string => (sortKey === 'name' ? m.name.toLowerCase() : Number(m[sortKey] ?? 0));
@@ -90,11 +92,11 @@ export const MapTable: React.FC<MapTableProps> = ({ rows }) => {
       </thead>
       <tbody>
         {sorted.map((m) => {
-          const isOpen = open === m.key;
+          const isOpen = openKey === m.key;
           return (
             <React.Fragment key={m.key}>
               <tr
-                onClick={() => setOpen(isOpen ? null : m.key)}
+                onClick={() => onOpenChange(isOpen ? null : m.key)}
                 className={`border-b border-m3-outline-subtle/50 cursor-pointer text-xs ${
                   isOpen ? 'bg-m3-surface-container-low/40' : 'hover:bg-m3-surface-container-high/25'
                 }`}
