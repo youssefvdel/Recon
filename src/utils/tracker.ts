@@ -347,8 +347,10 @@ function healMapName(s: LiveMatchState | null): LiveMatchState | null {
 
 export async function fetchMmrDirect(region: string, name: string, tag: string): Promise<TrackerProfile> {
   const ent = await getEntitlements();
-  const j = await riotGet(shardFor(region), `/mmr/v1/players/${ent.puuid}`);
-  assertRiotOk(j, 'MMR');
+  // Validated reader (docs/riotget-conversion.md #1). The parse stays here —
+  // this site needs the full profile shape, not the LocalRank row.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const j = await readMmrProfile(ent.puuid, shardFor(region), (payload) => payload as any);
   const latest = j?.LatestCompetitiveUpdate ?? {};
   const currentSeasonId = String(latest?.SeasonID ?? '').toLowerCase();
   const seasons = j?.QueueSkills?.competitive?.SeasonalInfoBySeasonID ?? {};
@@ -481,22 +483,17 @@ export async function fetchCompetitiveUpdates(
   queue = 'competitive'
 ): Promise<TrackerMmrPoint[]> {
   const ent = await getEntitlements();
-  const queueParam = queue ? `&queue=${encodeURIComponent(queue)}` : '';
-  const j = await riotGet(
-    shardFor(region),
-    `/mmr/v1/players/${ent.puuid}/competitiveupdates?startIndex=0&endIndex=${count}${queueParam}`
-  );
-  assertRiotOk(j, 'competitive history');
-  const list = Array.isArray(j?.Matches) ? j.Matches : [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return list.map((g: any) => ({
-    tier: tierName(Number(g?.TierAfterUpdate ?? 0)),
-    rr: Number(g?.RankedRatingAfterUpdate ?? 0),
-    change: Number(g?.RankedRatingEarned ?? 0),
-    matchId: String(g?.MatchID ?? ''),
-    mapId: String(g?.MapID ?? ''),
-    when: Number(g?.MatchStartTime ?? 0),
-    queueId: String(g?.QueueID ?? queue ?? 'competitive'),
+  // Validated reader (docs/riotget-conversion.md #2): rows arrive typed, so
+  // this call site no longer sees raw Riot field names.
+  const rows = await readCompetitiveUpdates(ent.puuid, shardFor(region), count, queue);
+  return rows.map((g) => ({
+    tier: tierName(g.tierAfterUpdate),
+    rr: g.rrAfterUpdate,
+    change: g.rrEarned,
+    matchId: g.matchId,
+    mapId: g.mapId,
+    when: g.matchStartTime,
+    queueId: g.queueId || queue || 'competitive',
   }));
 }
 
@@ -925,7 +922,7 @@ export type { PersistedRank } from '../cache/namespace';
 // external importers; a re-export does not bring the name into this scope).
 import { evictOldest, pruneSupersededCaches, persistLiveRank, readPersistedRank } from '../cache/namespace';
 import { inCurrentLobby, setCurrentLobbyPuuids } from '../live/lobbyScope';
-import { riotGet, getEntitlements, clearEntitlements, assertRiotOk, readMmr, readMatchHistoryPage, readMatchDetails, readRiotValidated } from '../sources/riot';
+import { riotGet, getEntitlements, clearEntitlements, readMmr, readMatchHistoryPage, readMatchDetails, readRiotValidated, readLivePlayer, readLiveMatchById, readMmrProfile, readCompetitiveUpdates, readHistoryPageWithTime } from '../sources/riot';
 export { riotPut, riotPost, getEntitlements, clearEntitlements } from '../sources/riot';
 import {
   enqueueTrnSpread,
@@ -1297,16 +1294,11 @@ export async function fetchPlayer24hRecord(
       const entries: { id: string; at: number; queue: string }[] = [];
       for (let page = 0; page < 5; page++) {
         const start = page * 20;
-        const j = await riotGet(
-          shardFor(region),
-          `/match-history/v1/history/${puuid}?startIndex=${start}&endIndex=${start + 20}`
-        );
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rows = ((Array.isArray(j?.History) ? j.History : []) as any[]).map((h) => ({
-          id: String(h?.MatchID ?? ''),
-          at: Number(h?.GameStartTime ?? 0),
-          queue: String(h?.QueueID ?? ''),
-        }));
+        // Validated reader (docs/riotget-conversion.md #5, decision B): the
+        // timestamped page keeps the 24h cutoff and the sort here, but a Riot
+        // error now throws RiotError into this function's catch — where the
+        // record is preserved and marked failed.
+        const rows = await readHistoryPageWithTime(puuid, shardFor(region), start, start + 20);
         if (rows.length === 0) break;
         entries.push(...rows);
         const oldest = rows[rows.length - 1]?.at ?? 0;
@@ -1743,15 +1735,16 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
 
     // 1. Check Coregame (in-match)
     try {
-      const corePlayer = await riotGet(glz, `/core-game/v1/players/${ent.puuid}`).catch(() =>
-        riotGet(glz, `/coregame/v1/players/${ent.puuid}`)
-      );
-      if (corePlayer?.MatchID) {
-        matchId = corePlayer.MatchID;
-        matchData = await riotGet(glz, `/core-game/v1/matches/${matchId}`).catch(() =>
-          riotGet(glz, `/coregame/v1/matches/${matchId}`)
-        );
-        if (matchData && !matchData.httpStatus) {
+      // Validated reader (docs/riotget-conversion.md #6/#7): null means Riot
+      // answered 404 — "not in a match" — and a failed read throws, which the
+      // catch below turns into probeFailed. The reader owns the legacy
+      // `/coregame/` retry, and it only retries after a 404, so a real 403 is
+      // no longer masked by the fallback.
+      const corePlayer = await readLivePlayer('coregame', ent.puuid);
+      if (corePlayer?.matchId) {
+        matchId = corePlayer.matchId;
+        matchData = await readLiveMatchById('coregame', matchId);
+        if (matchData) {
           phase = 'coregame';
         }
       }
@@ -1762,11 +1755,12 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
     // 2. Check Pregame (agent select) if not in coregame
     if (phase === 'idle') {
       try {
-        const prePlayer = await riotGet(glz, `/pregame/v1/players/${ent.puuid}`);
-        if (prePlayer?.MatchID) {
-          matchId = prePlayer.MatchID;
-          matchData = await riotGet(glz, `/pregame/v1/matches/${matchId}`);
-          if (matchData && !matchData.httpStatus) {
+        // Sites #8/#9, same contract as #6/#7.
+        const prePlayer = await readLivePlayer('pregame', ent.puuid);
+        if (prePlayer?.matchId) {
+          matchId = prePlayer.matchId;
+          matchData = await readLiveMatchById('pregame', matchId);
+          if (matchData) {
             phase = 'pregame';
             // Safe Agent Pre-Picker: safely hover preferred agent once per match
             import('./prepick')

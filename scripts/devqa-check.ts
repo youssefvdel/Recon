@@ -1229,6 +1229,50 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
     true
   );
 
+  // Site #5: the timestamped page keeps the cutoff/sort here; the read is typed.
+  check(
+    'the 24h record pages through the timestamped reader',
+    /readHistoryPageWithTime\(puuid, shardFor\(region\), start, start \+ 20\)/.test(trackerSrc2),
+    true
+  );
+
+  // Sites #1/#2: both mmr endpoints go through typed readers.
+  check(
+    'the mmr profile uses the validated reader',
+    /readMmrProfile\(ent\.puuid, shardFor\(region\)/.test(trackerSrc2) &&
+      !/assertRiotOk\(j, 'MMR'\)/.test(trackerSrc2),
+    true
+  );
+  // Scoped to the function: `TierAfterUpdate` legitimately appears elsewhere
+  // (parseLocalRank reads it from a different payload).
+  const cuFn = trackerSrc2.slice(
+    trackerSrc2.indexOf('export async function fetchCompetitiveUpdates'),
+    trackerSrc2.indexOf('export async function detectRegion')
+  );
+  check(
+    'competitive updates use the typed rows',
+    /readCompetitiveUpdates\(ent\.puuid, shardFor\(region\), count, queue\)/.test(cuFn) &&
+      !/TierAfterUpdate/.test(cuFn) &&
+      /g\.rrEarned/.test(cuFn),
+    true
+  );
+
+  // Sites #6-#9: the live probes go through NoMatch readers, and the 404 and
+  // failure paths stay distinct at the call site.
+  check(
+    'the live probes use the NoMatch readers',
+    /readLivePlayer\('coregame', ent\.puuid\)/.test(trackerSrc2) &&
+      /readLivePlayer\('pregame', ent\.puuid\)/.test(trackerSrc2) &&
+      /readLiveMatchById\('coregame', matchId\)/.test(trackerSrc2) &&
+      /readLiveMatchById\('pregame', matchId\)/.test(trackerSrc2),
+    true
+  );
+  check(
+    'the probes no longer hand-roll the legacy fallback',
+    /riotGet\(glz, `\/coregame\/v1\/players/.test(trackerSrc2),
+    false
+  );
+
   // Sites #6-#9, caller half: a FAILED probe is not an empty menu.
   const failedProbeMarks = (trackerSrc2.match(/probeFailed = true;/g) ?? []).length;
   check('both live probes mark a failure', failedProbeMarks, 2);
@@ -1280,7 +1324,7 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   // failure mode this whole refactor exists to remove is a comment nobody
   // recomputes.
   const rawSites = (trackerSrc2.match(/await riotGet\(/g) ?? []).length;
-  const stated = Number((riotSrc.match(/makes (\d+) raw `riotGet` calls/) ?? [])[1] ?? -1);
+  const stated = Number((riotSrc.match(/makes (\d+) raw `riotGet` calls?/) ?? [])[1] ?? -1);
   check('the header states the real number of raw call sites', stated, rawSites);
 
   // Two states, both asserted. While sites remain, the header may not claim
