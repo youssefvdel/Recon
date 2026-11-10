@@ -1424,6 +1424,23 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('readSnapshot no longer discards a stale snapshot', /return null;\s*\}\s*\n\}/.test(parseBody) && !/SNAPSHOT_TTL/.test(parseBody), true);
 }
 
+// --- notices are a toast, never a layout banner ----------------------------
+{
+  const { readFileSync } = await import('node:fs');
+  const appSrc = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const mhSrc2 = readFileSync(new URL('../src/components/MatchHistory.tsx', import.meta.url), 'utf8');
+  const toastSrc = readFileSync(new URL('../src/components/NoticeToast.tsx', import.meta.url), 'utf8');
+  const appToastSrc = readFileSync(new URL('../src/components/AppToast.tsx', import.meta.url), 'utf8');
+
+  check('the toast is app-level, not per view', /<AppToast \/>/.test(appSrc), true);
+  check('no view renders a banner in the layout flow', /\{banner && \(/.test(mhSrc2), false);
+  check('it dismisses itself after 6 s', /TOAST_MS = 6000/.test(toastSrc), true);
+  check('and announces politely for screen readers', /role="status"/.test(toastSrc) && /aria-live="polite"/.test(toastSrc), true);
+  // Dedupe is by reason: the age changes hourly and must not re-fire.
+  check('dedupe is by reason, not by text', /function bannerReason\(/.test(appToastSrc) && /dismissedReason\.current/.test(appToastSrc), true);
+  check('a dismissed reason stays dismissed until it changes', /reason === dismissedReason\.current/.test(appToastSrc), true);
+}
+
 // --- the pre-round plate is a first-class HUD widget -----------------------
 {
   const { readFileSync } = await import('node:fs');

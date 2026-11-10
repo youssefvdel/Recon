@@ -415,7 +415,7 @@ const MatchRow: React.FC<{
 };
 
 export const MatchHistory: React.FC = () => {
-  const { profile, games, queueById, mapById, detailsById, agentInfo, tierIcons, trnMatchTrs, isLoading, banner, setBanner } =
+  const { profile, games, queueById, mapById, detailsById, agentInfo, tierIcons, trnMatchTrs, isLoading } =
     useTrackerData();
   const [agentFilter, setAgentFilter] = useState('All');
   const [mapFilter, setMapFilter] = useState('All');
@@ -668,19 +668,6 @@ export const MatchHistory: React.FC = () => {
           <p className="text-xs text-m3-outline mt-0.5">Competitive matches, newest first</p>
         </header>
 
-        {banner && (
-          <div className="p-2.5 rounded-xl bg-m3-primary-container/40 border border-m3-primary/40 text-m3-on-primary-container text-xs font-semibold flex items-center justify-between shrink-0">
-            <div className="flex items-center space-x-2">
-              <Check className="w-3.5 h-3.5 text-m3-primary shrink-0" />
-              <span>{banner}</span>
-            </div>
-            <button
-              onClick={() => setBanner(null)}
-              className="text-m3-primary hover:underline text-xs ml-3 cursor-pointer font-bold shrink-0">
-              Dismiss
-            </button>
-          </div>
-        )}
 
         {/* Filters */}
         <div className="flex items-center gap-2 flex-wrap shrink-0">
