@@ -449,7 +449,7 @@ export const AccountsView: React.FC<{
             ))}
           </div>
         ) : accounts.length === 0 ? (
-          <div className="mx-1 mb-2 px-3 py-2.5 rounded-xl bg-m3-surface-container-high/60 border border-m3-outline-subtle/60 flex items-center gap-2">
+          <div className="mx-1 mb-2 pl-3 py-1 border-l-2 border-m3-outline-subtle/60 flex items-center gap-2">
             <Users className="w-4 h-4 text-m3-outline shrink-0" />
             <span className="text-[10.5px] text-m3-outline leading-snug">
               No saved logins yet — sign into Riot Client and this list fills itself.
@@ -517,7 +517,7 @@ export const AccountsView: React.FC<{
                   return (
                     <div
                       key={m.id}
-                      className="rounded-xl border bg-m3-surface-container-low border-m3-outline-subtle/70 hover:border-m3-outline px-3 py-2.5 transition-colors"
+                      className="border-b border-m3-outline-subtle/30 last:border-b-0 hover:bg-m3-surface-container-high/40 px-3 py-2.5 transition-colors"
                     >
                       <div className="flex items-center gap-2.5">
                         <div className="w-9 h-9 rounded-xl bg-m3-surface-container-high border border-m3-outline-subtle text-m3-outline flex items-center justify-center font-display font-black text-base shrink-0">
