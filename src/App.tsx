@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import { AppToast } from './components/AppToast';
 import { motion, AnimatePresence, MotionConfig } from 'framer-motion';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
@@ -521,6 +522,7 @@ export const App: React.FC = () => {
     <div className="h-screen w-screen bg-m3-surface text-m3-on-surface flex overflow-hidden selection:bg-m3-primary-container selection:text-m3-on-primary-container antialiased font-sans">
       <TooltipHost />
       {/* Left Sidebar Navigation */}
+      <AppToast />
       <Sidebar
         currentTab={effectiveTab}
         onSelectTab={(tab) => {

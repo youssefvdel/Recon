@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { AlertTriangle, Check, Gamepad2, Lock, RefreshCw, X } from 'lucide-react';
+import {AlertTriangle, Gamepad2, Lock, RefreshCw} from 'lucide-react';
 import { tierName, type RiotClientStatus } from '../utils/tracker';
 import { StatValue } from './StatValue';
 import { formatKd, formatPct } from '../utils/format';
@@ -163,7 +163,7 @@ const PLAYLISTS = [
 ];
 
 export const Overview: React.FC = () => {
-  const { profile, seasonNames, seasonOrder, tierIcons, agentInfo, agg, trn, trnAgents, trnPrev, trnFetchedAt, games, detailsById, isLoading, clientClosed, riotClient, riotClientDetail, banner, setBanner, refresh } =
+  const { profile, seasonNames, seasonOrder, tierIcons, agentInfo, agg, trn, trnAgents, trnPrev, trnFetchedAt, games, detailsById, isLoading, clientClosed, riotClient, riotClientDetail, refresh } =
     useTrackerData();
 
   const [playlist, setPlaylist] = useState('competitive');
@@ -173,16 +173,6 @@ export const Overview: React.FC = () => {
   const [selLoading, setSelLoading] = useState(false);
   const [selError, setSelError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  // Floating notice toast: banner text must never live in the layout flow.
-  // Shows once per distinct message. The toast owns its countdown and
-  // dismisses itself; `key={banner}` restarts the timer per message.
-  const [toastVisible, setToastVisible] = useState(false);
-  const lastToastRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!banner || banner === lastToastRef.current) return;
-    lastToastRef.current = banner;
-    setToastVisible(true);
-  }, [banner]);
   // True only for the live act + competitive — the one case where the store's
   // `trn`/`agg` snapshots describe the selection.
   const isDefault = playlist === 'competitive' && !seasonId;
@@ -818,85 +808,8 @@ export const Overview: React.FC = () => {
       {/* Floating notice toast: fixed overlay with zero layout impact.
           The countdown ring around the icon depletes over TOAST_MS, then
           the toast dismisses itself. */}
-      {toastVisible && banner && (
-        <NoticeToast
-          key={banner}
-          message={banner}
-          onClose={() => {
-            setToastVisible(false);
-            setBanner(null);
-          }}
-        />
-      )}
     </motion.div>
   );
 };
 
-/** Self-dismissing notice. The card's own outline is the countdown: a
- *  conic-gradient border that depletes over TOAST_MS, then it dismisses. */
-const TOAST_MS = 8000;
 
-const NoticeToast: React.FC<{ message: string; onClose: () => void }> = ({ message, onClose }) => {
-  const [remain, setRemain] = useState(1);
-  useEffect(() => {
-    let raf = 0;
-    const t0 = performance.now();
-    const tick = (t: number) => {
-      const p = Math.max(0, 1 - (t - t0) / TOAST_MS);
-      setRemain(p);
-      if (p > 0) {
-        raf = requestAnimationFrame(tick);
-      } else {
-        onClose();
-      }
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-    // Mount-only: `key={message}` remounts per distinct message, restarting
-    // the countdown. onClose is a stable-enough inline; re-running on its
-    // identity change would restart the timer mid-flight.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  // Perimeter-based countdown: an SVG rect with a normalized pathLength
-  // depletes at constant border distance. (A conic-gradient sweep moves at
-  // constant ANGLE, so it visibly races through the corners.)
-  const done = 100 - remain * 100;
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="fixed bottom-6 right-6 z-50 max-w-sm"
-      data-tip={`Hiding in ${Math.ceil((remain * TOAST_MS) / 1000)}s`}
-    >
-      <div className="relative rounded-2xl p-[2px]">
-        <svg className="pointer-events-none absolute inset-0 h-full w-full" fill="none" aria-hidden="true">
-          <rect
-            style={{ x: 1.5, y: 1.5, width: 'calc(100% - 3px)', height: 'calc(100% - 3px)', rx: 14.5 }}
-            stroke="rgba(255, 255, 255, 0.12)"
-            strokeWidth={2}
-          />
-          <rect
-            style={{ x: 1.5, y: 1.5, width: 'calc(100% - 3px)', height: 'calc(100% - 3px)', rx: 14.5 }}
-            stroke="#d0bcff"
-            strokeWidth={2}
-            strokeLinecap="round"
-            pathLength={100}
-            strokeDasharray={100}
-            strokeDashoffset={done}
-          />
-        </svg>
-        <div className="rounded-[14px] bg-m3-surface-container-high shadow-m3-3 p-3.5 flex items-start gap-2.5">
-          <Check className="w-4 h-4 text-m3-primary shrink-0 mt-0.5" />
-          <p className="text-xs text-m3-on-surface font-medium leading-snug flex-1">{message}</p>
-          <button
-            onClick={onClose}
-            aria-label="Dismiss"
-            className="p-1 -m-1 rounded-lg hover:bg-white/10 text-m3-outline hover:text-m3-on-surface cursor-pointer shrink-0"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-    </motion.div>
-  );
-};
