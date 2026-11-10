@@ -140,3 +140,53 @@
     --motion-large: 0ms;
   }
 }
+
+/* ── Legacy palette bridge ──────────────────────────────────────────────────
+ *
+ * Six surfaces are still the old components (match body, store, crosshair, chat,
+ * accounts, settings). They were written against `m3-*` Tailwind colours, which
+ * are now CSS variables with their old hex as the fallback, so nothing outside
+ * the v2 shell changes.
+ *
+ * Inside the shell those variables resolve to the v2 roles instead, which is why
+ * the embedded surfaces stop looking like a different app. This is a bridge, not
+ * a redesign: the components keep their markup, their spacing and their logic.
+ */
+[data-theme] {
+  --m3-surface: var(--surface-0);
+  --m3-surface-dim: var(--surface-0);
+  --m3-surface-bright: var(--surface-2);
+  --m3-surface-container-lowest: var(--surface-0);
+  --m3-surface-container-low: var(--surface-1);
+  --m3-surface-container: var(--surface-1);
+  --m3-surface-container-high: var(--surface-2);
+  --m3-surface-container-highest: var(--surface-2);
+
+  --m3-primary: var(--accent);
+  --m3-on-primary: var(--on-accent);
+  --m3-primary-container: var(--surface-2);
+  --m3-on-primary-container: var(--on-surface);
+  --m3-secondary: var(--on-surface-muted);
+  --m3-on-secondary: var(--on-surface);
+  --m3-secondary-container: var(--surface-2);
+  --m3-on-secondary-container: var(--on-surface);
+
+  --m3-tertiary: var(--negative);
+  --m3-on-tertiary: #1b0503;
+  --m3-tertiary-container: var(--surface-2);
+  --m3-on-tertiary-container: var(--negative);
+  --m3-coral: var(--negative);
+  --m3-coral-container: var(--surface-2);
+  --m3-gold: var(--attention);
+  --m3-gold-container: var(--surface-2);
+  --m3-mint: var(--positive);
+  --m3-mint-container: var(--surface-2);
+  --m3-error: var(--negative);
+  --m3-on-error: #1b0503;
+
+  --m3-outline: var(--outline);
+  --m3-outline-variant: var(--outline);
+  --m3-outline-subtle: var(--outline);
+  --m3-on-surface: var(--on-surface);
+  --m3-on-surface-variant: var(--on-surface-muted);
+}
