@@ -1424,6 +1424,25 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('readSnapshot no longer discards a stale snapshot', /return null;\s*\}\s*\n\}/.test(parseBody) && !/SNAPSHOT_TTL/.test(parseBody), true);
 }
 
+// --- match modal: verdict hero, no duplicate rail, sticky header -----------
+{
+  const { readFileSync } = await import('node:fs');
+  const { matchVerdict } = await import('../src/utils/matchVerdict.ts');
+  const mdm = readFileSync(new URL('../src/components/MatchDetailModal.tsx', import.meta.url), 'utf8');
+
+  // The honesty rule: no side or no score means no verdict word.
+  check('a win is a win', matchVerdict(13, 11), 'WIN');
+  check('a loss is a loss', matchVerdict(9, 13), 'LOSS');
+  check('a tie is a draw', matchVerdict(12, 12), 'DRAW');
+  check('an unknown score yields no verdict', matchVerdict(undefined, 13), null);
+  check('an unknown side yields no verdict', matchVerdict(13, undefined), null);
+
+  check('the header mini-strip is gone', /Round \$\{i \+ 1\}: \$\{r\.winningTeam\}/.test(mdm), false);
+  check('the verdict is the largest element', /text-\[26px\][^"]*leading-none/.test(mdm), true);
+  check('the scoreboard header is sticky and opaque', /<thead className="sticky top-0 z-10 bg-m3-surface-container-highest/.test(mdm), true);
+  check('sticky is not defeated by an x-scroll ancestor at sm+', /overflow-x-auto sm:overflow-x-visible/.test(mdm), true);
+}
+
 // --- one vocabulary for one fact: no 'not fetched yet' anywhere ------------
 {
   const { readFileSync } = await import('node:fs');
