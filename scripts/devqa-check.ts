@@ -1041,7 +1041,11 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   // The old name may still be MENTIONED (prune list, comments) but must never
   // be used as a live storage key again.
   check('v2 live-stats is not used as a key', /localStorage\.(getItem|setItem)\(\s*'recon_live_player_stats_v2'/.test(trk), false);
-  check('the MMR read is guarded by assertRiotOk', /assertRiotOk\(j, 'mmr'\)/.test(trk), true);
+  // The guard moved INTO readMmr (step 2, site #12): the call site cannot skip
+  // what it no longer performs.
+  const riotSrcNow = readFileSync(new URL('../src/sources/riot.ts', import.meta.url), 'utf8');
+  check('the MMR guard lives inside the reader', /assertRiotOk\(j, 'mmr'\)/.test(riotSrcNow), true);
+  check('tracker no longer guards mmr by hand', /assertRiotOk\(j, 'mmr'\)/.test(trk), false);
 
   // A snapshot from another match must not describe this one.
   tk.setLiveSnapshotMatch('match-A');
@@ -1219,6 +1223,14 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
     riotSrc.includes("'Riot Client is not running'") &&
       riotSrc.includes("'Riot Client is not responding'") &&
       riotSrc.includes("'Riot Client is logged out'"),
+    true
+  );
+
+  // Site #12 of docs/riotget-conversion.md: the batch rank swap must use the
+  // shared parser through the reader, never a local guard.
+  check(
+    'the batch rank site uses the validated reader',
+    /readMmr\(p, shard, parseLocalRank, data\.seasonOrder/.test(trackerSrc2),
     true
   );
 

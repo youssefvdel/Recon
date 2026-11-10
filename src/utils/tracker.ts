@@ -925,7 +925,7 @@ export type { PersistedRank } from '../cache/namespace';
 // external importers; a re-export does not bring the name into this scope).
 import { evictOldest, pruneSupersededCaches, persistLiveRank, readPersistedRank } from '../cache/namespace';
 import { inCurrentLobby, setCurrentLobbyPuuids } from '../live/lobbyScope';
-import { riotGet, getEntitlements, clearEntitlements, assertRiotOk } from '../sources/riot';
+import { riotGet, getEntitlements, clearEntitlements, assertRiotOk, readMmr } from '../sources/riot';
 export { riotPut, riotPost, getEntitlements, clearEntitlements } from '../sources/riot';
 import {
   enqueueTrnSpread,
@@ -2027,16 +2027,12 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
         await Promise.all(
           batch.map(async (p) => {
             try {
-              const j = await riotGet(shard, `/mmr/v1/players/${p}`);
-              // THE GUARD THAT WAS MISSING. The comment on assertRiotOk says it
-              // exists so a Riot error cannot parse into "no rank" and then be
-              // persisted — but this call site skipped it. A 403/5xx during a
-              // match produced tier 0 for every row: the all-"Unrated" board.
-              assertRiotOk(j, 'mmr');
-              // Same parser the single-player local path uses (parseLocalRank):
-              // one place decides how a rank payload becomes a row.
+              // Validated reader — the guard lives inside it now, so this
+              // call site cannot skip it again. A 403/5xx during a match used
+              // to parse into tier 0 for every row: the all-"Unrated" board.
+              // Same parser the single-player path uses (parseLocalRank).
               const val = {
-                ...parseLocalRank(j, data.seasonOrder || []),
+                ...(await readMmr(p, shard, parseLocalRank, data.seasonOrder ?? [])),
                 fetchedAt: Date.now(),
               };
               liveMmrCache.set(p, val);
