@@ -25,6 +25,9 @@ pub mod trace;
 #[path = "../../src/trn_http_rules.rs"]
 pub mod trn_http_rules;
 
+#[path = "../../src/updater_version.rs"]
+pub mod updater_version;
+
 #[cfg(test)]
 mod tests {
     use crate::cache_paths::{
@@ -122,6 +125,153 @@ mod tests {
         assert_eq!(status_error(403).as_deref(), Some("HTTP 403"));
         assert_eq!(status_error(500).as_deref(), Some("HTTP 500"));
         assert_eq!(status_error(302).as_deref(), Some("HTTP 302"));
+    }
+
+    // ---- updater_version.rs: version ordering and channel maths ------------
+
+    use crate::updater_version::{
+        is_early_access_channel, is_upgrade, pick_endpoint_tag, pick_highest_manifest_tag,
+        resolve_endpoint_with,
+    };
+    use serde_json::{json, Value};
+
+    #[test]
+    fn prerelease_is_older_than_its_release() {
+        // 1.0.0-beta < 1.0.0: the release is the upgrade, never the beta.
+        assert!(is_upgrade("1.0.0-beta", "1.0.0"));
+        assert!(!is_upgrade("1.0.0", "1.0.0-beta"));
+        // Same for this repo's alpha tags.
+        assert!(is_upgrade("0.5.0-alpha14", "0.5.0"));
+        assert!(!is_upgrade("0.5.0", "0.5.0-alpha14"));
+    }
+
+    #[test]
+    fn alpha_numbers_compare_naturally_not_lexically() {
+        // String compare says "alpha10" < "alpha9" and offers the downgrade —
+        // the bug this ordering exists to prevent.
+        assert!(is_upgrade("0.5.0-alpha9", "0.5.0-alpha10"));
+        assert!(is_upgrade("0.5.0-alpha10", "0.5.0-alpha11"));
+        assert!(is_upgrade("0.5.0-alpha11", "0.5.0-alpha12"));
+        assert!(!is_upgrade("0.5.0-alpha10", "0.5.0-alpha9"));
+        // leading v is tolerated on either side.
+        assert!(is_upgrade("v0.5.0-alpha9", "v0.5.0-alpha10"));
+        assert!(is_upgrade("v0.5.0-alpha9", "0.5.0-alpha10"));
+    }
+
+    #[test]
+    fn equal_and_older_versions_are_not_upgrades() {
+        assert!(!is_upgrade("0.5.0-alpha10", "0.5.0-alpha10"));
+        assert!(!is_upgrade("0.5.0", "0.5.0"));
+        assert!(!is_upgrade("0.6.0", "0.5.9"));
+        assert!(!is_upgrade("0.5.0", "0.4.9"));
+        assert!(is_upgrade("0.4.9", "0.5.0"));
+        assert!(is_upgrade("1.9.9", "2.0.0"));
+    }
+
+    #[test]
+    fn malformed_tags_never_count_as_newer() {
+        assert!(!is_upgrade("0.5.0-alpha10", "not-a-version"));
+        assert!(!is_upgrade("not-a-version", "0.5.1"));
+        assert!(!is_upgrade("0.5.1", ""));
+        assert!(!is_upgrade("", "0.5.1"));
+    }
+
+    fn release(tag: &str, has_manifest: bool) -> Value {
+        json!({
+            "tag_name": tag,
+            "assets": if has_manifest {
+                json!([{ "name": "latest.json" }, { "name": "Recon_0.5.0_x64-setup.exe" }])
+            } else {
+                json!([{ "name": "Recon_0.5.0_x64-setup.exe" }])
+            }
+        })
+    }
+
+    #[test]
+    fn picker_takes_the_highest_manifest_not_the_first() {
+        let releases = vec![
+            release("v0.5.0-alpha9", true),
+            release("v0.5.0-alpha11", false), // no manifest: must not win
+            release("v0.5.0-alpha8", true),
+            release("v0.5.0-alpha10", true),
+            release("not-a-version", true),
+        ];
+        assert_eq!(pick_highest_manifest_tag(&releases), Some("v0.5.0-alpha10"));
+        assert_eq!(pick_highest_manifest_tag(&[]), None);
+    }
+
+    #[test]
+    fn picker_unions_a_stale_list_with_releases_latest() {
+        let latest = release("v0.5.0-alpha10", true);
+        assert_eq!(pick_endpoint_tag(&[release("v0.5.0-alpha9", true)], Some(&latest)), Some("v0.5.0-alpha10"));
+        assert_eq!(pick_endpoint_tag(&[], Some(&latest)), Some("v0.5.0-alpha10"));
+        assert_eq!(pick_endpoint_tag(&[release("v0.5.0-alpha11", false)], Some(&latest)), Some("v0.5.0-alpha10"));
+        assert_eq!(pick_endpoint_tag(&[], None), None);
+        // A newer list entry beats an older latest.
+        let older_latest = release("v0.5.0-alpha10", true);
+        assert_eq!(
+            pick_endpoint_tag(&[release("v0.5.0-alpha11", true)], Some(&older_latest)),
+            Some("v0.5.0-alpha11")
+        );
+    }
+
+    #[test]
+    fn channel_names_are_classified_case_insensitively() {
+        assert!(!is_early_access_channel("stable"));
+        assert!(!is_early_access_channel("nightly"));
+        for ch in ["early-access", "early_access", "alpha", "beta", "ALPHA", "Early-Access"] {
+            assert!(is_early_access_channel(ch), "{ch}");
+        }
+    }
+
+    #[test]
+    fn stable_channel_never_touches_the_network() {
+        let endpoint = resolve_endpoint_with("stable", |_| -> Option<Value> {
+            panic!("stable resolution must not fetch releases");
+        });
+        assert_eq!(
+            endpoint,
+            "https://github.com/youssefvdel/Recon/releases/latest/download/latest.json"
+        );
+    }
+
+    #[test]
+    fn alpha_channel_picks_the_highest_usable_tag() {
+        let endpoint = resolve_endpoint_with("alpha", |url| {
+            if url.ends_with("releases?per_page=10") {
+                Some(json!([
+                    release("v0.5.0-alpha9", true),
+                    release("v0.5.0-alpha11", false),
+                    release("v0.5.0-alpha10", true)
+                ]))
+            } else if url.ends_with("releases/latest") {
+                Some(release("v0.5.0-alpha9", true))
+            } else {
+                None
+            }
+        });
+        assert_eq!(
+            endpoint,
+            "https://github.com/youssefvdel/Recon/releases/download/v0.5.0-alpha10/latest.json"
+        );
+    }
+
+    #[test]
+    fn alpha_channel_falls_back_when_nothing_is_usable() {
+        let endpoint = resolve_endpoint_with("beta", |_| None);
+        assert_eq!(
+            endpoint,
+            "https://github.com/youssefvdel/Recon/releases/download/alpha/latest.json"
+        );
+        // Malformed tags only: same fallback, no panic.
+        let endpoint = resolve_endpoint_with("early-access", |url| {
+            if url.ends_with("per_page=10") {
+                Some(json!([release("garbage", true)]))
+            } else {
+                Some(release("also-garbage", true))
+            }
+        });
+        assert!(endpoint.ends_with("/releases/download/alpha/latest.json"));
     }
 
     // ---- perf/model.rs: the numbers the dashboard renders ------------------

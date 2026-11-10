@@ -23,6 +23,7 @@ cd src-tauri/pure && cargo test        # 24 tests, no PC, no Tauri
 | `src/trn_cache/paths.rs` + `constants.rs` | 7 | path allowlist incl. the 300/301 boundary, published FNV-1a 64 vector (`hello` → `a430d84680aabd0b`), 16-hex stable keys, `entry_path` cannot escape the cache dir, header round-trip with spaces, garbage rejection, `read_header` on real temp files |
 | `src/trn_proxy/trace.rs` | 2 | bounded ring eviction, incremental `trace_since` head/lines/missed semantics, zero cap |
 | `src/trn_http_rules.rs` | 3 | host allowlist (exact host only: suffix/prefix/userinfo tricks, scheme-relative and absolute redirect targets, empty host, port), path allowlist (scheme smuggling, `//`, `.`/`..` segments, query pass-through that cannot smuggle a scheme or traversal, whitespace, empty, 300 boundary), status map (2xx → body, 451/404/429 → TS keys, 403/500/302 → `HTTP n`) |
+| `src/updater_version.rs` | 10 | prerelease ordering (`1.0.0-beta < 1.0.0`), natural `alpha9 < alpha10` (string compare would invert), equal/downgrade never upgrades, malformed tags never upgrade, manifest picker takes the highest not the first, stale release-list ∪ `releases/latest`, channel classification, stable channel never fetches, alpha fallback with no usable tag |
 
 `src/perf/model.rs` is the strongest case: it is the memory/CPU maths the
 dashboard renders, and it is a pure function of its arguments.
@@ -37,7 +38,6 @@ dashboard renders, and it is a pure function of its arguments.
 | `window_manager.rs`, `shortcuts.rs`, `space_spam.rs` | Win32 window/input APIs |
 | `accounts.rs` | Windows registry + Tauri app paths |
 | `state.rs` | `crate::display` (Win32) |
-| `updater.rs` | the file imports `tauri` / `tauri-plugin-updater`, so the whole module needs a Tauri build even though `is_upgrade` and the channel-endpoint maths are pure — same extraction candidate |
 | `trn_cache/{store,read,sweep}.rs` | `tauri::AppHandle` for app paths (the path/header layer above is covered) |
 | `trn_proxy/{window,fetch,...}.rs` | WebView2 / Tauri window runtime |
 | `perf/sampler.rs` | Win32 PDH / process APIs (the model above is the pure half) |
