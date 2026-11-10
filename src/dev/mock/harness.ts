@@ -100,7 +100,24 @@ export function installDevHarness(): void {
   }
   if (fixture === 'empty') localStorage.clear();
 
+  /* Every call is recorded so a missing phase can be diagnosed from the console
+   * instead of by guessing which endpoint the parser wanted. */
+  const calls: { cmd: string; path?: string; result: string }[] = [];
+  (window as unknown as Record<string, unknown>).__harnessCalls = calls;
+
   const invoke = async (cmd: string, args?: unknown): Promise<unknown> => {
+    const path = String((args as { path?: string })?.path ?? '');
+    try {
+      const r = await answer(cmd, args);
+      calls.push({ cmd, path, result: typeof r === 'object' ? Object.keys(r as object).slice(0, 6).join(',') : String(r).slice(0, 40) });
+      return r;
+    } catch (e) {
+      calls.push({ cmd, path, result: `THREW ${String(e).slice(0, 60)}` });
+      throw e;
+    }
+  };
+
+  const answer = async (cmd: string, args?: unknown): Promise<unknown> => {
     if (fixture === 'error') {
       throw new Error(`[harness] ${cmd} failed: Riot Client is closed`);
     }
