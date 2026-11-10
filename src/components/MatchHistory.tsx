@@ -424,6 +424,17 @@ export const MatchHistory: React.FC = () => {
    * rail is a single controlled selection, so a second expansion would need
    * per-row selection state, which is the duplication we keep deleting. */
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  /* The Overview feed asks for a specific match: expand it here rather than
+   * opening a dialog there. */
+  useEffect(() => {
+    const onGoto = (e: Event) => {
+      const id = (e as CustomEvent<{ matchId?: string }>).detail?.matchId;
+      if (id) setExpandedId(id);
+    };
+    window.addEventListener('recon:goto-match', onGoto);
+    return () => window.removeEventListener('recon:goto-match', onGoto);
+  }, []);
+
   /* Escape collapses the open row, and does nothing when none is open — one
    * unambiguous meaning, no hidden "close everything" state. */
   useEffect(() => {
