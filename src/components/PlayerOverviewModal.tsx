@@ -114,41 +114,19 @@ export const PlayerOverviewModal: React.FC<Props> = ({
   /* Modal a11y: labelled dialog, Esc closes, Tab is trapped, focus returns. */
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = React.useId();
+  /* Escape closes the drawer before it reaches the row. No Tab trap: a drawer
+   * that is not modal must not steal the keyboard. */
   useEffect(() => {
     if (!player) return;
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const node = dialogRef.current;
-    node?.focus();
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-      if (e.key !== 'Tab' || !node) return;
-      const focusable = Array.from(
-        node.querySelectorAll<HTMLElement>(
-          'button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])'
-        )
-      ).filter((el) => !el.hasAttribute('disabled'));
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const activeEl = document.activeElement;
-      if (e.shiftKey && (activeEl === first || activeEl === node)) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && activeEl === last) {
-        e.preventDefault();
-        first.focus();
-      }
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      onClose();
     };
-    document.addEventListener('keydown', onKey, true);
-    return () => {
-      document.removeEventListener('keydown', onKey, true);
-      previous?.focus?.();
-    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
   }, [player, onClose]);
+
 
   if (!player) return null;
 
@@ -179,28 +157,20 @@ export const PlayerOverviewModal: React.FC<Props> = ({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-5">
-        {/* Blurred Backdrop */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          onClick={onClose}
-          className="absolute inset-0 bg-black/80"
-        />
-
-        {/* Modal Container (Google Material 3) */}
+      /* A right-side drawer, not a dialog: no backdrop, no aria-modal, no focus
+       * trap. It slides in beside the ledger, scrolls on its own, and Escape
+       * (handled by the host) closes it before the row. */
+      <div className="fixed inset-y-0 right-0 z-[60] flex pointer-events-none">
         <motion.div
           ref={dialogRef}
-          role="dialog"
-          aria-modal="true"
+          role="region"
           aria-labelledby={titleId}
           tabIndex={-1}
-          initial={{ opacity: 0, scale: 0.96, y: 10 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.96, y: 10 }}
-          transition={{ duration: 0.2, ease: 'easeOut' }}
-          className="relative w-full max-w-2xl rounded-3xl bg-m3-surface-container-low border border-m3-outline-subtle shadow-m3-3 overflow-hidden flex flex-col z-10 max-h-[90vh] focus:outline-none"
+          initial={{ opacity: 0, x: 24 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: 24 }}
+          transition={{ duration: 0.18, ease: 'easeOut' }}
+          className="pointer-events-auto w-[min(440px,92vw)] h-full bg-m3-surface-container-low border-l border-m3-outline-subtle shadow-m3-2 overflow-y-auto flex flex-col focus:outline-none"
         >
           {/* Header */}
           <div className="p-5 border-b border-m3-outline-subtle bg-m3-surface-container flex items-center justify-between gap-4">

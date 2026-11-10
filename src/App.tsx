@@ -163,13 +163,27 @@ export const App: React.FC = () => {
   }, [currentTab]);
   // Jump-to-live requests from the TopBar LIVE pill.
   const [liveNonce, setLiveNonce] = useState(0);
+  const [pendingMatchId, setPendingMatchId] = useState<string | null>(null);
   useEffect(() => {
     const onGotoLive = () => {
       setCurrentTab('overview');
       setLiveNonce((n) => n + 1);
     };
     window.addEventListener('recon:goto-live', onGotoLive);
-    return () => window.removeEventListener('recon:goto-live', onGotoLive);
+    /* The Overview feed no longer opens a dialog: it asks the Matches ledger to
+     * expand that match. */
+    /* The id must survive the tab switch: MatchHistory does not exist until the
+     * Matches subtab mounts, so an event alone lands on nothing. */
+    const onGotoMatch = (e: Event) => {
+      const id = (e as CustomEvent<{ matchId?: string }>).detail?.matchId ?? null;
+      setPendingMatchId(id);
+      setCurrentTab('matches');
+    };
+    window.addEventListener('recon:goto-match', onGotoMatch);
+    return () => {
+      window.removeEventListener('recon:goto-live', onGotoLive);
+      window.removeEventListener('recon:goto-match', onGotoMatch);
+    };
   }, []);
   const [displayInfo, setDisplayInfo] = useState<DisplayInfo | null>(null);
   const [shortcut, setShortcut] = useState<ShortcutBinding | null>(null);
@@ -578,6 +592,8 @@ export const App: React.FC = () => {
                   <TrackerView
                     initialSubTab={currentTab === 'matches' ? 'matches' : 'overview'}
                     liveRequest={liveNonce}
+                    initialMatchId={pendingMatchId}
+                    onMatchConsumed={() => setPendingMatchId(null)}
                   />
                 )}
 

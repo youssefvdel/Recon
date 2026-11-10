@@ -1464,23 +1464,92 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('readSnapshot no longer discards a stale snapshot', /return null;\s*\}\s*\n\}/.test(parseBody) && !/SNAPSHOT_TTL/.test(parseBody), true);
 }
 
-// --- 2a: the body moved out, the dialog stayed a thin wrapper -------------
+// --- 2b: one expansion, in place, Escape collapses ------------------------
+{
+  const { readFileSync } = await import('node:fs');
+  const mh = readFileSync(new URL('../src/components/MatchHistory.tsx', import.meta.url), 'utf8');
+
+  check('there is exactly one expansion state', /const \[expandedId, setExpandedId\] = useState<string \| null>\(null\)/.test(mh), true);
+  check('the old set-of-ids is gone', /openIds/.test(mh), false);
+  check('and the separate modal selection is gone', /selectedMatch/.test(mh), false);
+  check('opening another row collapses the previous', /setExpandedId\(\(prev\) => \(prev === id \? null : id\)\)/.test(mh), true);
+  check('Escape collapses the open row', /e\.key === 'Escape'[\s\S]{0,40}setExpandedId\(null\)/.test(mh), true);
+  check('the body renders under its own row, not in a dialog', /<MatchDetailBody/.test(mh) && /open && r\.detail && \(/.test(mh), true);
+  check('the ledger no longer mounts the modal', /<MatchDetailModal/.test(mh), false);
+  check('the filters survive the collapse', /agentFilter/.test(mh) && /mapFilter/.test(mh), true);
+}
+
+// --- judge fixes: no dialog in a row, drawer not a modal, id survives ------
+{
+  const { readFileSync } = await import('node:fs');
+  const { nextExpandedId } = await import('../src/utils/expansion.ts');
+  const body = readFileSync(new URL('../src/components/matches/MatchDetailBody.tsx', import.meta.url), 'utf8');
+  const player = readFileSync(new URL('../src/components/PlayerOverviewModal.tsx', import.meta.url), 'utf8');
+  const mh = readFileSync(new URL('../src/components/MatchHistory.tsx', import.meta.url), 'utf8');
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const tv = readFileSync(new URL('../src/components/TrackerView.tsx', import.meta.url), 'utf8');
+
+  // FAIL 1 — the body is inline content, not a dialog.
+  check('the body declares no dialog', /aria-modal="true"/.test(body), false);
+  check('and no dialog role', /role="dialog"/.test(body), false);
+  check('it does not steal or restore focus', /restoreFocusRef|closeRef/.test(body), false);
+  check('it has no close affordance of its own', /Close match details/.test(body), false);
+  check('the tablist is still a tablist', /role="tablist"/.test(body), true);
+
+  // FAIL 2 — the player panel is a drawer.
+  check('the player panel is not a modal', /aria-modal="true"/.test(player), false);
+  check('and draws no backdrop', /bg-black\/80/.test(player), false);
+  check('it is a right-side drawer with its own scroll', /fixed inset-y-0 right-0/.test(player) && /overflow-y-auto/.test(player), true);
+  check('it does not trap Tab', /e\.key !== 'Tab'|e\.key === 'Tab'/.test(player), false);
+
+  // FAIL 3 — a request made BEFORE the ledger mounts still expands that row.
+  check('an incoming request wins', nextExpandedId(null, 'm-1'), 'm-1');
+  check('the mount-later case works', nextExpandedId('old', 'm-2'), 'm-2');
+  check('no request changes nothing', nextExpandedId('keep', null), 'keep');
+  check('App keeps the id across the tab switch', /setPendingMatchId\(id\)/.test(app) && /initialMatchId=\{pendingMatchId\}/.test(app), true);
+  check('TrackerView threads it to the ledger', /initialMatchId/.test(tv) && /initialExpandedId=\{initialMatchId\}/.test(tv), true);
+  check('the ledger adopts it on mount', /nextExpandedId\(prev, initialExpandedId\)/.test(mh), true);
+}
+
+// --- 2c: the dialog is gone, the body is the only host --------------------
 {
   const { existsSync, readFileSync } = await import('node:fs');
   const bodyPath = new URL('../src/components/matches/MatchDetailBody.tsx', import.meta.url);
-  const modalPath = new URL('../src/components/MatchDetailModal.tsx', import.meta.url);
   check('the body lives in matches/', existsSync(bodyPath), true);
-
-  const modal = readFileSync(modalPath, 'utf8');
-  check('the modal is a thin wrapper', modal.split('\n').length < 30, true);
-  check('and it renders the moved body', /<MatchDetailBody \{\.\.\.props\} \/>/.test(modal), true);
-  check('the chrome lives in the wrapper, not the body', /bg-black\/80/.test(modal), true);
+  check('the modal file is deleted', existsSync(new URL('../src/components/MatchDetailModal.tsx', import.meta.url)), false);
 
   const body = readFileSync(bodyPath, 'utf8');
   check('the body no longer draws a full-screen backdrop', /absolute inset-0 bg-black\/80/.test(body), false);
   check('and still owns its own open/close contract', /if \(!isOpen \|\| !detail\) return null;/.test(body), true);
   check('nothing the modal showed was dropped', /RoundTimeline/.test(body) && /RoundRail/.test(body) && /role="tablist"/.test(body), true);
+
+  // No importer anywhere.
+  const { execSync } = await import('node:child_process');
+  const hits = execSync("grep -rn 'MatchDetailModal' src/ || true", { encoding: 'utf8' }).trim();
+  check('no import of the modal survives', hits.length, 0);
+
+  // Overview hands the match to the ledger instead of opening a dialog.
+  const ov = readFileSync(new URL('../src/components/Overview.tsx', import.meta.url), 'utf8');
+  check('Overview asks the ledger to expand', /recon:goto-match/.test(ov), true);
+  check('and mounts no dialog', /<MatchDetailModal/.test(ov), false);
 }
+
+// --- 2b: one expansion, in place, Escape collapses ------------------------
+{
+  const { readFileSync } = await import('node:fs');
+  const mh = readFileSync(new URL('../src/components/MatchHistory.tsx', import.meta.url), 'utf8');
+
+  check('there is exactly one expansion state', /const \[expandedId, setExpandedId\] = useState<string \| null>\(null\)/.test(mh), true);
+  check('the old set-of-ids is gone', /openIds/.test(mh), false);
+  check('and the separate modal selection is gone', /selectedMatch/.test(mh), false);
+  check('opening another row collapses the previous', /setExpandedId\(\(prev\) => \(prev === id \? null : id\)\)/.test(mh), true);
+  check('Escape collapses the open row', /e\.key === 'Escape'[\s\S]{0,40}setExpandedId\(null\)/.test(mh), true);
+  check('the body renders under its own row, not in a dialog', /<MatchDetailBody/.test(mh) && /open && r\.detail && \(/.test(mh), true);
+  check('the ledger no longer mounts the modal', /<MatchDetailModal/.test(mh), false);
+  check('the filters survive the collapse', /agentFilter/.test(mh) && /mapFilter/.test(mh), true);
+}
+
+// --- 2a: the body moved out, the dialog stayed a thin wrapper -------------
 
 // --- Retry after a failed fetch issues a SECOND request -------------------
 {
@@ -1524,7 +1593,7 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('the act age ticks with the feed clock', /\[isDefault, trn, trnFetchedAt, now\]/.test(ov), true);
   check('a closed client says "date unknown", not "as of date unknown"', /' \u00b7 date unknown'/.test(ov), true);
   check('the eyebrow never renders a dangling separator', ov.includes("'Current Act'"), true);
-  check('a row with no detail opens nothing', ov.includes('detailsById?.[g.matchId] ? () => setOpenMatch(g) : undefined'), true);
+  check('a row with no detail opens nothing', ov.includes('detailsById?.[g.matchId]') && ov.includes("recon:goto-match"), true);
 }
 
 // --- Overview: the judge's four blockers stay fixed -----------------------
@@ -1556,7 +1625,7 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('the Unrated playlist is back and selectable', /value: 'unrated'/.test(ov) && /onChange=\{\(e\) => setPlaylist/.test(ov), true);
   check('feed map falls back to shortMapName', /shortMapName\(g\.mapId/.test(ov), true);
   check('feed ages tick with a clock', ov.includes('setInterval(() => setNow(Date.now()), 60_000)'), true);
-  check('the modal gets the real tier icons', /tierIcons=\{tierIcons \?\? \{\}\}/.test(ov), true);
+  check('the feed hands off instead of mounting a dialog', !/<MatchDetailModal/.test(ov), true);
   check('the top-agent icon is found by name, not by key', /Object\.values\(agentInfo \?\? \{\}\)\.find/.test(ov), true);
   check('useCountUp is deleted', existsSync(new URL('../src/hooks/useCountUp.ts', import.meta.url)), false);
   check('OverviewSkeletons is deleted', /OverviewSkeletons/.test(readFileSync(new URL('../src/components/TrackerSkeletons.tsx', import.meta.url), 'utf8')), false);
@@ -1572,7 +1641,7 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('shortAct stays exported for other surfaces', /export const shortAct/.test(ov), true);
   check('no em-dash or ellipsis placeholder', /'—'|"—"|'…'|"…"/.test(ov), false);
   check('it renders the primitives, not cards', /<ActHeader/.test(ov) && /<FeedRow/.test(ov) && /<Sparkline/.test(ov), true);
-  check('the feed opens the existing modal', /<MatchDetailModal/.test(ov), true);
+  check('the feed dispatches to the ledger', /recon:goto-match/.test(ov), true);
 }
 
 // --- B foundations: one file per primitive, one colour contract -----------

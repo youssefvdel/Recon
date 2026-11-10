@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Check, Lightbulb, Copy } from 'lucide-react';
 import type { TrackerMatchDetail, TrackerMmrPoint } from '../types';
@@ -8,7 +8,8 @@ import { calculateTrsFallback } from '../utils/trn';
 import { buildTips } from '../utils/trackerTips';
 import { HistorySkeletons } from './TrackerSkeletons';
 import { CustomDropdown } from './ValorantConfig';
-import { MatchDetailModal } from './MatchDetailModal';
+import { MatchDetailBody } from './matches/MatchDetailBody';
+import { nextExpandedId } from '../utils/expansion';
 import { ScoreBadge, scoreTier } from './ScoreBadge';
 import { StatValue } from './StatValue';
 import { formatKd, formatPct } from '../utils/format';
@@ -116,8 +117,7 @@ const MatchRow: React.FC<{
   puuid: string;
   open: boolean;
   onToggle: () => void;
-  onOpenModal: () => void;
-}> = ({ r, queue, map, index, icon, rankIcon, puuid, open, onToggle, onOpenModal }) => {
+}> = ({ r, queue, map, index, icon, rankIcon, puuid, open, onToggle }) => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const card = useMemo(() => (r.detail ? matchCard(r.detail, puuid) : null), [r.detail, puuid]);
 
@@ -182,9 +182,9 @@ const MatchRow: React.FC<{
       <div className="flex items-stretch">
         <button
           onClick={() => {
-            if (r.detail) onOpenModal();
+            if (r.detail) onToggle();
           }}
-          aria-haspopup={r.detail ? 'dialog' : undefined}
+          aria-expanded={r.detail ? open : undefined}
           className={`flex-1 min-w-0 px-2.5 py-2 flex items-center gap-2.5 text-left ${
             r.detail ? 'cursor-pointer hover:bg-m3-surface-container-high/30' : ''
           }`}>
@@ -414,17 +414,77 @@ const MatchRow: React.FC<{
   );
 };
 
-export const MatchHistory: React.FC = () => {
+export const MatchHistory: React.FC<{
+  /** Set when another surface asked for a specific match before this mounted. */
+  initialExpandedId?: string | null;
+  onConsumed?: () => void;
+}> = ({ initialExpandedId = null, onConsumed }) => {
   const { profile, games, queueById, mapById, detailsById, agentInfo, tierIcons, trnMatchTrs, isLoading } =
     useTrackerData();
   const [agentFilter, setAgentFilter] = useState('All');
   const [mapFilter, setMapFilter] = useState('All');
-  const [openIds, setOpenIds] = useState<Set<string>>(new Set());  const [selectedMatch, setSelectedMatch] = useState<{
-    detail: TrackerMatchDetail;
-    game: TrackerMmrPoint;
-    mapName: string;
-    queue: string;
-  } | null>(null);
+  /* ONE expansion at a time (docs/design/migration-b.md): opening another row
+   * collapses the previous one, and Escape collapses the open row. The body is
+   * tall — two open makes "which match am I reading" ambiguous — and the round
+   * rail is a single controlled selection, so a second expansion would need
+   * per-row selection state, which is the duplication we keep deleting. */
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  /* The Overview feed asks for a specific match. If the ledger was already
+   * mounted the event is enough; if it mounts AFTER the request (the usual
+   * case — the tab switch happens first), the id arrives as a prop. */
+  useEffect(() => {
+    if (!initialExpandedId) return;
+    /* Adopting the id is the point of this effect: the ledger mounted after the
+     * request, so this is how the request becomes state. */
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setExpandedId((prev) => nextExpandedId(prev, initialExpandedId));
+    onConsumed?.();
+  }, [initialExpandedId, onConsumed]);
+
+  /* Same request while the ledger is already on screen. */
+  useEffect(() => {
+    const onGoto = (e: Event) => {
+      const id = (e as CustomEvent<{ matchId?: string }>).detail?.matchId;
+      if (id) setExpandedId((prev) => nextExpandedId(prev, id));
+    };
+    window.addEventListener('recon:goto-match', onGoto);
+    return () => window.removeEventListener('recon:goto-match', onGoto);
+  }, []);
+
+  /* Escape collapses the open row, and does nothing when none is open — one
+   * unambiguous meaning, no hidden "close everything" state. */
+  useEffect(() => {
+    if (!expandedId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setExpandedId(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [expandedId]);
+
+  /** Player profile opens in its own webview, never inside the ledger. */
+  const openTrackerProfile = (name: string, tag: string): void => {
+    const trackerUrl = `https://tracker.gg/valorant/profile/riot/${encodeURIComponent(name + '#' + (tag || ''))}/overview`;
+    try {
+      if ((window as any).__TAURI__) {
+        import('@tauri-apps/api/webviewWindow')
+          .then(({ WebviewWindow }) => {
+            const win = new WebviewWindow(`player-${name.replace(/[^a-zA-Z0-9]/g, '')}-${Date.now() % 1000}`, {
+              url: trackerUrl,
+              title: `Recon • ${name}#${tag} Profile`,
+              width: 1240,
+              height: 860,
+              resizable: true,
+            });
+            win.once('tauri://error', () => window.open(trackerUrl, '_blank'));
+          })
+          .catch(() => window.open(trackerUrl, '_blank'));
+        return;
+      }
+    } catch {}
+    window.open(trackerUrl, '_blank');
+  };
+
   // TRN is the only match-history source.
   const puuid = profile?.puuid ?? '';
 
@@ -642,12 +702,7 @@ export const MatchHistory: React.FC = () => {
   }, [rows, puuid]);
 
   const toggle = (id: string) => {
-    setOpenIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    setExpandedId((prev) => (prev === id ? null : id));
   };
 
   if (!profile && games.length === 0) {
@@ -792,30 +847,49 @@ export const MatchHistory: React.FC = () => {
                   </Stat>
                 </span>
               </div>
-              {day.rs.map((r, i) => (
-                <MatchRow
-                  key={r.g.matchId || r.g.when}
-                  r={r}
-                  index={i}
-                  queue={queueLabel(r.g.queueId || detailsById[r.g.matchId]?.queue || queueById[r.g.matchId] || 'competitive')}
-                  map={mapById[r.g.matchId] ?? shortMapName(r.g.mapId, {})}
-                  icon={infoByName[r.agent.toLowerCase()]?.icon ?? ''}
-                  rankIcon={tierIconByName[r.g.tier.toLowerCase()] ?? ''}
-                  puuid={puuid}
-                  open={openIds.has(r.g.matchId || String(r.g.when))}
-                  onToggle={() => toggle(r.g.matchId || String(r.g.when))}
-                  onOpenModal={() => {
-                    if (r.detail) {
-                      setSelectedMatch({
-                        detail: r.detail,
-                        game: r.g,
-                        mapName: mapById[r.g.matchId] ?? shortMapName(r.g.mapId, {}),
-                        queue: queueLabel(r.g.queueId || detailsById[r.g.matchId]?.queue || queueById[r.g.matchId] || 'competitive'),
-                      });
-                    }
-                  }}
-                />
-              ))}
+              {day.rs.map((r, i) => {
+                const rowId = r.g.matchId || String(r.g.when);
+                const open = expandedId === rowId;
+                const mapName = mapById[r.g.matchId] ?? shortMapName(r.g.mapId, {});
+                const queueName = queueLabel(
+                  r.g.queueId || detailsById[r.g.matchId]?.queue || queueById[r.g.matchId] || 'competitive'
+                );
+                return (
+                  <React.Fragment key={rowId}>
+                    <MatchRow
+                      r={r}
+                      index={i}
+                      queue={queueName}
+                      map={mapName}
+                      icon={infoByName[r.agent.toLowerCase()]?.icon ?? ''}
+                      rankIcon={tierIconByName[r.g.tier.toLowerCase()] ?? ''}
+                      puuid={puuid}
+                      open={open}
+                      onToggle={() => toggle(rowId)}
+                    />
+                    {/* In place, under its own row: no dialog, no second page. */}
+                    {open && r.detail && (
+                      <div className="border-t border-m3-outline-subtle/60 px-2 pb-5 pt-1">
+                        <MatchDetailBody
+                          isOpen
+                          onClose={() => setExpandedId(null)}
+                          detail={r.detail}
+                          game={r.g}
+                          seasonId={profile?.currentSeasonId}
+                          mapName={mapName}
+                          queue={queueName}
+                          puuid={puuid}
+                          myAccountName={profile?.name}
+                          myAccountTag={profile?.tag}
+                          tierIcons={tierIcons}
+                          agentInfo={agentInfo}
+                          onSelectProfile={openTrackerProfile}
+                        />
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              })}
             </div>
           );
         })}
@@ -844,39 +918,6 @@ export const MatchHistory: React.FC = () => {
         )}
       </div>
 
-      <MatchDetailModal
-        isOpen={!!selectedMatch}
-        onClose={() => setSelectedMatch(null)}
-        detail={selectedMatch?.detail ?? null}
-        game={selectedMatch?.game ?? null}
-        seasonId={profile?.currentSeasonId}
-        mapName={selectedMatch?.mapName ?? ''}
-        queue={selectedMatch?.queue ?? ''}
-        puuid={puuid}
-        myAccountName={profile?.name}
-        myAccountTag={profile?.tag}
-        tierIcons={tierIcons}
-        agentInfo={agentInfo}
-        onSelectProfile={(name, tag) => {
-          const trackerUrl = `https://tracker.gg/valorant/profile/riot/${encodeURIComponent(name + '#' + (tag || ''))}/overview`;
-          try {
-            if ((window as any).__TAURI__) {
-              import('@tauri-apps/api/webviewWindow').then(({ WebviewWindow }) => {
-                const win = new WebviewWindow(`player-${name.replace(/[^a-zA-Z0-9]/g, '')}-${Date.now() % 1000}`, {
-                  url: trackerUrl,
-                  title: `Recon • ${name}#${tag} Profile`,
-                  width: 1240,
-                  height: 860,
-                  resizable: true,
-                });
-                win.once('tauri://error', () => window.open(trackerUrl, '_blank'));
-              }).catch(() => window.open(trackerUrl, '_blank'));
-              return;
-            }
-          } catch {}
-          window.open(trackerUrl, '_blank');
-        }}
-      />
     </div>
   );
 };
