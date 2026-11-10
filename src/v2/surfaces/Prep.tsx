@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { usePrepData } from '../../components/prep/usePrepData';
-import { num, signedInt } from '../../components/prep/cell';
+import { joinInts, num, signedInt, wonLost } from '../../components/prep/cell';
 import type { TrnAgentStat } from '../../utils/trn';
 
 /** Prep, rebuilt on the v2 tokens.
@@ -63,21 +63,26 @@ export const Prep: React.FC = () => {
   );
 
   const agentDetail = (a: TrnAgentStat): [string, string][] => [
-    ['Kills / deaths / assists', `${a.kills} / ${a.deaths} / ${a.assists}`],
+    ['Kills / deaths / assists', joinInts([a.kills, a.deaths, a.assists])],
     ['KAST', num(a.kast, 1, '%')],
     ['First bloods', num(a.firstBloods, 0)],
     ['First deaths', num(a.firstDeaths, 0)],
     ['Aces', num(a.aces, 0)],
     ['Clutches', num(a.clutches, 0)],
     ['Flawless', num(a.flawless, 0)],
-    ['Attack rounds', `${a.attackRoundsWon} won / ${a.attackRoundsLost} lost`],
-    ['Defence rounds', `${a.defenseRoundsWon} won / ${a.defenseRoundsLost} lost`],
+    ['Attack rounds', wonLost(a.attackRoundsWon, a.attackRoundsLost)],
+    ['Defence rounds', wonLost(a.defenseRoundsWon, a.defenseRoundsLost)],
     ['Attack K/D', num(a.attackKd, 2)],
     ['Defence K/D', num(a.defenseKd, 2)],
     ['Plants / match', num(a.plantsPerMatch, 2)],
     ['Defuses / match', num(a.defusesPerMatch, 2)],
     ['Time played', num(a.hours, 1, ' h')],
   ];
+
+  /* A row with no value is not a row: an empty expansion would draw a bordered
+   * band with nothing in it, which reads as a loading failure. */
+  const detailRows = (a: TrnAgentStat): [string, string][] =>
+    agentDetail(a).filter(([, v]) => v);
 
   return (
     <div className="max-w-[940px] mx-auto w-full px-6 pt-8 pb-16">
@@ -148,9 +153,9 @@ export const Prep: React.FC = () => {
                   <Cell>{num(a.hsPct, 1, '%')}</Cell>
                   <Cell>{num(a.kast, 1, '%')}</Cell>
                 </button>
-                {isOpen && (
+                {isOpen && detailRows(a).length > 0 && (
                   <div className="grid grid-cols-2 gap-x-10 pb-4 pl-1 border-b" style={{ borderColor: 'var(--outline)' }}>
-                    {agentDetail(a).map(([k, v]) => (
+                    {detailRows(a).map(([k, v]) => (
                       <Detail key={k} label={k} value={v} />
                     ))}
                   </div>
@@ -222,9 +227,11 @@ export const Prep: React.FC = () => {
                       ['Plants', num(m.plants, 0)],
                       ['Defuses', num(m.defuses, 0)],
                       ['Time played', num(m.timePlayedSeconds, 0, ' s')],
-                    ] as [string, string][]).map(([k, v]) => (
-                      <Detail key={k} label={k} value={v} />
-                    ))}
+                    ] as [string, string][])
+                      .filter(([, v]) => v)
+                      .map(([k, v]) => (
+                        <Detail key={k} label={k} value={v} />
+                      ))}
                   </div>
                 )}
               </React.Fragment>

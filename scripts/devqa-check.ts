@@ -2186,6 +2186,16 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('no overall K/D under a side label (defense)', /defenseKd\s*\|\|\s*a?\.?kd/.test(agents), false);
   check('no overall K/D under a side label (attack)', /attackKd\s*\|\|\s*a?\.?kd/.test(agents), false);
   {
+    /* The expanded detail grid used to print "undefined / undefined / undefined"
+     * for a row whose counters the payload did not carry, and drew an empty
+     * bordered band when every row was absent. */
+    const prepSrc = readFileSync(new URL('../src/v2/surfaces/Prep.tsx', import.meta.url), 'utf8');
+    check('detail values are joined, not interpolated', /\$\{a\.(kills|deaths|assists|attackRoundsWon)/.test(prepSrc), false);
+    check('the detail grid uses the guarded join', /joinInts\(|wonLost\(/.test(prepSrc), true);
+    check('an empty expansion renders nothing', /detailRows\(a\)\.length > 0/.test(prepSrc), true);
+  }
+
+  {
     /* A missing stat used to crash the whole Prep view: `.toFixed` on undefined
      * threw inside <AgentTable> and the error boundary replaced the page with
      * "This view failed to load". And `String(Math.round(NaN))` printed the

@@ -20,3 +20,26 @@ export const num = (v: unknown, digits: number, suffix = ''): string =>
  */
 export const signedInt = (v: unknown): string =>
   typeof v === 'number' && Number.isFinite(v) ? (v > 0 ? `+${Math.round(v)}` : String(Math.round(v))) : '';
+
+/** Join whole numbers that exist, and only those.
+ *
+ *  `${a} / ${b} / ${c}` on a partial row prints "undefined / undefined / 3",
+ *  which is the same class of lie as a fabricated default: it looks like data
+ *  and is not. A missing part drops out; if none are present the whole value is
+ *  empty and the caller renders nothing.
+ */
+export const joinInts = (parts: unknown[], sep = ' / '): string =>
+  parts
+    .map((p) => (typeof p === 'number' && Number.isFinite(p) ? String(Math.round(p)) : ''))
+    .filter(Boolean)
+    .join(sep);
+
+/** "12 won / 14 lost", with the half that exists when the other does not. */
+export const wonLost = (won: unknown, lost: unknown): string => {
+  const w = num(won, 0);
+  const l = num(lost, 0);
+  if (!w && !l) return '';
+  if (!l) return `${w} won`;
+  if (!w) return `${l} lost`;
+  return `${w} won / ${l} lost`;
+};
