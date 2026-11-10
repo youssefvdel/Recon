@@ -1,9 +1,12 @@
-//! The HUD window itself: styles, subclass, placement, edit mode, click-through.
+//! The HUD window itself: styles, the message subclass, click-through, edit styles.
 //!
-//! Style and placement stay in one file on purpose: `setup_overlay_window`,
-//! `set_overlay_editable` and `toggle_overlay_clickthrough` each set styles AND
-//! reposition in the same pass, so splitting them by "style vs policy" would cut
-//! through single functions.
+//! Two of these functions mix style with placement in one pass —
+//! `setup_overlay_window`, `set_overlay_editable` and `toggle_overlay_clickthrough`
+//! set flags AND reposition by calling `overlay_placement::overlay_target_rect`.
+//! They stay whole for that reason; the split is by responsibility, not by line.
+
+use super::overlay_edit::overlay_edit_touch;
+use super::overlay_placement::overlay_target_rect;
 
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
@@ -34,378 +37,121 @@ extern "system" {
     fn DefSubclassProc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT;
 }
 
-/// Last mouse activity delivered to the overlay while edit mode was on (epoch
-/// ms; 0 = never). Written by the subclass proc, read by the overlay guard
-/// thread's watchdog. A window that has seen no mouse message for the watchdog
-/// budget is presumed abandoned — exactly the state that used to swallow every
-/// click until the process exited (audit overlay#1).
-pub static OVERLAY_EDIT_ACTIVITY_MS: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
-/// Mark edit-mode activity. Called by the subclass on mouse messages over the
-/// non-click-through overlay and on every entry into edit mode.
-pub fn overlay_edit_touch() {
-    OVERLAY_EDIT_ACTIVITY_MS.store(now_ms(), std::sync::atomic::Ordering::Relaxed);
-}
-
-/// Milliseconds since the last edit-mode mouse activity.
-pub fn overlay_edit_idle_ms() -> u64 {
-    now_ms().saturating_sub(OVERLAY_EDIT_ACTIVITY_MS.load(std::sync::atomic::Ordering::Relaxed))
-}
-
-/// Ctrl+Shift+H — the always-available "leave edit mode" chord.
-///
-/// Polled rather than hooked on purpose: a low-level keyboard hook sits in the
-/// system input path and taxes every keystroke, while this only reads key
-/// state on the guard thread's 100 ms tick. Works regardless of focus and
-/// regardless of whether the overlay webview is alive, which is the whole point
-/// (audit overlay#1a).
-pub fn overlay_edit_exit_chord_down() -> bool {
-    unsafe {
-        let ctrl = (GetAsyncKeyState(0x11) as u16 & 0x8000) != 0; // VK_CONTROL
-        let shift = (GetAsyncKeyState(0x10) as u16 & 0x8000) != 0; // VK_SHIFT
-        let h = (GetAsyncKeyState(0x48) as u16 & 0x8000) != 0; // 'H'
-        ctrl && shift && h
-    }
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct WindowInfo {
-    pub hwnd: isize,
-    pub title: String,
-    #[serde(default)]
-    pub class_name: String,
-    #[serde(default)]
-    pub is_game: bool,
-}
-
-pub fn list_visible_windows() -> Vec<WindowInfo> {
-    let mut windows: Vec<WindowInfo> = Vec::new();
-    let lparam = &mut windows as *mut Vec<WindowInfo> as isize;
-
-    unsafe {
-        let _ = EnumWindows(Some(enum_windows_proc), LPARAM(lparam));
-    }
-
-    windows
-}
-
-unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    unsafe {
-        if !IsWindowVisible(hwnd).as_bool() {
-            return BOOL(1);
-        }
-
-        let length = GetWindowTextLengthW(hwnd);
-        if length == 0 {
-            return BOOL(1);
-        }
-
-        // Filter out zero-size and tool windows
-        let mut rect = RECT::default();
-        if GetWindowRect(hwnd, &mut rect).is_err() {
-            return BOOL(1);
-        }
-        if (rect.right - rect.left) < 120 || (rect.bottom - rect.top) < 80 {
-            return BOOL(1);
-        }
-
-        let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-        if ex_style & WS_EX_TOOLWINDOW.0 != 0 {
-            return BOOL(1);
-        }
-
-        let mut buffer: Vec<u16> = vec![0; (length + 1) as usize];
-        let copied = GetWindowTextW(hwnd, &mut buffer);
-        if copied > 0 {
-            let title = String::from_utf16_lossy(&buffer[..copied as usize]);
-            let trimmed = title.trim();
-            if !trimmed.is_empty()
-                && trimmed != "Program Manager"
-                && trimmed != "Windows Input Experience"
-                && !trimmed.starts_with("Settings")
-                && trimmed != "True Stretch Toolkit"
-                && trimmed != "Aspect"
-            {
-                let mut class_buf = [0u16; 128];
-                let class_len = GetClassNameW(hwnd, &mut class_buf);
-                let class_name = if class_len > 0 {
-                    String::from_utf16_lossy(&class_buf[..class_len as usize])
-                } else {
-                    String::new()
-                };
-
-                let is_game = is_game_window(hwnd, trimmed, &class_name);
-
-                let windows = &mut *(lparam.0 as *mut Vec<WindowInfo>);
-                windows.push(WindowInfo {
-                    hwnd: hwnd.0 as isize,
-                    title: trimmed.to_string(),
-                    class_name,
-                    is_game,
-                });
+unsafe extern "system" fn overlay_subclass_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _u_id_subclass: usize,
+    _dw_ref_data: usize,
+) -> LRESULT {
+    match msg {
+        // 1. WM_NCCALCSIZE (0x0083):
+        // Returning 0 when wParam is TRUE indicates that the client area covers the ENTIRE window.
+        // Windows sets titlebar height, non-client borders, and frame margins to 0 pixels.
+        // This eliminates the ~30px ghost titlebar completely!
+        0x0083 => {
+            if wparam.0 != 0 {
+                return LRESULT(0);
             }
         }
-
-        BOOL(1)
-    }
-}
-
-pub fn is_valorant_game_window(_hwnd: HWND, title: &str, class_name: &str) -> bool {
-    let trimmed = title.trim();
-    let lower = trimmed.to_lowercase();
-
-    // 1. Filter out companion apps, trackers, overlays, and launchers.
-    // "Valorant Tracker", "Overwolf", "Blitz", "Riot Client", etc.
-    if lower.contains("tracker")
-        || lower.contains("overwolf")
-        || lower.contains("blitz")
-        || lower.contains("riot client")
-        || lower.contains("aspect")
-        || lower.contains("discord")
-        || lower.contains("obs")
-        || lower.contains("chrome")
-        || lower.contains("edge")
-    {
-        return false;
-    }
-
-    // 2. Valorant's real game client is an Unreal Engine 4 window ("UnrealWindow" or "VALORANTUnrealWindow").
-    // Third-party trackers and Electron wrappers are NEVER "UnrealWindow".
-    if class_name == "UnrealWindow"
-        || class_name == "VALORANTUnrealWindow"
-        || class_name.contains("UnrealWindow")
-    {
-        return lower == "valorant" || lower.starts_with("valorant");
-    }
-
-    // 3. Fallback: exact match on title "VALORANT" if class_name is unavailable
-    lower == "valorant" || lower.starts_with("valorant")
-}
-
-#[allow(dead_code)]
-pub fn is_valorant_foreground() -> bool {
-    unsafe {
-        let fg = GetForegroundWindow();
-        if !IsWindow(fg).as_bool() {
-            return false;
-        }
-        let length = GetWindowTextLengthW(fg);
-        if length == 0 {
-            return false;
-        }
-        let mut buffer: Vec<u16> = vec![0; (length + 1) as usize];
-        let copied = GetWindowTextW(fg, &mut buffer);
-        if copied > 0 {
-            let title = String::from_utf16_lossy(&buffer[..copied as usize]);
-            let mut class_buf = [0u16; 128];
-            let class_len = GetClassNameW(fg, &mut class_buf);
-            let class_name = if class_len > 0 {
-                String::from_utf16_lossy(&class_buf[..class_len as usize])
-            } else {
-                String::new()
-            };
-            return is_valorant_game_window(fg, title.trim(), &class_name);
-        }
-        false
-    }
-}
-
-pub fn is_game_window(hwnd: HWND, title: &str, class_name: &str) -> bool {
-    if is_valorant_game_window(hwnd, title, class_name) {
-        return true;
-    }
-    let lower = title.trim().to_lowercase();
-    if lower.contains("tracker")
-        || lower.contains("overwolf")
-        || lower.contains("blitz")
-        || lower.contains("riot client")
-        || lower.contains("aspect")
-    {
-        return false;
-    }
-    lower.contains("counter-strike") || lower.contains("cs2") || lower.contains("aimlabs")
-}
-
-pub fn find_valorant_game_window() -> Option<WindowInfo> {
-    let windows = list_visible_windows();
-    for w in windows {
-        let hwnd = HWND(w.hwnd as *mut std::ffi::c_void);
-        if is_valorant_game_window(hwnd, &w.title, &w.class_name) {
-            return Some(w);
-        }
-    }
-    None
-}
-
-pub fn is_window_borderless_fullscreen(hwnd: HWND) -> bool {
-    unsafe {
-        if !IsWindow(hwnd).as_bool() {
-            return false;
-        }
-
-        let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
-        let is_popup = (style & WS_POPUP.0) != 0;
-        let has_caption = (style & (WS_CAPTION.0 | WS_THICKFRAME.0)) != 0;
-
-        if !is_popup || has_caption {
-            return false;
-        }
-
-        let h_mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        let mut mi = MONITORINFO {
-            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-            ..Default::default()
-        };
-
-        if GetMonitorInfoW(h_mon, &mut mi).as_bool() {
-            let mut wr = RECT::default();
-            if GetWindowRect(hwnd, &mut wr).is_ok() {
-                let mon_w = mi.rcMonitor.right - mi.rcMonitor.left;
-                let mon_h = mi.rcMonitor.bottom - mi.rcMonitor.top;
-                let win_w = wr.right - wr.left;
-                let win_h = wr.bottom - wr.top;
-                return win_w == mon_w && win_h == mon_h;
+        // 2. WM_NCHITTEST (0x0084):
+        // When not actively editing, return HTTRANSPARENT (-1).
+        // Tells Windows mouse hit-testing to ignore this window completely and dispatch
+        // all cursor clicks/events to the window beneath it (Valorant)!
+        0x0084 => {
+            if !crate::OVERLAY_EDIT_MODE.load(std::sync::atomic::Ordering::Relaxed) {
+                return LRESULT(-1); // HTTRANSPARENT
             }
         }
-        false
-    }
-}
-
-pub fn make_borderless(hwnd_val: isize) -> Result<String, String> {
-    unsafe {
-        let hwnd = HWND(hwnd_val as *mut std::ffi::c_void);
-        if !IsWindow(hwnd).as_bool() {
-            return Err("Target window is no longer valid.".to_string());
-        }
-
-        let current_style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
-        let mut style = WINDOW_STYLE(current_style);
-
-        // Strip decorations
-        style &= !(WS_CAPTION
-            | WS_THICKFRAME
-            | WS_MINIMIZEBOX
-            | WS_MAXIMIZEBOX
-            | WS_SYSMENU
-            | WS_BORDER);
-        style |= WS_POPUP;
-
-        SetWindowLongPtrW(hwnd, GWL_STYLE, style.0 as isize);
-
-        // Query monitor bounds
-        let h_mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        let mut mi = MONITORINFO {
-            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-            ..Default::default()
-        };
-
-        let (x, y, width, height) = if GetMonitorInfoW(h_mon, &mut mi).as_bool() {
-            let rc: RECT = mi.rcMonitor;
-            (rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top)
-        } else {
-            let cx = GetSystemMetrics(SM_CXSCREEN);
-            let cy = GetSystemMetrics(SM_CYSCREEN);
-            (0, 0, cx, cy)
-        };
-
-        // Borderless FULLSCREEN = strip the frame AND cover the whole monitor.
-        // Applied twice: games often re-assert their own size on the first
-        // style change — the second pass wins.
-        //
-        // SWP_NOACTIVATE | SWP_NOZORDER are load-bearing: without them this
-        // raises AND activates the game, so every auto-apply buried Recon
-        // behind Valorant and forced an alt-tab. The game does not need
-        // z-order or activation to be borderless — only style + geometry.
-        for _ in 0..2 {
-            SetWindowPos(
-                hwnd,
-                HWND_TOP,
-                x,
-                y,
-                width,
-                height,
-                SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOZORDER,
-            )
-            .map_err(|e| format!("SetWindowPos failed: {}", e))?;
-        }
-
-        // Re-assert shortly after: Valorant reverts external resizes on some
-        // frames. A background nudge wins without blocking the UI.
-        // (HWND is a raw pointer, so the plain integer crosses threads.)
-        let hwnd_val = hwnd_val;
-        std::thread::spawn(move || {
-            let hwnd = HWND(hwnd_val as *mut std::ffi::c_void);
-            for ms in [400u64, 1000] {
-                std::thread::sleep(std::time::Duration::from_millis(ms));
-                if !IsWindow(hwnd).as_bool() {
-                    break;
-                }
-                let _ = SetWindowPos(
-                    hwnd,
-                    HWND_TOP,
-                    x,
-                    y,
-                    width,
-                    height,
-                    SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOZORDER,
-                );
+        // 3. WM_NCPAINT (0x0085):
+        // Return 0 so DWM never attempts to render non-client frame/borders.
+        0x0085 => return LRESULT(0),
+        // 4. WM_NCACTIVATE (0x0086):
+        // Return 1 so Windows never repaints the titlebar on focus change.
+        0x0086 => return LRESULT(1),
+        // 5. WM_ERASEBKGND (0x0014):
+        // Return 1 so GDI never paints a white background before DirectX composites.
+        0x0014 => return LRESULT(1),
+        // 6. Mouse activity while edit mode is on: the fail-safe heartbeat.
+        // Not swallowed — falls through to DefSubclassProc like any normal
+        // message; we only stamp that a human is still there.
+        0x0200 | 0x0201 | 0x0202 | 0x020A => {
+            if crate::OVERLAY_EDIT_MODE.load(std::sync::atomic::Ordering::Relaxed) {
+                overlay_edit_touch();
             }
-        });
+        }
+        _ => {}
+    }
+    DefSubclassProc(hwnd, msg, wparam, lparam)
+}
 
-        // Read back what actually stuck, so the UI reports truth, not hope.
-        let mut final_rect = RECT::default();
-        let (fw, fh) = if GetWindowRect(hwnd, &mut final_rect).is_ok() {
-            (
-                final_rect.right - final_rect.left,
-                final_rect.bottom - final_rect.top,
-            )
-        } else {
-            (width, height)
-        };
-
-        Ok(format!(
-            "Borderless fullscreen: window now {}x{} on a {}x{} screen",
-            fw, fh, width, height
-        ))
+/// Invalidate the whole overlay window tree so DWM drops any stale surface
+/// regions (white flashes) left behind by style toggles and resolution
+/// switches. The frontend's own repaint hammer covers the web content.
+pub fn install_overlay_subclass(top_hwnd: HWND) {
+    unsafe {
+        let _ = SetWindowSubclass(top_hwnd, Some(overlay_subclass_proc), 0x7001, 0);
     }
 }
 
-pub fn restore_window(hwnd_val: isize) -> Result<String, String> {
+fn redraw_all(hwnd: HWND) {
     unsafe {
-        let hwnd = HWND(hwnd_val as *mut std::ffi::c_void);
-        if !IsWindow(hwnd).as_bool() {
-            return Err("Target window is no longer valid.".to_string());
-        }
-
-        let current_style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
-        let mut style = WINDOW_STYLE(current_style);
-
-        style &= !WS_POPUP;
-        style |= WS_OVERLAPPEDWINDOW;
-
-        SetWindowLongPtrW(hwnd, GWL_STYLE, style.0 as isize);
-
-        SetWindowPos(
+        // Null region handle by value: Option<HRGN> does not implement
+        // Param<HRGN> under the mixed windows-core versions in this graph.
+        let _ = RedrawWindow(
             hwnd,
-            HWND_TOP,
-            100,
-            100,
-            1280,
-            720,
-            SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOZORDER,
-        )
-        .map_err(|e| format!("SetWindowPos failed: {}", e))?;
-
-        Ok("Window restored to standard framed mode.".to_string())
+            None,
+            HRGN(std::ptr::null_mut()),
+            RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN,
+        );
     }
+}
+
+pub fn strip_all_dwm_borders(hwnd: HWND) {
+    unsafe {
+        // 1. Prevent Windows 11 rounded corners from drawing white pixels in corners
+        let do_not_round: u32 = 1; // DWMWCP_DONOTROUND
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            33, // DWMWA_WINDOW_CORNER_PREFERENCE
+            &do_not_round as *const _ as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+
+        // 2. NOTE: DWMWA_NCRENDERING_POLICY = DWMNCRP_DISABLED is intentionally
+        // NOT set here. Per MS docs it is a documented reset trigger for the
+        // blur-behind compositing tao establishes at window creation — setting
+        // it makes DWM composite the transparent overlay opaque (white bar).
+        // The border/caption color attributes below already suppress all chrome.
+
+        // 3. Strictly prohibit DWM from drawing any window border or frame
+        let color_none: u32 = 0xFFFFFFFE; // DWMWA_COLOR_NONE
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            34, // DWMWA_BORDER_COLOR
+            &color_none as *const _ as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+
+        // 4. Force caption area color to none if any non-client calculation leaks
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            35, // DWMWA_CAPTION_COLOR
+            &color_none as *const _ as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+    }
+}
+
+/// Re-enable DWM blur-behind compositing — the transparency tao establishes
+/// at window creation for `transparent: true` windows. Style/pos changes and
+/// the resulting WM_NCCALCSIZE can make DWM drop it, leaving the overlay
+/// composited opaque (the white bar). Harmless if already enabled.
+pub fn restore_blur_behind(_hwnd: HWND) {
+    // No-op: modern Windows 10/11 DirectComposition transparent webview
+    // handles alpha blending natively. DwmEnableBlurBehindWindow is a legacy
+    // API that causes visual artifacts and flickering on layered windows.
 }
 
 /// Dev debugging aid: reshape the overlay into a normal framed window (and
@@ -471,262 +217,6 @@ pub fn set_overlay_windowed(hwnd_val: isize, windowed: bool) -> Result<(), Strin
             );
         }
         Ok(())
-    }
-}
-
-/// Invalidate the whole overlay window tree so DWM drops any stale surface
-/// regions (white flashes) left behind by style toggles and resolution
-/// switches. The frontend's own repaint hammer covers the web content.
-fn redraw_all(hwnd: HWND) {
-    unsafe {
-        // Null region handle by value: Option<HRGN> does not implement
-        // Param<HRGN> under the mixed windows-core versions in this graph.
-        let _ = RedrawWindow(
-            hwnd,
-            None,
-            HRGN(std::ptr::null_mut()),
-            RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN,
-        );
-    }
-}
-
-#[link(name = "dwmapi")]
-extern "system" {
-    fn DwmSetWindowAttribute(
-        hwnd: HWND,
-        dw_attribute: u32,
-        pv_attribute: *const std::ffi::c_void,
-        cb_attribute: u32,
-    ) -> windows::core::HRESULT;
-}
-
-pub fn strip_all_dwm_borders(hwnd: HWND) {
-    unsafe {
-        // 1. Prevent Windows 11 rounded corners from drawing white pixels in corners
-        let do_not_round: u32 = 1; // DWMWCP_DONOTROUND
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            33, // DWMWA_WINDOW_CORNER_PREFERENCE
-            &do_not_round as *const _ as *const std::ffi::c_void,
-            std::mem::size_of::<u32>() as u32,
-        );
-
-        // 2. NOTE: DWMWA_NCRENDERING_POLICY = DWMNCRP_DISABLED is intentionally
-        // NOT set here. Per MS docs it is a documented reset trigger for the
-        // blur-behind compositing tao establishes at window creation — setting
-        // it makes DWM composite the transparent overlay opaque (white bar).
-        // The border/caption color attributes below already suppress all chrome.
-
-        // 3. Strictly prohibit DWM from drawing any window border or frame
-        let color_none: u32 = 0xFFFFFFFE; // DWMWA_COLOR_NONE
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            34, // DWMWA_BORDER_COLOR
-            &color_none as *const _ as *const std::ffi::c_void,
-            std::mem::size_of::<u32>() as u32,
-        );
-
-        // 4. Force caption area color to none if any non-client calculation leaks
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            35, // DWMWA_CAPTION_COLOR
-            &color_none as *const _ as *const std::ffi::c_void,
-            std::mem::size_of::<u32>() as u32,
-        );
-    }
-}
-
-/// Re-enable DWM blur-behind compositing — the transparency tao establishes
-/// at window creation for `transparent: true` windows. Style/pos changes and
-/// the resulting WM_NCCALCSIZE can make DWM drop it, leaving the overlay
-/// composited opaque (the white bar). Harmless if already enabled.
-pub fn restore_blur_behind(_hwnd: HWND) {
-    // No-op: modern Windows 10/11 DirectComposition transparent webview
-    // handles alpha blending natively. DwmEnableBlurBehindWindow is a legacy
-    // API that causes visual artifacts and flickering on layered windows.
-}
-
-pub(crate) fn overlay_monitor_file() -> std::path::PathBuf {
-    std::env::var("LOCALAPPDATA")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::path::PathBuf::from(r"C:\Users\Administrator\AppData\Local"))
-        .join("Recon")
-        .join("overlay_monitor.txt")
-}
-
-/// Overlay monitor choice: "auto" (default — follow the game window) or a
-/// `\\.\DISPLAYn` device name pinned by the user in Settings.
-pub fn get_overlay_monitor_setting() -> String {
-    crate::settings::load_overlay_monitor()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "auto".to_string())
-}
-
-pub fn set_overlay_monitor_setting(name: &str) -> Result<String, String> {
-    let clean = name.trim();
-    if !clean.eq_ignore_ascii_case("auto") {
-        let known = crate::display::get_all_monitors();
-        if !known.iter().any(|m| m.device_name == clean) {
-            return Err(format!("Unknown monitor '{}'", clean));
-        }
-    }
-    crate::settings::save_overlay_monitor(clean);
-    Ok(clean.to_string())
-}
-
-/// Pinned monitor rect, if the user picked one and it is still attached.
-pub fn overlay_monitor_rect() -> Option<(i32, i32, i32, i32)> {
-    let want = get_overlay_monitor_setting();
-    if want.eq_ignore_ascii_case("auto") {
-        return None;
-    }
-    crate::display::get_all_monitors()
-        .into_iter()
-        .find_map(|m| {
-            if m.device_name == want && m.is_attached && !m.is_device_disabled {
-                Some((m.position_x, m.position_y, m.width as i32, m.height as i32))
-            } else {
-                None
-            }
-        })
-}
-
-/// Single source of truth for where the overlay belongs: pinned monitor >
-/// game window > nearest monitor.
-pub fn overlay_target_rect(hwnd: HWND) -> (i32, i32, i32, i32) {
-    if let Some(r) = overlay_monitor_rect() {
-        return r;
-    }
-    get_valorant_or_screen_rect(hwnd)
-}
-
-pub fn get_valorant_or_screen_rect(hwnd: HWND) -> (i32, i32, i32, i32) {
-    unsafe {
-        if let Some(val) = find_valorant_game_window() {
-            let val_hwnd = HWND(val.hwnd as *mut std::ffi::c_void);
-            let mut rect = RECT::default();
-            if GetWindowRect(val_hwnd, &mut rect).is_ok() {
-                let w = rect.right - rect.left;
-                let h = rect.bottom - rect.top;
-                if w > 100 && h > 100 {
-                    return (rect.left, rect.top, w, h);
-                }
-            }
-        }
-
-        let h_mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        let mut mi = MONITORINFO {
-            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-            ..Default::default()
-        };
-        if GetMonitorInfoW(h_mon, &mut mi).as_bool() {
-            let rc = mi.rcMonitor;
-            (rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top)
-        } else {
-            let cx = GetSystemMetrics(SM_CXSCREEN);
-            let cy = GetSystemMetrics(SM_CYSCREEN);
-            (0, 0, cx, cy)
-        }
-    }
-}
-
-pub fn align_overlay_to_valorant(hwnd_val: isize) -> Result<(), String> {
-    unsafe {
-        let hwnd = HWND(hwnd_val as *mut std::ffi::c_void);
-        if !IsWindow(hwnd).as_bool() {
-            return Err("Overlay window handle is invalid.".to_string());
-        }
-
-        // Pinned monitor wins; otherwise follow the game window (or nearest
-        // screen via overlay_target_rect's fallback).
-        let (tx, ty, tw, th) = overlay_target_rect(hwnd);
-        if tw > 100 && th > 100 {
-            let mut cur_rect = RECT::default();
-            if GetWindowRect(hwnd, &mut cur_rect).is_ok() {
-                if cur_rect.left != tx
-                    || cur_rect.top != ty
-                    || (cur_rect.right - cur_rect.left) != tw
-                    || (cur_rect.bottom - cur_rect.top) != th
-                {
-                    // ponytail: no SWP_SHOWWINDOW — positioning must never
-                    // undo a hide(); callers that mean "show" call
-                    // window.show() themselves.
-                    let _ = SetWindowPos(
-                        hwnd,
-                        HWND_TOPMOST,
-                        tx,
-                        ty,
-                        tw,
-                        th,
-                        SWP_NOACTIVATE | SWP_NOZORDER,
-                    );
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-/// OS-level Tab key state for the in-match scoreboard peek.
-/// Reads the physical key, not the focused window — the click-through overlay
-/// never receives keyboard focus, so JS key listeners can't fire in-game.
-pub fn is_tab_down() -> bool {
-    unsafe { (GetAsyncKeyState(0x09) as u16 & 0x8000) != 0 }
-}
-
-unsafe extern "system" fn overlay_subclass_proc(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-    _u_id_subclass: usize,
-    _dw_ref_data: usize,
-) -> LRESULT {
-    match msg {
-        // 1. WM_NCCALCSIZE (0x0083):
-        // Returning 0 when wParam is TRUE indicates that the client area covers the ENTIRE window.
-        // Windows sets titlebar height, non-client borders, and frame margins to 0 pixels.
-        // This eliminates the ~30px ghost titlebar completely!
-        0x0083 => {
-            if wparam.0 != 0 {
-                return LRESULT(0);
-            }
-        }
-        // 2. WM_NCHITTEST (0x0084):
-        // When not actively editing, return HTTRANSPARENT (-1).
-        // Tells Windows mouse hit-testing to ignore this window completely and dispatch
-        // all cursor clicks/events to the window beneath it (Valorant)!
-        0x0084 => {
-            if !crate::OVERLAY_EDIT_MODE.load(std::sync::atomic::Ordering::Relaxed) {
-                return LRESULT(-1); // HTTRANSPARENT
-            }
-        }
-        // 3. WM_NCPAINT (0x0085):
-        // Return 0 so DWM never attempts to render non-client frame/borders.
-        0x0085 => return LRESULT(0),
-        // 4. WM_NCACTIVATE (0x0086):
-        // Return 1 so Windows never repaints the titlebar on focus change.
-        0x0086 => return LRESULT(1),
-        // 5. WM_ERASEBKGND (0x0014):
-        // Return 1 so GDI never paints a white background before DirectX composites.
-        0x0014 => return LRESULT(1),
-        // 6. Mouse activity while edit mode is on: the fail-safe heartbeat.
-        // Not swallowed — falls through to DefSubclassProc like any normal
-        // message; we only stamp that a human is still there.
-        0x0200 | 0x0201 | 0x0202 | 0x020A => {
-            if crate::OVERLAY_EDIT_MODE.load(std::sync::atomic::Ordering::Relaxed) {
-                overlay_edit_touch();
-            }
-        }
-        _ => {}
-    }
-    DefSubclassProc(hwnd, msg, wparam, lparam)
-}
-
-pub fn install_overlay_subclass(top_hwnd: HWND) {
-    unsafe {
-        let _ = SetWindowSubclass(top_hwnd, Some(overlay_subclass_proc), 0x7001, 0);
     }
 }
 
@@ -945,4 +435,21 @@ pub fn toggle_overlay_clickthrough(hwnd_val: isize, clickthrough: bool) -> Resul
 
         Ok(())
     }
+}
+
+/// OS-level Tab key state for the in-match scoreboard peek.
+/// Reads the physical key, not the focused window — the click-through overlay
+/// never receives keyboard focus, so JS key listeners can't fire in-game.
+pub fn is_tab_down() -> bool {
+    unsafe { (GetAsyncKeyState(0x09) as u16 & 0x8000) != 0 }
+}
+
+#[link(name = "dwmapi")]
+extern "system" {
+    fn DwmSetWindowAttribute(
+        hwnd: HWND,
+        dw_attribute: u32,
+        pv_attribute: *const std::ffi::c_void,
+        cb_attribute: u32,
+    ) -> windows::core::HRESULT;
 }
