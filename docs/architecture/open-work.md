@@ -63,6 +63,14 @@ removal) → Settings dialog → cleanup → **HUD last**.
 select.** Both are built and wired; nobody has seen either in a live game on a
 current build. Everything else has been measured.
 
+## Step 3 deferral (recorded so it is not a silent loss)
+
+**The loadout / skins viewer is deferred, not deleted.** It owned a dialog and its
+own Escape handler; mounting it inside the new in-place live section would
+reintroduce the exact Escape collision fixed in `d7a99ef`. When it returns it must
+be a **drawer** (region, no backdrop, no keydown of its own), not the old modal.
+Until then the live rows have no Skins/Loadouts affordance.
+
 ## Known gaps, deliberately not fixed
 
 - `riotPut`/`riotPost`: prepick converted; **storefront in progress** (rust-proxy);
