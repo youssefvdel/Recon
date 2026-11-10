@@ -28,6 +28,13 @@ type Route = {
   id: string;
   clicks?: string[];
   marker: RegExp;
+  /** Navigate to this fragment instead of the pass base (deep link). */
+  hash?: string;
+  /** Item to pick from the ⋯ menu (matched inside [role="menu"] only, so a page
+   *  button with the same label cannot be clicked by mistake). */
+  menu?: string;
+  /** A Tools section whose body must have mounted (lazy mount must not be a no-op). */
+  section?: string;
   /** Written reason why this route may exceed one viewport. */
   allowTall?: string;
 };
@@ -49,10 +56,23 @@ const OLD_ROUTES: Route[] = [
   { id: 'settings', clicks: ['Settings'], marker: /Application Settings/i },
 ];
 
+/* The six tools are anchors in ONE sheet, not six pages: each route deep-links
+ * to its section, and `section` asserts that section's body actually mounted —
+ * a heading alone would pass even if the lazy mount never fired. */
+const TOOL_ROUTES: Route[] = [
+  { id: 'store', hash: '#store', section: 'store', menu: 'Store', marker: /Store/i },
+  { id: 'crosshair', hash: '#crosshair', section: 'crosshair', menu: 'Crosshair', marker: /Crosshair/i },
+  { id: 'prepicker', hash: '#prepick', section: 'prepick', menu: 'Pre-Picker', marker: /Pre-Picker/i },
+  { id: 'resolution', hash: '#resolution', section: 'resolution', menu: 'Resolution', marker: /Resolution/i },
+  { id: 'chat', hash: '#chat', section: 'chat', menu: 'Riot Chat', marker: /Riot Chat/i },
+  { id: 'accounts', hash: '#accounts', section: 'accounts', menu: 'Accounts', marker: /Accounts/i },
+].map((r) => ({ ...r, allowTall: 'the tools sheet is one page with six anchored sections' }));
+
 const V2_ROUTES: Route[] = [
   { id: 'now', clicks: ['Now'], marker: /Recent matches|as of|Current Act/i, allowTall: 'the v2 feed is the page' },
   { id: 'matches', clicks: ['Matches'], marker: /Matches|Surface not built yet/i },
   { id: 'prep', clicks: ['Prep'], marker: /Prep|Surface not built yet/i },
+  ...TOOL_ROUTES,
 ];
 
 const PASSES: Pass[] = [
@@ -99,8 +119,14 @@ const PROBE = String.raw`(() => {
     height: document.documentElement.scrollHeight,
     viewport: window.innerHeight,
     boundary, alerts, cards, badCells, badBody,
+    mounted: [...main.querySelectorAll('[data-tools-section]')]
+      .filter((e) => e.getAttribute('data-mounted') === 'true')
+      .map((e) => e.id),
     placeholder: /Surface not built yet/i.test(body),
     head: text.slice(0, 180),
+    /* A sheet route's landmark can sit anywhere on the page: six sections of
+       real content push it past any fixed head window. Bounded, not unbounded. */
+    text: text.slice(0, 6000),
   });
 })()`;
 
@@ -202,8 +228,19 @@ async function run(): Promise<number> {
         console.log(`\n=== ${pass.name} pass ===`);
         for (const route of pass.routes) {
           const reasons: string[] = [];
-          await cdp.send('Page.navigate', { url: pass.base });
+          /* A different query string forces a real document load; a bare fragment
+           * change is same-document and would leave the previous route mounted. */
+          const url = pass.base + (route.hash ? `&u=${route.id}${route.hash}` : '');
+          await cdp.send('Page.navigate', { url });
           await Bun.sleep(900);
+          if (route.menu) {
+            const opened = await evalx(`(() => { const n=(s)=>(s||'').replace(/\\s+/g,' ').trim(); const b=[...document.querySelectorAll('button')].find(x=>n(x.innerText)==='⋯'); if(!b) return 'NO_BUTTON'; b.click(); return 'ok'; })()`);
+            if (opened !== 'ok') reasons.push(`click failed: ⋯ (${opened})`);
+            await Bun.sleep(260);
+            const picked = await evalx(`(() => { const n=(s)=>(s||'').replace(/\\s+/g,' ').trim(); const root=document.querySelector('[role="menu"]'); if(!root) return 'NO_MENU'; const b=[...root.querySelectorAll('button')].find(x=>n(x.innerText)===${JSON.stringify(route.menu)}); if(!b) return 'NO_ITEM'; b.click(); return 'ok'; })()`);
+            if (picked !== 'ok') reasons.push(`menu item failed: ${route.menu} (${picked})`);
+            await Bun.sleep(260);
+          }
           for (const label of route.clicks ?? []) {
             const clicked = await evalx(`(() => { const n=(s)=>(s||'').replace(/\\s+/g,' ').trim(); const b=[...document.querySelectorAll('button')].find(x=>n(x.innerText)===${JSON.stringify(label)}); if(!b) return 'NO_BUTTON'; b.click(); return 'ok'; })()`);
             if (clicked !== 'ok') reasons.push(`click failed: ${label} (${clicked})`);
@@ -214,9 +251,11 @@ async function run(): Promise<number> {
 
           if (data.boundary) reasons.push('view error boundary is rendered');
           if (data.alerts.length) reasons.push(`role=alert: ${data.alerts.join(' | ').slice(0, 120)}`);
-          if (!data.placeholder && !route.marker.test(String(data.head || ''))) reasons.push(`primary landmark missing (${route.marker})`);
+          const hay = route.section ? String(data.text || '') : String(data.head || '');
+          if (!data.placeholder && !route.marker.test(hay)) reasons.push(`primary landmark missing (${route.marker})`);
           if (data.badBody) reasons.push('body contains NaN/undefined/Infinity');
           for (const cell of data.badCells.slice(0, 4)) reasons.push(`bad cell <${cell.tag} class="${cell.cls}">: ${JSON.stringify(cell.text).slice(0, 80)}`);
+          if (route.section && !data.mounted.includes(route.section)) reasons.push(`section #${route.section} body did not mount`);
           if (data.height > data.viewport + 1 && !route.allowTall) reasons.push(`page height ${data.height} > viewport ${data.viewport}`);
 
           const na = Boolean(data.placeholder);
