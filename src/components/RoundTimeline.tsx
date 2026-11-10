@@ -1,5 +1,5 @@
-import React, { useId, useMemo, useRef, useState } from 'react';
-import { Bomb, ChevronDown, Wrench } from 'lucide-react';
+import React, { useId, useMemo, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import type { MatchRoundDetail, MatchRoundPlayer } from '../types';
 
 /* Round-by-round view for a tracked match (docs/features/round-timeline.md §3).
@@ -29,6 +29,13 @@ export interface RoundTimelineProps {
   roster: RoundTimelineRosterEntry[];
   /** weapon id → display name, from the existing gameData() cache. */
   weaponNames?: Record<string, string>;
+  /** Selection is owned above (RoundRail renders the one selector). Omit both
+   *  props and the timeline keeps its own state, unchanged. */
+  selectedRound?: number | null;
+  onSelectRound?: (roundNum: number) => void;
+  /** Open on mount. The modal's rounds tab passes true so the rail it renders
+   *  above always has something to drive. */
+  defaultExpanded?: boolean;
 }
 
 /* The match-details mapper currently stores `roundNum` 0-based (18 rounds ->
@@ -82,16 +89,20 @@ export const RoundTimeline: React.FC<RoundTimelineProps> = ({
   subjectPuuid,
   roster,
   weaponNames,
+  selectedRound: selectedRoundProp,
+  onSelectRound,
+  defaultExpanded = false,
 }) => {
   const rounds = useMemo(() => roundDetails ?? [], [roundDetails]);
   const hasData = rounds.length > 0;
 
-  const [expanded, setExpanded] = useState(false);
-  const [selectedRound, setSelectedRound] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const [internalSelected, setInternalSelected] = useState<number | null>(null);
+  const selectedRound = selectedRoundProp ?? internalSelected;
+  const setSelectedRound = onSelectRound ?? setInternalSelected;
   const [playerPuuid, setPlayerPuuid] = useState(subjectPuuid);
   const panelId = useId();
   const playerSelectId = useId();
-  const tabRefs = useRef(new Map<number, HTMLButtonElement>());
 
   const rosterByPuuid = useMemo(() => {
     const m = new Map<string, RoundTimelineRosterEntry>();
@@ -115,48 +126,6 @@ export const RoundTimeline: React.FC<RoundTimelineProps> = ({
 
   const selected =
     rounds.find((r) => r.roundNum === selectedRound) ?? rounds[0] ?? null;
-
-  const selectRound = (roundNum: number): void => {
-    setSelectedRound(roundNum);
-    requestAnimationFrame(() => {
-      tabRefs.current
-        .get(roundNum)
-        ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    });
-  };
-
-  const moveSelection = (delta: 1 | -1 | 'first' | 'last'): void => {
-    if (rounds.length === 0) return;
-    const currentIdx = Math.max(
-      0,
-      rounds.findIndex((r) => r.roundNum === selected?.roundNum)
-    );
-    const nextIdx =
-      delta === 'first'
-        ? 0
-        : delta === 'last'
-          ? rounds.length - 1
-          : (currentIdx + delta + rounds.length) % rounds.length;
-    const next = rounds[nextIdx];
-    setSelectedRound(next.roundNum);
-    requestAnimationFrame(() => tabRefs.current.get(next.roundNum)?.focus());
-  };
-
-  const onStripKeyDown = (e: React.KeyboardEvent): void => {
-    if (e.key === 'ArrowRight') {
-      e.preventDefault();
-      moveSelection(1);
-    } else if (e.key === 'ArrowLeft') {
-      e.preventDefault();
-      moveSelection(-1);
-    } else if (e.key === 'Home') {
-      e.preventDefault();
-      moveSelection('first');
-    } else if (e.key === 'End') {
-      e.preventDefault();
-      moveSelection('last');
-    }
-  };
 
   /* Kill lines for the selected round, split by the killer's team. Players
      whose puuid is not in the roster (partial payload) are skipped rather
@@ -226,72 +195,6 @@ export const RoundTimeline: React.FC<RoundTimelineProps> = ({
             </p>
           ) : (
             <>
-              {/* Round strip */}
-              <div
-                role="tablist"
-                aria-label="Rounds"
-                onKeyDown={onStripKeyDown}
-                className="flex items-end gap-1 overflow-x-auto custom-scrollbar pb-1"
-              >
-                {rounds.map((r) => {
-                  const tone = toneFor(r.winningTeam);
-                  const isSelected = r.roundNum === (selected?.roundNum ?? rounds[0].roundNum);
-                  const label = `Round ${displayRound(r.roundNum)}: ${tone.label} won${
-                    r.roundResult ? ` (${r.roundResult})` : ''
-                  }${r.bombPlanter ? ', bomb planted' : ''}${r.bombDefuser ? ', bomb defused' : ''}`;
-                  return (
-                    <button
-                      key={r.roundNum}
-                      ref={(el) => {
-                        if (el) tabRefs.current.set(r.roundNum, el);
-                        else tabRefs.current.delete(r.roundNum);
-                      }}
-                      type="button"
-                      role="tab"
-                      id={`round-tab-${r.roundNum}`}
-                      aria-selected={isSelected}
-                      aria-controls="round-detail-panel"
-                      tabIndex={isSelected ? 0 : -1}
-                      aria-label={label}
-                      onClick={() => selectRound(r.roundNum)}
-                      className="shrink-0 flex flex-col items-center gap-1 rounded-lg p-0.5 cursor-pointer"
-                    >
-                      <span
-                        className={`relative flex h-8 w-9 items-center justify-center rounded-md border ${tone.box} ${
-                          isSelected
-                            ? 'ring-2 ring-m3-primary ring-offset-1 ring-offset-m3-surface-container'
-                            : ''
-                        }`}
-                      >
-                        {r.bombPlanter && (
-                          <Bomb className={`w-3 h-3 ${tone.text}`} aria-hidden="true" />
-                        )}
-                        {r.bombDefuser && (
-                          <Wrench className={`w-3 h-3 ${tone.text}`} aria-hidden="true" />
-                        )}
-                      </span>
-                      <span
-                        className={`text-micro font-mono tabular-nums ${
-                          isSelected ? 'text-m3-primary font-bold' : 'text-m3-outline'
-                        }`}
-                      >
-                        {displayRound(r.roundNum)}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Marker legend — the strip icons are not self-explanatory. */}
-              <div className="flex items-center gap-3 text-micro text-m3-outline -mt-1">
-                <span className="inline-flex items-center gap-1">
-                  <Bomb className="w-3 h-3" aria-hidden="true" /> planted
-                </span>
-                <span className="inline-flex items-center gap-1">
-                  <Wrench className="w-3 h-3" aria-hidden="true" /> defused
-                </span>
-              </div>
-
               {/* Selected round */}
               {selected && (
                 <div
@@ -441,7 +344,7 @@ export const RoundTimeline: React.FC<RoundTimelineProps> = ({
                       <button
                         key={r.roundNum}
                         type="button"
-                        onClick={() => selectRound(r.roundNum)}
+                        onClick={() => setSelectedRound(r.roundNum)}
                         aria-label={`Round ${displayRound(r.roundNum)} economy for ${selectedPlayerName}`}
                         aria-current={isSelected ? 'true' : undefined}
                         className={`shrink-0 w-16 rounded-md border px-1.5 py-1 text-left cursor-pointer ${

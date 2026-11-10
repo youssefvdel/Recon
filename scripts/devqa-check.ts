@@ -1424,6 +1424,30 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('readSnapshot no longer discards a stale snapshot', /return null;\s*\}\s*\n\}/.test(parseBody) && !/SNAPSHOT_TTL/.test(parseBody), true);
 }
 
+// --- one round rail, and selection drives BOTH panes -----------------------
+{
+  const { readFileSync } = await import('node:fs');
+  const rail = readFileSync(new URL('../src/components/RoundRail.tsx', import.meta.url), 'utf8');
+  const tl = readFileSync(new URL('../src/components/RoundTimeline.tsx', import.meta.url), 'utf8');
+  const mdm2 = readFileSync(new URL('../src/components/MatchDetailModal.tsx', import.meta.url), 'utf8');
+
+  // One selector: the rail. RoundTimeline must not render a second tablist.
+  check('RoundTimeline no longer renders a round tablist', /role="tablist"/.test(tl), false);
+  check('the rail owns the tablist', /role="tablist"/.test(rail), true);
+  check('the modal renders the rail exactly once', (mdm2.match(/<RoundRail/g) ?? []).length, 1);
+  check('and pins it', /sticky top-0 z-20[^"]*"\s*>\s*<RoundRail/.test(mdm2), true);
+
+  // Selection is state: the rail reports it, the timeline reads it for both panes.
+  check('the rail reports selection upward', /onSelect\(roundNum\)/.test(rail) && /onClick=\{\(\) => select\(r\.roundNum\)\}/.test(rail), true);
+  check(
+    'the timeline takes a controlled selection',
+    /selectedRound\?: number \| null;/.test(tl) && /onSelectRound\?: \(roundNum: number\) => void;/.test(tl),
+    true
+  );
+  check('the modal owns the one selection value', /const \[selectedRound, setSelectedRound\] = useState<number \| null>\(null\);/.test(mdm2), true);
+  check('both panes read the same value', (tl.match(/selected\b/g) ?? []).length > 1, true);
+}
+
 // --- match modal: verdict hero, no duplicate rail, sticky header -----------
 {
   const { readFileSync } = await import('node:fs');

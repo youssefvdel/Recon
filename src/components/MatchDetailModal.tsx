@@ -6,6 +6,7 @@ import { tierName, resolvePlayerNames, gameData } from '../utils/tracker';
 import { getPartyStyle } from '../utils/playerDisplay';
 import { PlayerOverviewModal, type SelectedPlayerInfo } from './PlayerOverviewModal';
 import { RoundTimeline } from './RoundTimeline';
+import { RoundRail } from './RoundRail';
 import { ScoreBadge, scoreTier } from './ScoreBadge';
 import { StatValue } from './StatValue';
 import { formatPct } from '../utils/format';
@@ -79,6 +80,8 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
 }) => {
   const { trnMatchTrs } = useTrackerData();
   const [activeTab, setActiveTab] = useState<ModalTab>('scoreboard');
+  /* One selection for the rail and the round panes: state, not markup. */
+  const [selectedRound, setSelectedRound] = useState<number | null>(null);
   const [resolvedNames, setResolvedNames] = useState<Record<string, { name: string; tag: string }>>({});
   const [selectedPlayer, setSelectedPlayer] = useState<SelectedPlayerInfo | null>(null);
   const [weaponMap, setWeaponMap] = useState<Record<string, string>>({});
@@ -1411,11 +1414,26 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
             </div>
           )}
 
+          {/* One round selector, pinned above the round content: a rail that
+              scrolls away from the round you are reading is worse than none. */}
+          {detail.roundDetails && detail.roundDetails.length > 0 && (
+            <div className="sticky top-0 z-20 bg-m3-surface-container border-b border-m3-outline-subtle px-1 pt-1">
+              <RoundRail
+                rounds={detail.roundDetails}
+                selectedRound={selectedRound}
+                onSelect={setSelectedRound}
+              />
+            </div>
+          )}
+
           {/* Round-by-round — additive section below the scoreboard. Absent
               roundDetails (old cached matches) renders its own empty state. */}
           <RoundTimeline
             key={detail.matchId ?? 'match'}
             roundDetails={detail.roundDetails}
+            selectedRound={selectedRound}
+            onSelectRound={setSelectedRound}
+            defaultExpanded
             subjectPuuid={puuid}
             roster={playerStats.map((p) => ({
               puuid: p.puuid,
