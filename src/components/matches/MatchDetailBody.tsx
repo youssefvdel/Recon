@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {Swords, Clock, Copy, Check} from 'lucide-react';
+import { computeAdvancedStats } from '../../live/advancedStats';
 import { matchVerdict } from '../../utils/matchVerdict';
 import type { TrackerMatchDetail, TrackerMmrPoint } from '../../types';
 import { tierName, resolvePlayerNames, gameData } from '../../utils/tracker';
@@ -159,19 +160,16 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
       const hsPct = totalHits > 0 ? Number(((p.headshots / totalHits) * 100).toFixed(1)) : 0;
 
       // KAST, First Kills, First Deaths, Multi-kills
-      let kastRounds = 0;
       let fk = 0;
       let fd = 0;
       let mk = 0;
 
       for (let rIdx = 0; rIdx < roundsCount; rIdx++) {
         const roundKills = detail.kills.filter((k) => k.round === rIdx);
-        const gotKill = roundKills.some((k) => k.killerPuuid === p.puuid);
-        const died = roundKills.some((k) => k.victimPuuid === p.puuid);
         const killsThisRound = roundKills.filter((k) => k.killerPuuid === p.puuid).length;
 
         if (killsThisRound >= 2) mk++;
-        if (gotKill || !died) kastRounds++;
+
 
         const sortedRoundKills = [...roundKills];
         if (sortedRoundKills.length > 0) {
@@ -180,7 +178,13 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
         }
       }
 
-      const kast = Math.round((kastRounds / roundsCount) * 100);
+      /* KAST% = rounds with (kill OR assist OR survived OR traded) / rounds.
+       * Four-way, per Riot's definition. `undefined` — not 0 — when the match
+       * carries no roundResults, because "no data" and "0%" are different
+       * claims and only one of them is true. The loop above still owns first
+       * kills/deaths and multi-kills: kill-feed facts, not KAST facts. */
+      const advanced = computeAdvancedStats(detail, p.puuid);
+      const kast = advanced.kastPct !== undefined ? Math.round(advanced.kastPct) : undefined;
 
       const agIcon =
         Object.values(agentInfo).find(
@@ -200,7 +204,7 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
         kd,
         acs,
         ddPerRound,
-        kast,
+        kast: kast ?? 0,
         won,
       });
 
@@ -867,7 +871,7 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
                             <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.hsPct > 0 ? formatPct(p.hsPct, 1) : <StatValue reason="Headshot % not recorded for this match" />}</td>
 
                             {/* KAST */}
-                            <td className="py-1.5 px-1 text-center text-m3-outline font-medium text-xs">{p.kast}%</td>
+                            <td className="py-1.5 px-1 text-center text-m3-outline font-medium text-xs">{p.kast !== undefined ? `${p.kast}%` : ''}</td>
 
                             {/* FK */}
                             <td className="py-1.5 px-1 text-center text-m3-mint font-bold text-xs">{p.fk}</td>
@@ -1069,7 +1073,7 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
                             <td className="py-1.5 px-1 text-center text-m3-on-surface font-medium text-xs">{p.hsPct > 0 ? formatPct(p.hsPct, 1) : <StatValue reason="Headshot % not recorded for this match" />}</td>
 
                             {/* KAST */}
-                            <td className="py-1.5 px-1 text-center text-m3-outline font-medium text-xs">{p.kast}%</td>
+                            <td className="py-1.5 px-1 text-center text-m3-outline font-medium text-xs">{p.kast !== undefined ? `${p.kast}%` : ''}</td>
 
                             {/* FK */}
                             <td className="py-1.5 px-1 text-center text-m3-mint font-bold text-xs">{p.fk}</td>
