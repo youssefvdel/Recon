@@ -99,28 +99,39 @@ const PROBE = String.raw`(() => {
   const badCells = cells.filter((c) => /\b(?:NaN|undefined|Infinity)\b/.test(c.text) || c.text === '—' || c.text === '— —');
   const badBody = /\b(?:NaN|undefined|Infinity)\b/.test(text);
 
-  let cards = 0;
-  for (const el of main.querySelectorAll('*')) {
-    const s = getComputedStyle(el);
-    const r = el.getBoundingClientRect();
-    if (r.width * r.height <= 10000) continue;
-    const radius = parseFloat(s.borderTopLeftRadius) || 0;
-    if (radius <= 0) continue;
-    const border = (parseFloat(s.borderTopWidth) || 0) > 0;
-    const bg = s.backgroundColor && s.backgroundColor !== 'transparent' && s.backgroundColor !== 'rgba(0, 0, 0, 0)';
-    if (!border && !bg) continue;
-    const tag = el.tagName;
-    if (tag === 'BUTTON' || tag === 'INPUT' || tag === 'A' || tag === 'SVG') continue;
-    cards++;
-  }
+  /* Census: radius > 0 AND (border OR fill) AND area > 10000px², controls excluded.
+     Counted per root so a section can be measured on its own — a one-page sheet's
+     page total says how many sections happened to mount, not how one looks. */
+  const count = (root) => {
+    let n = 0;
+    for (const el of root.querySelectorAll('*')) {
+      const s = getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      if (r.width * r.height <= 10000) continue;
+      const radius = parseFloat(s.borderTopLeftRadius) || 0;
+      if (radius <= 0) continue;
+      const border = (parseFloat(s.borderTopWidth) || 0) > 0;
+      const bg = s.backgroundColor && s.backgroundColor !== 'transparent' && s.backgroundColor !== 'rgba(0, 0, 0, 0)';
+      if (!border && !bg) continue;
+      const tag = el.tagName;
+      if (tag === 'BUTTON' || tag === 'INPUT' || tag === 'A' || tag === 'SVG') continue;
+      n++;
+    }
+    return n;
+  };
+  const cards = count(main);
+  const sections = [...main.querySelectorAll('[data-tools-section]')].map((sec) => ({
+    id: sec.id,
+    mounted: sec.getAttribute('data-mounted') === 'true',
+    cards: count(sec),
+  }));
 
   return JSON.stringify({
     height: document.documentElement.scrollHeight,
     viewport: window.innerHeight,
     boundary, alerts, cards, badCells, badBody,
-    mounted: [...main.querySelectorAll('[data-tools-section]')]
-      .filter((e) => e.getAttribute('data-mounted') === 'true')
-      .map((e) => e.id),
+    mounted: sections.filter((x) => x.mounted).map((x) => x.id),
+    sections,
     placeholder: /Surface not built yet/i.test(body),
     head: text.slice(0, 180),
     /* A sheet route's landmark can sit anywhere on the page: six sections of
@@ -261,8 +272,9 @@ async function run(): Promise<number> {
           const passOk = reasons.length === 0 && !na;
           if (!passOk && !na) failures++;
           results.push({ pass: pass.name, route: route.id, ok: passOk, na, reasons, height: data.height, viewport: data.viewport, cards: data.cards });
+          const own = route.section ? data.sections.find((x: { id: string }) => x.id === route.section) : undefined;
           console.log(
-            `${na ? 'N/A ' : passOk ? 'PASS' : 'FAIL'} ${route.id}  ${data.height}/${data.viewport}px  ${data.cards} container(s)${route.allowTall ? `  (tall: ${route.allowTall})` : ''}${na ? '  (surface not built)' : ''}`
+            `${na ? 'N/A ' : passOk ? 'PASS' : 'FAIL'} ${route.id}  ${data.height}/${data.viewport}px  ${data.cards} container(s)${own ? `  · #${route.section} ${own.cards}` : ''}${route.allowTall ? `  (tall: ${route.allowTall})` : ''}${na ? '  (surface not built)' : ''}`
           );
           for (const r of reasons) console.log(`  - ${r}`);
         }

@@ -268,7 +268,7 @@ export const ResolutionVisualizer: React.FC<ResolutionVisualizerProps> = ({
   return (
     <div className="h-full min-h-0 flex flex-col gap-2.5 max-w-6xl mx-auto overflow-hidden [@media(max-height:720px)]:overflow-y-auto">
       {/* Sleek Top Toolbar: Agent Selection + View Mode + Apply CTA */}
-      <div className="px-3 py-1.5 rounded-2xl bg-m3-surface-container border border-m3-outline-subtle shadow-m3-1 shrink-0 flex items-center justify-between gap-3">
+      <div className="px-3 py-1.5 border-b border-m3-outline-subtle shrink-0 flex items-center justify-between gap-3">
         {/* Left: Agent picker — icon-only M3 buttons, everything fits, zero scroll.
             Selected agent name + role always shown in the simulator OSD below. */}
         <div className="flex-1 min-w-0 flex items-center overflow-visible p-1 -m-1">
@@ -363,7 +363,7 @@ export const ResolutionVisualizer: React.FC<ResolutionVisualizerProps> = ({
             </div>
 
             {/* Screen Glass Surface */}
-            <div className="relative w-full flex-1 min-h-0 bg-[#0a0712] rounded-xl overflow-hidden border border-m3-outline-subtle/80 flex flex-col select-none">
+            <div className="relative w-full flex-1 min-h-0 bg-[#0a0712] overflow-hidden flex flex-col select-none">
               {/* Tactical Range Grid Canvas */}
               <div
                 className="absolute inset-0 opacity-20 pointer-events-none"
@@ -442,7 +442,7 @@ export const ResolutionVisualizer: React.FC<ResolutionVisualizerProps> = ({
                     {/* Character Viewport with horizontal stretch */}
                     <div className="flex-1 min-h-0 flex items-center justify-center relative my-1 px-1">
                       {/* Static ambient glow — painted once, never re-rastered mid-stretch */}
-                      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-[70%] aspect-[1/2] rounded-full bg-m3-primary/15 blur-2xl pointer-events-none" />
+                      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-[70%] aspect-[1/2] rounded-full bg-gradient-to-b from-m3-primary/20 to-transparent blur-2xl pointer-events-none" />
                       <motion.div
                         animate={{ scaleX: hitboxWidthScale }}
                         transition={stretchTransition}
@@ -480,7 +480,7 @@ export const ResolutionVisualizer: React.FC<ResolutionVisualizerProps> = ({
 
                   <div className="flex-1 min-h-0 flex items-center justify-center relative my-1 px-2">
                     {/* Static ambient glow — painted once, never re-rastered mid-stretch */}
-                    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-[70%] aspect-[1/2] rounded-full bg-m3-primary/15 blur-2xl pointer-events-none" />
+                    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-[70%] aspect-[1/2] rounded-full bg-gradient-to-b from-m3-primary/20 to-transparent blur-2xl pointer-events-none" />
                     <motion.div
                       animate={{ scaleX: hitboxWidthScale }}
                       transition={stretchTransition}
@@ -524,7 +524,7 @@ export const ResolutionVisualizer: React.FC<ResolutionVisualizerProps> = ({
 
         {/* Right 5 Cols: Presets & Controls */}
         <div className="lg:col-span-5 flex flex-col h-full min-h-0">
-          <section className="bg-m3-surface-container border border-m3-outline-subtle rounded-2xl p-3 shadow-m3-1 h-full flex flex-col justify-between min-h-0">
+          <section className="border-t border-m3-outline-subtle p-3 h-full flex flex-col justify-between min-h-0">
             <div className="flex items-center justify-between border-b border-m3-outline-subtle pb-2 shrink-0">
               <div className="flex items-center space-x-1.5">
                 <Eye className="w-4 h-4 text-m3-primary" />
@@ -560,7 +560,7 @@ export const ResolutionVisualizer: React.FC<ResolutionVisualizerProps> = ({
                         )}
                       </div>
                       <span className="font-mono tabular-nums text-xs text-m3-outline font-semibold">
-                        {displayUnverified ? '—' : `${Math.round(nativeH * preset.ratio)}×${nativeH}`}
+                        {displayUnverified ? '' : `${Math.round(nativeH * preset.ratio)}×${nativeH}`}
                       </span>
                     </div>
                   </button>
