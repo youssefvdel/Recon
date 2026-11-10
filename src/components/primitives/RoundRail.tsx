@@ -1,6 +1,6 @@
 import React, { useCallback, useRef } from 'react';
 import { Bomb, Wrench } from 'lucide-react';
-import type { MatchRoundDetail } from '../types';
+import type { MatchRoundDetail } from '../../types';
 
 /* The one round selector. Hoisted out of RoundTimeline so it can stay pinned
  * above the round content while kills and economy scroll beneath it — a rail

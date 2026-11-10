@@ -6,7 +6,7 @@ import { tierName, resolvePlayerNames, gameData } from '../utils/tracker';
 import { getPartyStyle } from '../utils/playerDisplay';
 import { PlayerOverviewModal, type SelectedPlayerInfo } from './PlayerOverviewModal';
 import { RoundTimeline } from './RoundTimeline';
-import { RoundRail } from './RoundRail';
+import { RoundRail } from './primitives/RoundRail';
 import { ScoreBadge, scoreTier } from './ScoreBadge';
 import { StatValue } from './StatValue';
 import { formatPct } from '../utils/format';
