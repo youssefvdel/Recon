@@ -78,6 +78,57 @@ binding.
 *Assertion to add:* the poll must keep its order — names before rank before
 fill — because the fill reads what the earlier steps wrote.
 
+## Write path — the remaining raw PUT/POST surface
+
+GET is validated end to end; `riotPut`/`riotPost` are still exported and called
+raw. The call sites are pinned by devqa (file + function + count), so this list can
+only change deliberately:
+
+- `src/utils/crosshair.ts:639` — `riotPut(host, '/playerPref/v3/savePreference', payload)`
+- `src/utils/prepick.ts:181` — `riotPost(glz, '/pregame/v1/matches/{id}/select/{agentId}')`
+- `src/utils/store.ts:289` — `riotPost(pdHostFor(region), '/store/v3/storefront/{puuid}')`
+
+A validated write means **two** validations, not one:
+
+1. **Before send** — the payload comes from a typed builder and is refused unless it
+   matches what the route accepts (non-empty ids, expected envelope, size cap). A
+   bad write is worse than a failed one: it persists.
+2. **After send** — `assertRiotOk` on the response, then a check of the success
+   shape the route promises. Never report success from a 200 alone.
+
+No retries for writes: a call that failed may already have landed.
+
+### Per site
+
+**1. `prepick.ts:181` — safe to convert first.** POST, no body, fire-and-forget
+(`.catch(() => {})`), response unused, and the match is latched before the call so
+a duplicate hover cannot fire. Conversion: a `riotPostValidated(host, path)` that
+calls `riotPost`, runs `assertRiotOk`, returns `Validated<unknown>`; validate
+`matchId` and `agentId` non-empty before the call; keep the catch. Today every
+failure disappears; after, the call stays fire-and-forget but a validation bug is
+visible to the trace.
+
+**2. `store.ts:289` — safe after a response-shape pass.** A read-shaped POST (empty
+body) returning storefront JSON that the function parses (`SkinsPanelLayout`,
+`AccessoryStore`, `FeaturedBundle`). Nothing user-owned is written; the risk is
+treating an error payload as an empty shop. Conversion: `readStorefront(puuid, host)`
+= POST + `assertRiotOk` + `Validated<unknown>`; the caller keeps its parse and its
+cache. Needs a schema pass over those three fields and must keep "an error is not
+an empty store" (today the caller falls back to the memory cache).
+
+**3. `crosshair.ts:639` — convert last, with read-back.** A true write: deflated
+`Ares.PlayerSettings` envelope, response must be `{ data: string }`, and a wrong
+payload silently overwrites the player's preferences. Conversion: typed payload
+builder (validate `type`, non-empty deflate, size cap) before send; `assertRiotOk`
++ envelope check after; on success read the preference back and compare before
+reporting `true`. Keep the 30 s timeout race and the `catch → false` contract.
+
+### Order and receipts
+
+prepick (fire-and-forget) → storefront (read-shaped POST) → crosshair (real write
+with read-back). Each is its own commit, with the devqa pin updated in the same
+write; the pin's expected list shrinking is the receipt that raw writes converted.
+
 ## Rules that carried this refactor and should carry the next one
 
 - One seam per commit, moves only, bodies byte-identical; a bug gets its own
