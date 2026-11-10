@@ -524,7 +524,7 @@ pub fn run() {
             trn_cache::trn_cache_get,
             trn_cache::trn_cache_put,
             trn_cache::trn_cache_trace_log,
-            perf::perf_poll,
+            perf::sample::perf_poll,
             space_spam::set_space_spam,
             commands::shell::check_requested_tab,
             commands::shell::trim_memory,
