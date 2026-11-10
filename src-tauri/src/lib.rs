@@ -365,11 +365,6 @@ pub fn run() {
             // agent-select/pregame durations.
             // Edit-mode / windowed-debug precedence: daemon never hides while
             // editing (set_overlay_edit_mode already forces visible on entry).
-            // Last daemon decision for the debug-only change-of-decision trace
-            // below: u8::MAX = none yet, 0 = skip, 1 = show, 2 = hide.
-            #[cfg(debug_assertions)]
-            static LAST_OVERLAY_DECISION: std::sync::atomic::AtomicU8 =
-                std::sync::atomic::AtomicU8::new(u8::MAX);
             daemons::overlay_daemon(app.handle().clone());
 
             // Overlay fail-safe guard (audit overlay#1 + #4). One 100 ms thread:

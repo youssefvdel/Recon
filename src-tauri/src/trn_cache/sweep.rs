@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 //! (moved verbatim from `trn_cache.rs`; split only.)
+#[cfg(debug_assertions)]
+use super::trace::cache_emit;
 use super::constants::{ENTRY_EXT, MAX_AGE_MS, MAX_ENTRIES, MAX_TOTAL_BYTES};
 use super::model::{now_ms};
 use super::paths::{read_header};

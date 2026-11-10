@@ -7,6 +7,13 @@
 //! `guard_handle`), so a reviewer can check the move by reading the signatures
 //! against the old closure captures.
 
+/// Last daemon decision for the debug-only change-of-decision trace:
+/// u8::MAX = none yet, 0 = skip, 1 = show, 2 = hide.
+#[cfg(debug_assertions)]
+static LAST_OVERLAY_DECISION: std::sync::atomic::AtomicU8 =
+    std::sync::atomic::AtomicU8::new(u8::MAX);
+
+
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

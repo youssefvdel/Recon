@@ -51,6 +51,10 @@
 //! so two realms asking for the same path mid-flight both missed it and both
 //! fetched it (proved live: same seasonId, +434ms, two 200s). A flight map
 //! now elects one leader per path; every other caller waits (bounded) for
+#[cfg(debug_assertions)]
+use self::result::trace_err;
+#[cfg(debug_assertions)]
+use self::trace::trace_emit;
 use self::ceiling::{Ceiling, ceiling_refundable, now_ms, refund_ceiling, spend_ceiling};
 use self::constants::{API_BASE, FETCH_TIMEOUT, POLL_EVERY};
 use self::flight::{FOLLOWER_WAIT, FlightGuard, FlightResult, TRN_FLIGHTS, flight_acquire, wait_flight};
@@ -83,6 +87,8 @@ mod readiness;
 
 pub use constants::{PROXY_LABEL, VERIFY_LABEL};
 pub use trace::{TraceLine, TrnTraceLog};
+#[cfg(debug_assertions)]
+pub use trace::TRACE_RING_CAP;
 
 
 

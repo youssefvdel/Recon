@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 //! (moved verbatim from `trn_proxy.rs`; split only.)
+#[cfg(debug_assertions)]
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
