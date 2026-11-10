@@ -143,9 +143,14 @@ render. The old route showed **one tab** of the four resolution children; the sh
 stacks all four because the design has no inner tabs. Different measurements, not
 a worse surface.
 
-Remaining honest gap: prep-picker is still **14 containers** — nobody de-carded it.
-The live strip still does not paint headless (the Tauri path is unreachable
-without Windows).
+**Prep-picker's 14 are correct, not debt** — I measured them: 13 are the map tiles
+(196×112, one map each, clicked to assign an agent) and 1 is the header panel. A map
+tile earns its border: delete it and you cannot tell where one map ends and the next
+begins. That is the card policy working, not card slop surviving.
+
+Remaining honest gap: **the live strip still does not paint headless** — the Tauri
+path is unreachable without Windows, so the strip's slot renders nothing in the
+harness.
 
 ## The rebuild has a pass/fail command now
 
