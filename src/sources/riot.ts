@@ -33,6 +33,14 @@ function validated<T>(value: T): Validated<T> {
   return value as Validated<T>;
 }
 
+/**
+ * Riot answered 404 — "nothing here", not "the read failed". Returned only by
+ * by-id lookups; every other error status (403/451/5xx) throws. The alias puts
+ * the contract in the signature: a caller that gets `null` retries or reports
+ * "no match", a caller that gets a throw reports a failed read.
+ */
+export type NoMatch<T> = Validated<T> | null;
+
 /* ------------------------------------------------------------------ *
  * Status seam
  * ------------------------------------------------------------------ */
@@ -323,7 +331,7 @@ export async function readMatchDetails<T>(
 export async function readLiveMatch<T>(
   phase: 'pregame' | 'coregame',
   parse: (j: Validated<unknown>) => T | null
-): Promise<Validated<T> | null> {
+): Promise<NoMatch<T>> {
   const path = phase === 'coregame' ? '/core-game/v1/matches' : '/pregame/v1/matches';
   const j = await riotGet('glz', path);
   const o = j as { httpStatus?: number };
@@ -402,6 +410,24 @@ export interface MatchHistoryRow {
   queue: string;
 }
 
+/** A history row with the match start time the 24h record's paging needs. `at`
+ *  is `GameStartTime` in epoch ms; 0 means Riot did not report it (the pager
+ *  treats that as the oldest possible row). */
+export type MatchHistoryTimeRow = MatchHistoryRow & { at: number };
+
+/** Parse one `History[]` page. Private and shared so the plain and timestamped
+ *  readers cannot drift. */
+function parseHistoryRows(j: unknown): MatchHistoryTimeRow[] {
+  const h = Array.isArray((j as { History?: unknown[] })?.History)
+    ? ((j as { History: Record<string, unknown>[] }).History as Record<string, unknown>[])
+    : [];
+  return h.map((x) => ({
+    id: String(x?.MatchID ?? ''),
+    queue: String(x?.QueueID ?? '').toLowerCase().trim(),
+    at: Number(x?.GameStartTime ?? 0),
+  }));
+}
+
 /** One page of match history, validated. Throws RiotError on an error payload. */
 export async function readMatchHistoryPage(
   puuid: string,
@@ -415,14 +441,24 @@ export async function readMatchHistoryPage(
     `/match-history/v1/history/${puuid}?startIndex=${start}&endIndex=${end}`
   );
   assertRiotOk(j, 'match history');
-  const rows = (Array.isArray((j as { History?: unknown[] })?.History)
-    ? ((j as { History: unknown[] }).History as Record<string, unknown>[])
-    : []
-  ).map((h) => ({
-    id: String(h?.MatchID ?? ''),
-    queue: String(h?.QueueID ?? '').toLowerCase().trim(),
-  }));
-  return validated(rows);
+  return validated(parseHistoryRows(j).map(({ id, queue }) => ({ id, queue })));
+}
+
+/** One page of match history with `GameStartTime`. Validated exactly like
+ *  `readMatchHistoryPage`; the timestamp is the only difference. */
+export async function readHistoryPageWithTime(
+  puuid: string,
+  region: string,
+  start: number,
+  end: number
+): Promise<Validated<MatchHistoryTimeRow[]>> {
+  if (!puuid) throw new RiotError('NO_PUUID', 'readHistoryPageWithTime: puuid is required');
+  const j = await riotGet(
+    region,
+    `/match-history/v1/history/${puuid}?startIndex=${start}&endIndex=${end}`
+  );
+  assertRiotOk(j, 'match history');
+  return validated(parseHistoryRows(j));
 }
 
 /** History page metadata (total rows + per-match queue). Validated: an error
@@ -473,6 +509,110 @@ export async function readRiotValidated<T = { data?: unknown; [k: string]: unkno
   const j = await riotGet(host, path);
   assertRiotOk(j, 'request');
   return validated(j as T);
+}
+
+/* ------------------------------------------------------------------ *
+ * Step-2 readers: the live-probe and MMR sites that had no typed reader.
+ * Additive on purpose — nothing calls them until ts-client swaps.
+ * ------------------------------------------------------------------ */
+
+/** GET a by-id Riot resource. 404 is data (`null`); every other error status
+ *  throws, so "nothing here" and "we could not ask" stay distinguishable. */
+async function riotGetNoMatch(host: string, path: string): Promise<Validated<unknown> | null> {
+  const j = await riotGet(host, path);
+  if (Number((j as { httpStatus?: number })?.httpStatus ?? 0) === 404) return null;
+  assertRiotOk(j, 'request');
+  return validated(j as unknown);
+}
+
+/** Live player entry for one puuid. `null` = no match (Riot 404). The legacy
+ *  `/coregame/` spelling is tried only when the canonical route 404s, so a real
+ *  403/451 on the canonical route still throws instead of being masked. */
+export async function readLivePlayer(
+  phase: 'pregame' | 'coregame',
+  puuid: string
+): Promise<NoMatch<{ matchId: string }>> {
+  if (!puuid) throw new RiotError('NO_PUUID', 'readLivePlayer: puuid is required');
+  const canonical =
+    phase === 'coregame' ? `/core-game/v1/players/${puuid}` : `/pregame/v1/players/${puuid}`;
+  let j = await riotGetNoMatch('glz', canonical);
+  if (j === null && phase === 'coregame') {
+    j = await riotGetNoMatch('glz', `/coregame/v1/players/${puuid}`);
+  }
+  if (j === null) return null;
+  return validated({ matchId: String((j as { MatchID?: unknown }).MatchID ?? '') });
+}
+
+/** Live match payload by id (pregame/coregame). Raw on purpose — typing the
+ *  live-match model is separate work. `null` = no such match (404). */
+export async function readLiveMatchById(
+  phase: 'pregame' | 'coregame',
+  matchId: string
+): Promise<NoMatch<unknown>> {
+  if (!matchId) throw new RiotError('NO_MATCH_ID', 'readLiveMatchById: matchId is required');
+  const canonical =
+    phase === 'coregame' ? `/core-game/v1/matches/${matchId}` : `/pregame/v1/matches/${matchId}`;
+  let j = await riotGetNoMatch('glz', canonical);
+  if (j === null && phase === 'coregame') {
+    j = await riotGetNoMatch('glz', `/coregame/v1/matches/${matchId}`);
+  }
+  return j;
+}
+
+/** Generic `/mmr/v1/players/{puuid}` read for callers that need more than the
+ *  LocalRank row (profile peaks, per-season buckets). */
+export async function readMmrProfile<T>(
+  puuid: string,
+  shard: string,
+  parse: (j: Validated<unknown>) => T
+): Promise<Validated<T>> {
+  if (!puuid) throw new RiotError('NO_PUUID', 'readMmrProfile: puuid is required');
+  const j = await riotGet(shard, `/mmr/v1/players/${puuid}`);
+  assertRiotOk(j, 'mmr');
+  return validated(parse(validated(j)));
+}
+
+/** One competitive-update row. Numeric tier/deltas only — rank names are model
+ *  code in the caller, not transport. */
+export interface MmrUpdateRow {
+  tierAfterUpdate: number;
+  rrAfterUpdate: number;
+  rrEarned: number;
+  matchId: string;
+  mapId: string;
+  matchStartTime: number;
+  queueId: string;
+}
+
+/** The last `count` competitive updates for a puuid. Validated: an error
+ *  payload throws instead of parsing as "no games". */
+export async function readCompetitiveUpdates(
+  puuid: string,
+  shard: string,
+  count: number,
+  queue: string
+): Promise<Validated<MmrUpdateRow[]>> {
+  if (!puuid) throw new RiotError('NO_PUUID', 'readCompetitiveUpdates: puuid is required');
+  const queueParam = queue ? `&queue=${encodeURIComponent(queue)}` : '';
+  const j = await riotGet(
+    shard,
+    `/mmr/v1/players/${puuid}/competitiveupdates?startIndex=0&endIndex=${count}${queueParam}`
+  );
+  assertRiotOk(j, 'competitive updates');
+  const list = Array.isArray((j as { Matches?: unknown[] })?.Matches)
+    ? ((j as { Matches: Record<string, unknown>[] }).Matches as Record<string, unknown>[])
+    : [];
+  return validated(
+    list.map((g) => ({
+      tierAfterUpdate: Number(g?.TierAfterUpdate ?? 0),
+      rrAfterUpdate: Number(g?.RankedRatingAfterUpdate ?? 0),
+      rrEarned: Number(g?.RankedRatingEarned ?? 0),
+      matchId: String(g?.MatchID ?? ''),
+      mapId: String(g?.MapID ?? ''),
+      matchStartTime: Number(g?.MatchStartTime ?? 0),
+      queueId: String(g?.QueueID ?? queue),
+    }))
+  );
 }
 
 /* ------------------------------------------------------------------ *
