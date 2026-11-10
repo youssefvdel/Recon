@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import '../v2/tokens.css';
 import { CommandLayer, type Overlay } from './CommandLayer';
 import { Now } from './surfaces/Now';
@@ -34,6 +34,21 @@ export const Shell: React.FC = () => {
   const [theme, setTheme] = useState<'graphite' | 'nocturne'>('graphite');
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
+
+  /* A pasted or edited `#store` link must work while the app is already open:
+   * the state above only reads the hash once, at mount, and a same-document hash
+   * change fires no reload. Not a keydown listener — CommandLayer still owns the
+   * only one. */
+  useEffect(() => {
+    const onHash = (): void => {
+      const a = hashAnchor();
+      if (!a) return;
+      setDest('tools');
+      setAnchor(a);
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
 
   const navigate = useCallback((item: NavItem) => {
     setDest(item.dest);
