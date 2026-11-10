@@ -67,7 +67,16 @@ Semantics (from the shipped app + our probes):
   returns `{isPrivate:true}` and stops rendering stats. Both readable values are
   treated the same: `public` and `ranked` resolve to `ready`, `hidden`/`private`/an
   absent value do not. Truth table: **public → ready · ranked → ready · hidden (or
-  any other value) → private · missing → missing**. The payload's own value is
+  any other value) → private · missing → missing**.
+
+  **Evidence basis for `ranked`:** it comes from the documented value set above and
+  from the invariant that `noteTrnPrivacy` is only ever called on a *successful*
+  profile fetch — not from an observed payload. No captured API response in this
+  repo contains the literal string. Note where captures live: `docs/overwolf/captures/`
+  is **gitignored** (`.gitignore:38`), so it exists only in the main checkout and
+  never in a worktree; it holds `installer/` and `opk/` package captures (WebView2
+  and the Overwolf `.opk`), **not** TRN API responses. A future search for a TRN
+  payload has to capture one; it will not be found there. The payload's own value is
   recorded verbatim (`noteTrnPrivacy`, `src/utils/trn.ts:1379`) and **outranks** the
   451 inference: `trnPlayerState` (`src/utils/trn.ts:504`) trusts a payload that said
   what it is before the negative registry, and a non-`public` value becomes terminal.
