@@ -145,8 +145,10 @@ launch came at 06:25:16. `MainWindowHandle 0`, empty title — no visible main w
   **Shipped behaviour from `600fcf4` (current HEAD):** `boot_marker` buffers the pre-attach lines and
   `replay_boot_markers()` drains them through the attached logger once, so all four land in
   `Recon.log` contiguous and in order; `recon-startup.log` stays only as the fallback for a run that
-  dies before attach. **Designed, not yet observed** — no build containing the fix has run on the PC
-  (machine was off-limits when this was corrected).
+  dies before attach.
+  **Observed on alpha30** (2026-11-10 06:54:42): all four markers appear in `Recon.log`, in order,
+  same second — `run() entered v0.5.0-alpha30` → `webview2 preflight passed` → `builder ready;
+  entering run()` → `setup reached`. The split-timeline defect is gone in the shipped build.
 - `[tracker]` 30 lines, `[riot]` 126 lines in the file; **every one is emitted twice** ~150 ms
   apart (same text) — double sink, visible in this launch too (`cached merge` ×2, `riot read
   failed` ×2).
@@ -155,4 +157,4 @@ launch came at 06:25:16. `MainWindowHandle 0`, empty title — no visible main w
 - `recon-startup.log` was cumulative at alpha28 (21 lines, alpha25→alpha28, no rotation).
   From `600fcf4` it is capped at **256 KB, size-based, keeping one generation**
   (`recon-startup.log.1`) — a crash loop must not erase the evidence of the crash before it.
-  Unverified on hardware for the same reason as above.
+  Not yet exercised: the file is far below the cap on this machine, so rotation is designed-only.

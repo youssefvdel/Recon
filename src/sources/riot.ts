@@ -626,9 +626,8 @@ async function riotGetNoMatch(host: string, path: string): Promise<Validated<unk
   return validated(j as unknown);
 }
 
-/** Live player entry for one puuid. `null` = no match (Riot 404). The legacy
- *  `/coregame/` spelling is tried only when the canonical route 404s, so a real
- *  403/451 on the canonical route still throws instead of being masked. */
+/** Live player entry for one puuid. `null` = no match (Riot 404); any other
+ *  error throws, so a real 403/451 is never masked as "no match". */
 export async function readLivePlayer(
   phase: 'pregame' | 'coregame',
   puuid: string,
@@ -638,10 +637,7 @@ export async function readLivePlayer(
   const host = glzHostFor(region);
   const canonical =
     phase === 'coregame' ? `/core-game/v1/players/${puuid}` : `/pregame/v1/players/${puuid}`;
-  let j = await riotGetNoMatch(host, canonical);
-  if (j === null && phase === 'coregame') {
-    j = await riotGetNoMatch(host, `/coregame/v1/players/${puuid}`);
-  }
+  const j = await riotGetNoMatch(host, canonical);
   if (j === null) return null;
   return validated({ matchId: String((j as { MatchID?: unknown }).MatchID ?? '') });
 }
@@ -657,11 +653,7 @@ export async function readLiveMatchById(
   const host = glzHostFor(region);
   const canonical =
     phase === 'coregame' ? `/core-game/v1/matches/${matchId}` : `/pregame/v1/matches/${matchId}`;
-  let j = await riotGetNoMatch(host, canonical);
-  if (j === null && phase === 'coregame') {
-    j = await riotGetNoMatch(host, `/coregame/v1/matches/${matchId}`);
-  }
-  return j;
+  return riotGetNoMatch(host, canonical);
 }
 
 /** Generic `/mmr/v1/players/{puuid}` read for callers that need more than the
@@ -731,9 +723,8 @@ export type LoadoutRow = Record<string, unknown>;
  * contract: no player resolution here, so opening loadouts costs exactly the
  * loadout read and nothing else.
  *
- * Spellings are tried in phase order; the legacy `/coregame/` name is retried
- * only after the canonical route 404s, so a real 403 throws instead of being
- * masked.
+ * Spellings are tried in phase order and a real 403 throws instead of being
+ * masked. `/coregame/` (no hyphen) is not a route and is not in the list.
  */
 export async function readMatchLoadouts(
   phase: 'pregame' | 'coregame',
@@ -742,16 +733,17 @@ export async function readMatchLoadouts(
 ): Promise<NoMatch<LoadoutRow[]>> {
   if (!matchId) throw new RiotError('NO_MATCH_ID', 'readMatchLoadouts: matchId is required');
   const host = glzHostFor(region);
+  /* Two spellings each, canonical route first: Riot serves `/core-game/` and
+   * `/pregame/`. There is no `/coregame/` (no hyphen) route — every call to it
+   * came back 404 or a transport failure, so it is not tried at all. */
   const routes =
     phase === 'pregame'
       ? [
           `/pregame/v1/matches/${matchId}/loadouts`,
           `/core-game/v1/matches/${matchId}/loadouts`,
-          `/coregame/v1/matches/${matchId}/loadouts`,
         ]
       : [
           `/core-game/v1/matches/${matchId}/loadouts`,
-          `/coregame/v1/matches/${matchId}/loadouts`,
           `/pregame/v1/matches/${matchId}/loadouts`,
         ];
 
