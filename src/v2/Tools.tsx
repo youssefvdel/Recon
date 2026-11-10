@@ -24,6 +24,11 @@ import { useToolsState } from './tools/useToolsState';
  *  full-height scroll shell, so they are given a bounded pane here rather than
  *  being rewritten (their owners are de-carding them in parallel). */
 
+/* Store and Crosshair render their own header — a title *and* a wallet or a
+ * profile switcher — so the sheet's heading would be the second "STORE" on the
+ * page. Their header is the section heading; the others get the sheet's. */
+const SELF_TITLED = new Set<ToolAnchor>(['store', 'crosshair']);
+
 /** Reserved height per unvisited section — roughly what the body measures when
  *  it lands. Without a reservation the page is six headings tall on first paint,
  *  every section sits inside the viewport, and opening the sheet mounts all six
@@ -92,13 +97,15 @@ const Section: React.FC<{
       className="mt-10 first:mt-0 scroll-mt-[72px]"
       style={{ minHeight: mounted ? undefined : RESERVE[id] }}
     >
-      <h2
-        tabIndex={-1}
-        className="text-[10px] uppercase tracking-[0.18em] pb-2 outline-none"
-        style={{ color: 'var(--on-surface-muted)' }}
-      >
-        {label}
-      </h2>
+      {!SELF_TITLED.has(id) && (
+        <h2
+          tabIndex={-1}
+          className="text-[10px] uppercase tracking-[0.18em] pb-2 outline-none"
+          style={{ color: 'var(--on-surface-muted)' }}
+        >
+          {label}
+        </h2>
+      )}
       <div className="border-b" style={{ borderColor: 'var(--outline)' }} />
       {mounted && <div className="pt-4">{children}</div>}
     </section>
