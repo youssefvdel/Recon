@@ -1123,7 +1123,7 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
     false
   );
   check('sources/riot.ts exists with a branded type', src.includes('declare const VALIDATED: unique symbol'), true);
-  for (const fn of ['readMmr', 'readMatchDetails', 'readLiveMatchById', 'readPlayer24h']) {
+  for (const fn of ['readMmr', 'readMatchDetails', 'readLiveMatchById']) {
     check(`${fn} is exported`, new RegExp(`export async function ${fn}`).test(src), true);
   }
   check('readMmr returns Validated', /readMmr[\s\S]{0,400}Validated<LocalRank>/.test(src), true);
@@ -1131,7 +1131,6 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   // Live-match readers return NoMatch<T> (Validated<T> | null): 404 is control
   // flow there, so null is a legal answer while every other error throws.
   check('readLiveMatchById returns NoMatch', /readLiveMatchById[\s\S]{0,400}NoMatch<unknown>/.test(src), true);
-  check('readPlayer24h returns Validated', /readPlayer24h[\s\S]{0,400}Validated</.test(src), true);
   // The raw call cannot be reached from outside the two transport modules.
   const outside = readFileSync(new URL('../src/utils/crosshair.ts', import.meta.url), 'utf8')
     + readFileSync(new URL('../src/utils/store.ts', import.meta.url), 'utf8');

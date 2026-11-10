@@ -370,18 +370,6 @@ export async function readMatchDetails<T>(
   return validated(parse(validated(j)));
 }
 
-/** Last-24h win/loss for a puuid, from match history + details. */
-export async function readPlayer24h(
-  puuid: string,
-  host: string,
-  page: (j: Validated<unknown>) => { id: string; at: number; queue: string }[]
-): Promise<Validated<{ id: string; at: number; queue: string }[]>> {
-  if (!puuid) throw new RiotError('NO_PUUID', 'readPlayer24h: puuid is required');
-  const j = await riotGet(host, `/match-history/v1/history/${puuid}?startIndex=0&endIndex=20`);
-  assertRiotOk(j, 'match history');
-  return validated(page(validated(j)));
-}
-
 /* ------------------------------------------------------------------ *
  * Transport helpers, moved verbatim out of utils/tracker.ts.
  *
