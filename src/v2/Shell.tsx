@@ -3,6 +3,7 @@ import '../v2/tokens.css';
 import { CommandLayer, type Overlay } from './CommandLayer';
 import { Now } from './surfaces/Now';
 import { Matches } from './surfaces/Matches';
+import { Prep } from './surfaces/Prep';
 
 type Dest = 'now' | 'matches' | 'prep';
 const DESTS: { id: Dest; label: string }[] = [
@@ -84,18 +85,9 @@ export const Shell: React.FC = () => {
       </header>
 
       <main className="mx-auto px-6 py-8" style={{ maxWidth: '1280px' }}>
-        {dest === 'now' ? (
-          <Now />
-        ) : dest === 'matches' ? (
-          <Matches />
-        ) : (
-          <>
-            <h1 className="text-lg font-semibold mb-2">{DESTS.find((d) => d.id === dest)?.label}</h1>
-            <p className="text-sm" style={{ color: 'var(--on-surface-muted)' }}>
-              Surface not built yet.
-            </p>
-          </>
-        )}
+        {/* Every destination has a surface now: the placeholder that used to sit
+            here would be dead code, and dead code is where a second app grows. */}
+        {dest === 'now' ? <Now /> : dest === 'matches' ? <Matches /> : <Prep />}
       </main>
 
       {overlay === 'palette' && (
