@@ -314,7 +314,10 @@ export function assertRiotOk(j: any, what: string): void {
   if (code || status >= 400) {
     const detail = code || `HTTP ${status}`;
     const msg = String(j?.message ?? '').slice(0, 140);
-    throw new Error(
+    // Same message text as the old plain Error, so the checks that match it
+    // keep working; the class is what carries the code.
+    throw new RiotError(
+      detail,
       `Riot ${what} unavailable (${detail})${msg ? ` — ${msg}` : ''}`
     );
   }

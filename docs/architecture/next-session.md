@@ -62,12 +62,11 @@ the UI shows a failed read rather than a smaller number. The same rule as
 *Pass first:* for each of the 13, write down what the current code does with an
 error payload and what the UI shows afterwards.
 
-*Known follow-up, deliberately deferred:* the readers validate into `RiotError`
-in intent, but `assertRiotOk` still throws a plain `Error` (the code rides in the
-message) and nothing constructs `RiotError`. That stays out of the swap window so
-five call-site rewrites are not mixed with an error-class change. After the swaps
-land, one commit makes `assertRiotOk` throw `RiotError` with the same message
-text the checks already match, and the call sites adopt `.code` deliberately.
+*Done after the swaps:* `assertRiotOk` now throws `RiotError` with the same
+message text the checks already match (`Riot <what> unavailable (<code>)...`), and
+`.code` carries the `errorCode` or `HTTP <status>`. No caller string-matches that
+message, so `.code` adoption stays available rather than forced; the message text
+is the compatibility contract and must not change without retargeting the checks.
 
 **3. Move the poll to `live/poll.ts`.**
 `fetchLiveMatchState`, `fetchLiveMatchStateInner` and the enrichment
