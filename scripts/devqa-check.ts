@@ -1164,6 +1164,50 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('consumers no longer import riotGet', /riotGet/.test(outside), false);
 }
 
+// --- raw PUT/POST are outside the validated surface: pinned, not expanded ---
+// GET is single-owner; writes are not. Three raw call expressions exist today
+// and each carries user data (preferences, agent hover, storefront), so the set
+// is asserted by file+function+count rather than by line (lines drift, the set
+// must not): a new raw call, or a second one in an existing file, fails here
+// until someone adds it deliberately and writes the validated path instead.
+{
+  const { readdirSync, readFileSync, statSync } = await import('node:fs');
+  const { join, relative } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const srcRoot = fileURLToPath(new URL('../src/', import.meta.url));
+  const repoRoot = fileURLToPath(new URL('../', import.meta.url));
+  const hits: Record<string, number> = {};
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name);
+      const st = statSync(full);
+      if (st.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!/\.(ts|tsx)$/.test(name)) continue;
+      // Definition site only; every other occurrence is a raw caller.
+      if (relative(repoRoot, full) === 'src/sources/riot.ts') continue;
+      const text = readFileSync(full, 'utf8');
+      for (const m of text.matchAll(/\briot(Put|Post)\(/g)) {
+        const key = `${relative(repoRoot, full)} riot${m[1]}`;
+        hits[key] = (hits[key] ?? 0) + 1;
+      }
+    }
+  };
+  walk(srcRoot);
+  const actual = Object.keys(hits)
+    .sort()
+    .map((k) => `${k} x${hits[k]}`)
+    .join(', ');
+  const expected = [
+    'src/utils/crosshair.ts riotPut x1',
+    'src/utils/prepick.ts riotPost x1',
+    'src/utils/store.ts riotPost x1',
+  ].join(', ');
+  check('raw PUT/POST call sites are pinned (validated writes are separate work)', actual, expected);
+}
+
 // --- the validated rank boundary (upstream audit finding) ------------------
 {
   const { readFileSync } = await import('node:fs');
