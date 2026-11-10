@@ -14,6 +14,18 @@ the real code and nothing is forked or copied. Anything importing
 cd src-tauri/pure && cargo test        # 24 tests, no PC, no Tauri
 ```
 
+## TypeScript pure modules (`bun test`)
+
+`bun test tests/` — 16 tests, no Tauri, no browser, no Windows.
+
+| Production module | Tests | What the fixtures prove |
+| --- | --- | --- |
+| `src/utils/crosshairCodec.ts` | 11 | builder refuses non-object docs, >2 MB docs and an empty/failed deflate; emits the `Ares.PlayerSettings` envelope; deterministic byte-for-byte; deflate→inflate round-trip including non-ASCII; canonical compare is key-order independent but catches changed values and reordered arrays; a truncated payload fails loudly; write contract `{ data: string }` or throw |
+| `src/sources/storefront.ts` | 5 | a well-formed shop parses; a Riot error envelope is rejected (the empty-shop bug); payloads without any shop section are rejected; a missing `SkinsPanelLayout` is accepted only when another section is present; scalar/array shapes rejected |
+
+`crosshair.ts` and `riot.ts` import these modules at their call sites; the pure
+modules import nothing, so no Tauri or DOM mocking is involved.
+
 ## Covered (tested here, all passing)
 
 | Production file | Tests | What the fixtures prove |

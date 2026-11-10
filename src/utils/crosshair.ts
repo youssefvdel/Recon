@@ -1,4 +1,10 @@
 import { isTauri } from './ipc';
+import {
+  assertPlayerSettingsWriteResponse,
+  buildPlayerSettingsPayload,
+  canonicalJson,
+  inflateRaw,
+} from './crosshairCodec';
 
 /**
  * Crosshair profiles — read and recolored through Riot's player-preferences
@@ -85,41 +91,6 @@ export function fromHex(hex: string, prev: Rgba): Rgba {
 export function ppHostFor(region: string): string | null {
   if (region.toLowerCase().trim() === 'eu') return 'player-preferences-euc1.pp.sgp.pvp.net';
   return null;
-}
-
-function b64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-function bytesToB64(bytes: Uint8Array): string {
-  let bin = '';
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-  }
-  return btoa(bin);
-}
-
-async function inflateRaw(b64: string): Promise<string> {
-  const ds = new DecompressionStream('deflate-raw');
-  const bytes: BlobPart = b64ToBytes(b64) as unknown as BlobPart;
-  const stream = new Blob([bytes]).stream().pipeThrough(ds);
-  return new Response(stream).text();
-}
-
-async function deflateRaw(text: string): Promise<string> {
-  const cs = new CompressionStream('deflate-raw');
-  // Attach the reader BEFORE writing: writer.write() applies backpressure and
-  // never resolves on large docs if nobody is draining the readable side.
-  const out = new Response(cs.readable).arrayBuffer();
-  const writer = cs.writable.getWriter();
-  await writer.write(new TextEncoder().encode(text));
-  await writer.close();
-  const buf = await out;
-  return bytesToB64(new Uint8Array(buf));
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -637,34 +608,6 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   ]);
 }
 
-/** One place builds the write body: validate the doc, deflate it, and refuse an
- *  empty compression before anything reaches the transport. */
-async function buildPlayerSettingsPayload(data: unknown): Promise<string> {
-  if (!data || typeof data !== 'object' || Array.isArray(data)) {
-    throw new Error('CROSSHAIR_PAYLOAD_INVALID');
-  }
-  const doc = JSON.stringify(data);
-  if (!doc || doc.length > 2_000_000) throw new Error('CROSSHAIR_PAYLOAD_SIZE');
-  const compressed = await deflateRaw(doc);
-  if (typeof compressed !== 'string' || compressed.length === 0) {
-    throw new Error('CROSSHAIR_PAYLOAD_DEFLATE');
-  }
-  return JSON.stringify({ type: 'Ares.PlayerSettings', data: compressed });
-}
-
-/** Order-independent JSON, for the read-back comparison. */
-function canonicalJson(v: unknown): string {
-  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(',')}]`;
-  if (v && typeof v === 'object') {
-    const o = v as Record<string, unknown>;
-    return `{${Object.keys(o)
-      .sort()
-      .map((k) => `${JSON.stringify(k)}:${canonicalJson(o[k])}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(v);
-}
-
 /** Persist a settings doc and prove it landed.
  *
  *  `true` means: the payload was validated and deflated, the write answered the
@@ -682,7 +625,8 @@ export async function saveCrosshair(host: string, data: any): Promise<boolean> {
       SAVE_TIMEOUT_MS,
       'SAVE_TIMEOUT'
     );
-    if (!res || typeof (res as { data?: unknown }).data !== 'string') return false;
+    // Transport answered; the write is only credible with `{ data: string }`.
+    assertPlayerSettingsWriteResponse(res);
     const echo = await withTimeout(
       readRiotValidated<{ data?: unknown }>(host, PREF_GET_PATH),
       SAVE_VERIFY_TIMEOUT_MS,

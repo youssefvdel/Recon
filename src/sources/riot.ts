@@ -13,6 +13,7 @@
  * hold while it is zero — so the count and this paragraph cannot drift apart. */
 
 import { invoke } from '@tauri-apps/api/core';
+import { parseStorefrontPayload, type StorefrontPayload } from './storefront';
 import { isTauri } from '../utils/ipc';
 import { gameData } from './gameData';
 import { logger } from '../utils/logger';
@@ -607,21 +608,18 @@ export async function riotPutValidated(
 
 /** The daily shop. A POST with an empty body, validated as a *read*: an error
  *  payload throws, and a payload carrying none of the three shop sections also
- *  throws — "not a shop" must never render as an empty shop. The deep offer
- *  model stays with the caller for now. */
+ *  throws — "not a shop" must never render as an empty shop. The shape gate is
+ *  pure (`sources/storefront.ts`) and tested without Tauri or a client. */
 export async function readStorefront(
   puuid: string,
   host: string
-): Promise<Validated<Record<string, unknown>>> {
+): Promise<Validated<StorefrontPayload>> {
   if (!puuid) throw new RiotError('NO_PUUID', 'readStorefront: puuid is required');
   const j = await riotPost(host, `/store/v3/storefront/${puuid}`);
   assertRiotOk(j, 'storefront');
-  const o = j as { SkinsPanelLayout?: unknown; AccessoryStore?: unknown; FeaturedBundle?: unknown };
-  const isObj = (v: unknown): boolean => typeof v === 'object' && v !== null && !Array.isArray(v);
-  if (!isObj(o?.SkinsPanelLayout) && !isObj(o?.AccessoryStore) && !isObj(o?.FeaturedBundle)) {
-    throw new RiotError('STORE_SHAPE', 'Riot storefront unavailable (not a storefront payload)');
-  }
-  return validated(j as Record<string, unknown>);
+  const shop = parseStorefrontPayload(j);
+  if (!shop) throw new RiotError('STORE_SHAPE', 'Riot storefront unavailable (not a storefront payload)');
+  return validated(shop);
 }
 
 /* ------------------------------------------------------------------ *

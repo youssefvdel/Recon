@@ -158,6 +158,7 @@ backend tests:
 
 ```bash
 cargo test --manifest-path src-tauri/pure/Cargo.toml   # 37 tests, no Windows/Tauri
+bun test tests/                                        # 16 tests, no Tauri/browser
 ```
 
 Windows target (four runs, all must exit 0): `cargo xwin check` release and
