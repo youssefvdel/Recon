@@ -507,7 +507,11 @@ export function trnPlayerState(name: string, tag: string): TrnPlayerState {
   // recorded on a SUCCESSFUL profile fetch, so 'public' also proves data
   // arrived — no extra memo check needed.
   const privacy = profilePrivacy.get(key);
-  if (privacy) return privacy === 'public' ? 'ready' : 'private';
+  /* `metadata.privacy` is documented as `public | ranked` (data-sources.md §
+   * semantics); anything else is terminal. `ranked` means the profile exposes
+   * its ranked data — it is readable, not hidden, so classifying it private
+   * locked profiles that had data. */
+  if (privacy) return privacy === 'public' || privacy === 'ranked' ? 'ready' : 'private';
   const neg = trnNegativeKind(name, tag);
   if (neg === 'private') return 'private';
   if (neg === 'missing') return 'missing';
@@ -1380,8 +1384,9 @@ export function noteTrnPrivacy(name: string, tag: string, privacy: unknown): voi
   const value = String(privacy ?? '').trim().toLowerCase();
   if (!value) return; // absent -> we learn nothing, so we store nothing
   profilePrivacy.set(trnPlayerKey(name, tag), value);
-  // Anything that is not plainly public is terminal: never re-fire it.
-  if (value !== 'public') trnNoteNegative(name, tag, 'private');
+  // Anything that is not plainly readable is terminal: never re-fire it.
+  // `ranked` is a readable value, not a hidden one.
+  if (value !== 'public' && value !== 'ranked') trnNoteNegative(name, tag, 'private');
 }
 
 /** The privacy a profile reported, or '' when we have never seen one. */

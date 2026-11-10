@@ -1467,6 +1467,24 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('readSnapshot no longer discards a stale snapshot', /return null;\s*\}\s*\n\}/.test(parseBody) && !/SNAPSHOT_TTL/.test(parseBody), true);
 }
 
+// --- TRN privacy: ranked is readable, not hidden --------------------------
+{
+  const { noteTrnPrivacy, trnPlayerState, trnProfilePrivacy } = await import('../src/utils/trn.ts');
+
+  noteTrnPrivacy('ProbeRanked', '1', 'ranked');
+  check('ranked is recorded verbatim', trnProfilePrivacy('ProbeRanked', '1'), 'ranked');
+  check('and resolves to ready, not private', trnPlayerState('ProbeRanked', '1'), 'ready');
+
+  noteTrnPrivacy('ProbePublic', '1', 'public');
+  check('public still resolves to ready', trnPlayerState('ProbePublic', '1'), 'ready');
+
+  noteTrnPrivacy('ProbeHidden', '1', 'hidden');
+  check('hidden stays terminal', trnPlayerState('ProbeHidden', '1'), 'private');
+
+  noteTrnPrivacy('ProbeCase', '1', 'RANKED');
+  check('the value is case-folded', trnPlayerState('ProbeCase', '1'), 'ready');
+}
+
 // --- a signed-out detail read describes the situation, not a fault --------
 {
   const { readFileSync } = await import('node:fs');
