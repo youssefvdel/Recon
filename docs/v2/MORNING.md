@@ -45,6 +45,17 @@ decision I did not want to make for you at 3am.
   backwards).
 - **Three theme boards**, rendered and served.
 
+## A real bug found in the shipped app
+
+**The KAST column has been wrong.** `MatchDetailBody.tsx:174` computed
+`if (gotKill || !died)` — that is **two-way** KAST (kill or survive), so assists
+and traded deaths earned nothing. Riot's KAST is four-way, so the column
+systematically **under-reports**: five assisted rounds with no deaths scored zero.
+
+Replaced with the four-way definition, with the number change called out in the
+commit body — a silently corrected stat is worse than the wrong one, because
+screenshots get compared across versions.
+
 ## Decisions I made overnight (all reversible)
 
 1. **Engine stays, presentation is rebuilt.** `src/sources/`, `src/live/`,
