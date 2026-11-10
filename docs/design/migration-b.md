@@ -18,7 +18,7 @@ final step. Each step is one mergeable commit.
 | 6 | Shell | Act scrubber + ⌘K + `⋯`; remove sidebar/topbar tab model | `Sidebar.tsx` tab groups, `TopBar` tab metadata, `TrackerView` tab shell | Deep-link by act/match works; back/forward sane |
 | 7 | Settings | Settings as ⌘, dialog + tools section | Settings page shell; section cards | Every setting still reachable and persisted |
 | 8 | Cleanup | Delete dead styles/tokens/components; update checks | `rounded-3xl` if unused, `shadow-m3-2/3` if unused, `BigTile`/`SmallStat`/`BodyFigure`/`RiotClientNotice`, old skeletons, empty-state card wrappers | `grep` for deleted imports empty; bundle size drops; all checks green |
-| 9 | HUD (later) | Only after the window is stable; it already follows the colour rule | Nothing now | Its own spec; no mid-match regression |
+| 9 | HUD (later) | Only after the window is stable; it already follows the colour rule | Nothing now | `hud-b-spec.md`; no mid-match regression |
 
 ## Why this order
 
