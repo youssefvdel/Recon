@@ -31,7 +31,23 @@ export const Shell: React.FC = () => {
   const [dest, setDest] = useState<Dest>(() => (hashAnchor() ? 'tools' : 'now'));
   const [anchor, setAnchor] = useState<ToolAnchor | null>(hashAnchor);
   const [overlay, setOverlay] = useState<Overlay>(null);
-  const [theme, setTheme] = useState<'graphite' | 'nocturne'>('graphite');
+  /* Nocturne is the chosen direction. The choice persists, because a theme that
+   * resets on every launch is a theme the user has to re-pick every launch. */
+  const [theme, setTheme] = useState<'graphite' | 'nocturne'>(() => {
+    try {
+      return localStorage.getItem('recon_v2_theme') === 'graphite' ? 'graphite' : 'nocturne';
+    } catch {
+      return 'nocturne';
+    }
+  });
+  const chooseTheme = useCallback((t: 'graphite' | 'nocturne') => {
+    setTheme(t);
+    try {
+      localStorage.setItem('recon_v2_theme', t);
+    } catch {
+      /* private mode: the choice just does not survive the session */
+    }
+  }, []);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
 
@@ -238,7 +254,7 @@ export const Shell: React.FC = () => {
             <div className="pt-1 mt-1 border-t" style={{ borderColor: 'var(--outline)' }}>
               <button
                 type="button"
-                onClick={() => setTheme(theme === 'graphite' ? 'nocturne' : 'graphite')}
+                onClick={() => chooseTheme(theme === 'graphite' ? 'nocturne' : 'graphite')}
                 className="w-full text-left text-sm px-2 py-1.5 rounded cursor-pointer"
                 style={{ color: 'var(--on-surface)' }}
               >
