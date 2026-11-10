@@ -1,0 +1,64 @@
+# Host-agnostic backend tests
+
+The full `src-tauri` crate cannot build on this Linux box: `cargo check` fails in
+`libdbus-sys` (pkg-config cannot find dbus), and GTK/WebKitGTK are absent. That
+means no `#[cfg(test)]` module inside the crate can run without a Windows
+machine — including the pure ones.
+
+`src-tauri/pure` exists to fix exactly that. It is a tiny crate that includes the
+production files **by path** (`#[path = "../../src/..."]`), so tests run against
+the real code and nothing is forked or copied. Anything importing
+`windows`/`tauri` stays out.
+
+```bash
+cd src-tauri/pure && cargo test        # 24 tests, no PC, no Tauri
+```
+
+## Covered (tested here, all passing)
+
+| Production file | Tests | What the fixtures prove |
+| --- | --- | --- |
+| `src/perf/model.rs` | 9 | CPU % from a real 100 ns delta (3 359 ms / 5 s / 12 cores = 5.598 %), PID-pair delta (new/exited PIDs), census omitted counts, RSS MiB, basis naming (clean vs Mixed), tree rollups, summarize empty/last, ring eviction, pause predicate |
+| `src/trn_proxy/ceiling.rs` | 5 | lobby cap at 30 rolls per match, hour cap at 900, window roll at 1 h, unkeyed requests hour-only, refunds saturate and never touch another lobby, refund allowlist (`TRN_CAPTCHA_REQUIRED` / `EDGE_*` vs `HTTP 429` / `TRN_BUDGET`) |
+| `src/trn_cache/paths.rs` + `constants.rs` | 7 | path allowlist incl. the 300/301 boundary, published FNV-1a 64 vector (`hello` → `a430d84680aabd0b`), 16-hex stable keys, `entry_path` cannot escape the cache dir, header round-trip with spaces, garbage rejection, `read_header` on real temp files |
+| `src/trn_proxy/trace.rs` | 2 | bounded ring eviction, incremental `trace_since` head/lines/missed semantics, zero cap |
+
+`src/perf/model.rs` is the strongest case: it is the memory/CPU maths the
+dashboard renders, and it is a pure function of its arguments.
+
+## Blocked on Linux (and by what)
+
+| Module | Blocker |
+| --- | --- |
+| `calculator.rs` | `GetSystemMetrics` (Win32) |
+| `display/`, `gpu.rs`, `custom_res.rs` | Win32 display/registry APIs |
+| `game_config.rs` | Windows registry |
+| `window_manager.rs`, `shortcuts.rs`, `space_spam.rs` | Win32 window/input APIs |
+| `accounts.rs` | Windows registry + Tauri app paths |
+| `state.rs` | `crate::display` (Win32) |
+| `trn_http.rs` | compiles on Linux in principle, but its pure rules (`host_allowed`, `validate_path`, `status_error`) are private inside a `reqwest` network module — extracting them is the next testable slice |
+| `updater.rs` | the file imports `tauri` / `tauri-plugin-updater`, so the whole module needs a Tauri build even though `is_upgrade` and the channel-endpoint maths are pure — same extraction candidate |
+| `trn_cache/{store,read,sweep}.rs` | `tauri::AppHandle` for app paths (the path/header layer above is covered) |
+| `trn_proxy/{window,fetch,...}.rs` | WebView2 / Tauri window runtime |
+| `perf/sampler.rs` | Win32 PDH / process APIs (the model above is the pure half) |
+
+## Not covered yet
+
+- **TypeScript pure logic** — the crosshair payload builder, deflate/inflate +
+  canonical comparison, and the storefront response validation are host-agnostic
+  by nature but live in modules that import Tauri IPC; testing them needs a small
+  extraction or `bun test` with the transport mocked. Not done in this pass.
+- **`updater.rs` version maths** — pure and valuable (`alpha9 < alpha10` natural
+  ordering, channel endpoint selection), blocked only by the module's Tauri
+  imports. Extraction is a small, additive refactor.
+
+## CI note
+
+This crate is deliberately **not** a workspace member and is not part of the
+Windows build. A Linux CI job can run it with:
+
+```bash
+cargo test --manifest-path src-tauri/pure/Cargo.toml
+```
+
+No system packages, no Windows target, no secrets.

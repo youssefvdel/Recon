@@ -1,0 +1,9 @@
+[package]
+name = "recon-pure"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Host-agnostic slice of the Recon backend, compiled by path for Linux-side tests"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
