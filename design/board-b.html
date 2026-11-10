@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Recon — Direction B · Season Stream</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400..800&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #140e1b;
+    --surface: #23192f;
+    --surface-low: #1c1325;
+    --surface-high: #2e213d;
+    --surface-highest: #3a2a4c;
+    --on: #e6e0e9;
+    --on-var: #cac4d0;
+    --outline: #938f99;
+    --outline-subtle: #352945;
+    --primary: #d0bcff;
+    --primary-container: #4f378b;
+    --mint: #a8f5cc;
+    --coral: #ff8a7a;
+    --gold: #e8b73a;
+    --mono: 'JetBrains Mono', 'Cascadia Code', monospace;
+    --display: 'Outfit', system-ui, sans-serif;
+    --sans: 'DM Sans', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: var(--outline-subtle) var(--bg); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--outline-subtle); border-radius: 6px; border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--outline); }
+  html, body { margin: 0; background: #0b0810; color: var(--on); font-family: var(--sans); }
+  .boardbar { max-width: 1320px; margin: 0 auto; padding: 22px 24px 14px; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+  .letter { display: flex; align-items: baseline; gap: 14px; }
+  .letter b { font: 900 44px/1 var(--display); color: var(--primary); letter-spacing: -0.02em; }
+  .letter h1 { margin: 0; font: 800 22px/1.1 var(--display); letter-spacing: -0.01em; }
+  .letter p { margin: 6px 0 0; color: var(--on-var); font-size: 13px; }
+  .viewswitch { display: flex; gap: 4px; background: var(--surface-low); border: 1px solid var(--outline-subtle); padding: 4px; border-radius: 12px; }
+  .viewswitch button { appearance: none; border: 0; background: transparent; color: var(--on-var); font: 600 12px var(--sans); padding: 8px 14px; border-radius: 9px; cursor: pointer; }
+  .viewswitch button.active { background: var(--surface-high); color: var(--on); }
+
+  .window { max-width: 1320px; margin: 0 auto 18px; height: 860px; display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--outline-subtle); border-radius: 18px; overflow: hidden; }
+  .topbar { height: 54px; flex: 0 0 54px; display: flex; align-items: center; gap: 20px; padding: 0 22px; border-bottom: 1px solid var(--outline-subtle); background: var(--surface-low); }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand i { width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(140deg, var(--primary), var(--primary-container)); display: block; }
+  .brand b { font: 800 15px var(--display); }
+  .brand small { color: var(--outline); font: 600 9px var(--mono); margin-left: 2px; }
+  .actsw { margin-left: 18px; display: flex; align-items: center; gap: 2px; border: 1px solid var(--outline-subtle); border-radius: 9px; padding: 3px; background: var(--bg); }
+  .actsw button { border: 0; background: transparent; color: var(--outline); font: 600 11px var(--mono); padding: 5px 10px; border-radius: 6px; cursor: pointer; }
+  .actsw button.on { background: var(--surface-high); color: var(--on); }
+  .topbar .right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .sync { font: 500 10px var(--mono); color: var(--outline); }
+  .sync i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--mint); margin-right: 7px; }
+  .search { border: 1px solid var(--outline-subtle); color: var(--outline); border-radius: 8px; padding: 6px 10px; font: 500 10px var(--mono); }
+  .more { border: 1px solid var(--outline-subtle); border-radius: 8px; color: var(--on-var); background: transparent; width: 28px; height: 26px; cursor: pointer; }
+
+  .feedwrap { flex: 1; min-height: 0; overflow: auto; scroll-behavior: smooth; }
+  .now { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px; padding: 11px 26px; background: var(--bg); border-bottom: 1px solid var(--outline-subtle); }
+  .now .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--primary); }
+  .now b { font: 700 11px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--primary); }
+  .now span { font: 500 12px var(--sans); color: var(--on-var); }
+  .now .sep { color: var(--outline-subtle); }
+  .now .open { margin-left: auto; font: 600 11px var(--mono); color: var(--primary); text-decoration: none; }
+  .now.idle .dot { background: var(--outline); }
+  .now.idle b { color: var(--outline); }
+
+  .feed { width: 940px; max-width: calc(100% - 48px); margin: 0 auto; padding: 26px 0 40px; }
+  .acthead { padding-bottom: 24px; border-bottom: 1px solid var(--outline-subtle); }
+  .acthead .k { font: 700 10px var(--mono); letter-spacing: 0.18em; text-transform: uppercase; color: var(--outline); }
+  .acthead .big { display: flex; align-items: baseline; gap: 20px; margin-top: 8px; }
+  .acthead .big b { font: 800 46px/1 var(--display); letter-spacing: -0.04em; }
+  .acthead .big span { font: 600 20px var(--mono); color: var(--primary); }
+  .acthead .metrics { margin-top: 12px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 16px; font: 500 12px var(--mono); color: var(--on-var); }
+  .acthead .metrics i { color: var(--outline); font-style: normal; }
+  .acthead .metrics b { color: var(--on); font-weight: 600; }
+
+  .entry { border-bottom: 1px solid var(--outline-subtle); }
+  .row { display: grid; grid-template-columns: 84px 1fr 168px 24px; gap: 16px; align-items: center; padding: 14px 4px 14px 0; cursor: pointer; }
+  .row:hover { background: rgba(255, 255, 255, 0.02); }
+  .gutter { font: 500 10px var(--mono); color: var(--outline); line-height: 1.6; }
+  .gutter b { display: block; color: var(--on-var); font-weight: 600; font-size: 11px; }
+  .row .title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+  .row .title b { font: 700 16px var(--display); }
+  .row .title .res { font: 700 10px var(--mono); letter-spacing: 0.14em; }
+  .row .sub { margin-top: 4px; font: 500 11px var(--mono); color: var(--outline); }
+  .row .sub b { color: var(--on-var); font-weight: 600; }
+  .strip { display: flex; gap: 2px; align-items: flex-end; justify-content: flex-end; height: 22px; }
+  .bar { width: 5px; height: 14px; border-radius: 1px; background: var(--surface-high); }
+  .bar.w { background: rgba(168, 245, 204, 0.75); height: 18px; }
+  .bar.l { background: rgba(255, 138, 122, 0.65); height: 11px; }
+  .chev { color: var(--outline); font: 600 12px var(--mono); text-align: center; }
+  .res-win { color: var(--mint); }
+  .res-loss { color: var(--coral); }
+
+  .body { display: none; padding: 0 0 26px 100px; }
+  .entry.open { background: var(--surface-low); }
+  .entry.open .body { display: block; }
+  .entry.open .chev { transform: rotate(90deg); }
+  .verdictline { display: flex; align-items: baseline; gap: 14px; padding: 6px 0 14px; }
+  .verdictline b { font: 800 24px var(--display); letter-spacing: -0.02em; }
+  .verdictline span { font: 500 11px var(--mono); color: var(--outline); }
+  .rail { position: sticky; top: 44px; z-index: 4; display: flex; gap: 3px; padding: 10px 0; background: var(--surface-low); border-bottom: 1px solid var(--outline-subtle); overflow-x: auto; }
+  .rc { flex: 0 0 auto; width: 26px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 4px; font: 700 10px var(--mono); color: var(--outline); background: var(--bg); }
+  .rc.w { color: var(--mint); background: rgba(168, 245, 204, 0.10); }
+  .rc.l { color: var(--coral); background: rgba(255, 138, 122, 0.10); }
+  .rc.sel { outline: 2px solid var(--primary); outline-offset: 1px; color: var(--on); }
+  .rhead { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-top: 18px; }
+  .rhead h3 { margin: 0; font: 800 16px var(--display); }
+  .rhead span { font: 500 10px var(--mono); color: var(--outline); }
+  .kills { margin-top: 10px; border-top: 1px solid var(--outline-subtle); }
+  .kill { display: grid; grid-template-columns: 1fr auto 1fr 54px; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid rgba(53, 41, 69, 0.5); font: 500 11px var(--mono); }
+  .kill .w { color: var(--outline); font-size: 10px; text-align: center; }
+  .kill .v { text-align: right; }
+  .kill .t { text-align: right; color: var(--outline); font-size: 10px; }
+  .muted { color: var(--outline); }
+  .econ { display: flex; gap: 26px; margin-top: 12px; font: 500 10px var(--mono); color: var(--outline); }
+  .econ b { display: block; margin-top: 3px; color: var(--on); font-size: 12px; }
+  .stable { width: 100%; border-collapse: collapse; margin-top: 20px; }
+  .stable th { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--outline-subtle); font: 600 9px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--outline); }
+  .stable td { padding: 7px 6px; border-bottom: 1px solid rgba(53, 41, 69, 0.45); font-size: 11.5px; color: var(--on-var); }
+  .stable td.n { font-family: var(--mono); text-align: right; }
+  .stable tr.tl td { color: var(--outline); font: 700 9px var(--mono); letter-spacing: 0.12em; padding-top: 12px; }
+  .stable tr.me td { color: var(--on); }
+  .stable tr.me td:first-child { box-shadow: inset 2px 0 0 var(--primary); }
+
+  .actbreak { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-top: 22px; padding: 14px 0 8px; border-bottom: 1px solid var(--outline-subtle); font: 700 10px var(--mono); letter-spacing: 0.16em; text-transform: uppercase; color: var(--outline); }
+  .actbreak b { color: var(--on-var); font-weight: 700; }
+  .feedend { padding: 16px 0 0; font: 500 10px var(--mono); color: var(--outline); }
+  .spec { max-width: 1320px; margin: 0 auto 40px; display: grid; grid-template-columns: 1fr 1.15fr 1.25fr 1fr; gap: 26px; padding: 24px; border: 1px solid var(--outline-subtle); border-radius: 16px; background: var(--surface-low); }
+  .spec h4 { margin: 0 0 10px; font: 700 11px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--outline); }
+  .spec p, .spec li { font-size: 12px; line-height: 1.55; color: var(--on-var); }
+  .spec ul { margin: 0; padding-left: 16px; }
+  .spec table th, .spec table td { padding: 5px 4px; font-size: 11px; }
+  .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; }
+</style>
+</head>
+<body>
+  <header class="boardbar">
+    <div class="letter">
+      <b>B</b>
+      <div>
+        <h1>Season Stream</h1>
+        <p>Zero destinations, zero pages: the season is one feed, and a match opens where it sits.</p>
+      </div>
+    </div>
+    <nav class="viewswitch" aria-label="Board views">
+      <button data-view="overview" class="active">Act feed</button>
+      <button data-view="matches">Matches</button>
+      <button data-view="detail">Match detail</button>
+    </nav>
+  </header>
+
+  <div class="window">
+    <div class="topbar">
+      <div class="brand"><i></i><b>Recon</b><small>0.5.0</small></div>
+      <div class="actsw" role="tablist" aria-label="Act">
+        <button class="on">Act 3</button><button>Act 2</button><button>Act 1</button>
+      </div>
+      <div class="right">
+        <span class="sync"><i></i>synced 2m</span>
+        <span class="search">⌘K</span>
+        <button class="more" aria-label="Tools and settings">⋯</button>
+      </div>
+    </div>
+
+    <div class="feedwrap" id="feedwrap">
+      <div class="now" id="now">
+        <span class="dot"></span><b>Live</b>
+        <span>Ascent</span><span class="sep">·</span><span>6–4</span><span class="sep">·</span><span>10 players</span>
+        <a href="#" class="open" onclick="return false">Open HUD ↗</a>
+      </div>
+
+      <div class="feed">
+        <div class="acthead">
+          <span class="k">Episode 9 · Act 3 · Competitive</span>
+          <div class="big"><b>34–29</b><span>54%</span></div>
+          <div class="metrics">
+            <span><b>Diamond 2</b> · 47 RR</span><i>·</i>
+            <span><b>218</b> ACS</span><i>·</i>
+            <span><b>1.24</b> K/D</span><i>·</i>
+            <span><b>27%</b> HS</span><i>·</i>
+            <span>63 games</span>
+          </div>
+        </div>
+
+        <div id="list-anchor"></div>
+
+        <!-- Ascent: expanded by default in Match detail -->
+        <article class="entry" id="m-ascent">
+          <div class="row" data-toggle>
+            <div class="gutter"><b>2h ago</b>Tue 21:40</div>
+            <div>
+              <div class="title"><b>Ascent</b><span class="res res-win">WIN 13–9</span></div>
+              <div class="sub">Jett <b>24/14/6</b> · 241 ACS · 31m · competitive</div>
+            </div>
+            <div class="strip" aria-hidden="true">
+              <span class="bar w"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar w"></span><span class="bar l"></span><span class="bar l"></span><span class="bar l"></span><span class="bar w"></span>
+            </div>
+            <div class="chev">›</div>
+          </div>
+          <div class="body">
+            <div class="verdictline"><b class="res-win">13–9</b><span>Blue 8 · Red 4 at half · 22 rounds</span></div>
+            <div class="rail" role="tablist" aria-label="Rounds">
+              <span class="rc w">1</span><span class="rc w">2</span><span class="rc l">3</span><span class="rc w">4</span><span class="rc l">5</span><span class="rc w">6</span><span class="rc w">7</span><span class="rc l">8</span><span class="rc sel">9</span><span class="rc w">10</span><span class="rc l">11</span><span class="rc w">12</span><span class="rc w">13</span><span class="rc l">14</span><span class="rc w">15</span><span class="rc l">16</span><span class="rc w">17</span><span class="rc w">18</span><span class="rc l">19</span><span class="rc l">20</span><span class="rc l">21</span><span class="rc w">22</span>
+            </div>
+            <div class="rhead"><h3>Round 9 · Blue win</h3><span>Elimination · 1:44</span></div>
+            <div class="kills">
+              <div class="kill"><span>Youssef <span class="muted">Jett</span></span><span class="w">Vandal</span><span class="v">Omen</span><span class="t">0:42</span></div>
+              <div class="kill"><span class="muted">Reyna</span><span class="w">Phantom</span><span class="v">Sova <span class="muted">teammate</span></span><span class="t">0:55</span></div>
+              <div class="kill"><span>Youssef <span class="muted">Jett</span></span><span class="w">Vandal</span><span class="v">Cypher</span><span class="t">1:12</span></div>
+              <div class="kill"><span class="muted">Killjoy</span><span class="w">Spectre</span><span class="v">Viper</span><span class="t">1:30</span></div>
+              <div class="kill"><span>Youssef <span class="muted">Jett</span></span><span class="w">Vandal</span><span class="v">Sage</span><span class="t">1:44</span></div>
+            </div>
+            <div class="econ"><span>Loadout<b>$3,900</b></span><span>Remaining<b>+$650</b></span><span>Weapon<b>Vandal</b></span><span>Armor<b>Light shield</b></span></div>
+            <table class="stable">
+              <thead><tr><th>Player</th><th>Agent</th><th style="text-align:right">ACS</th><th style="text-align:right">K/D/A</th><th style="text-align:right">ADR</th><th style="text-align:right">HS%</th></tr></thead>
+              <tbody>
+                <tr class="tl"><td colspan="6">YOUR TEAM</td></tr>
+                <tr class="me"><td>Youssef <span class="muted">#EGY</span></td><td>Jett</td><td class="n">241</td><td class="n">24/14/6</td><td class="n">168</td><td class="n">31%</td></tr>
+                <tr><td>Shadow</td><td>Omen</td><td class="n">198</td><td class="n">17/16/9</td><td class="n">142</td><td class="n">24%</td></tr>
+                <tr><td>ViperX</td><td>Sova</td><td class="n">176</td><td class="n">14/15/7</td><td class="n">131</td><td class="n">22%</td></tr>
+                <tr><td>Clutch</td><td>Killjoy</td><td class="n">164</td><td class="n">13/17/5</td><td class="n">124</td><td class="n">19%</td></tr>
+                <tr><td>Phantom</td><td>Raze</td><td class="n">151</td><td class="n">12/18/4</td><td class="n">118</td><td class="n">21%</td></tr>
+                <tr class="tl"><td colspan="6">ENEMY</td></tr>
+                <tr><td>ReynaMain</td><td>Reyna</td><td class="n">226</td><td class="n">22/16/3</td><td class="n">159</td><td class="n">28%</td></tr>
+                <tr><td>Silent</td><td>Viper</td><td class="n">187</td><td class="n">16/15/8</td><td class="n">137</td><td class="n">23%</td></tr>
+                <tr><td>Headshot</td><td>Cypher</td><td class="n">171</td><td class="n">15/17/6</td><td class="n">129</td><td class="n">25%</td></tr>
+                <tr><td>EcoFrag</td><td>Sage</td><td class="n">158</td><td class="n">13/18/7</td><td class="n">121</td><td class="n">18%</td></tr>
+                <tr><td>Smurf</td><td>Phoenix</td><td class="n">142</td><td class="n">11/19/2</td><td class="n">112</td><td class="n">20%</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="entry" id="m-haven">
+          <div class="row">
+            <div class="gutter"><b>1d ago</b>Mon 20:12</div>
+            <div><div class="title"><b>Haven</b><span class="res res-loss">LOSS 11–13</span></div><div class="sub">Omen <b>18/17/9</b> · 196 ACS · 42m</div></div>
+            <div class="strip" aria-hidden="true"><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar w"></span><span class="bar l"></span><span class="bar l"></span><span class="bar w"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar l"></span><span class="bar l"></span></div>
+            
+          </div>
+          
+        </article>
+
+        <article class="entry" id="m-lotus">
+          <div class="row">
+            <div class="gutter"><b>1d ago</b>Mon 18:40</div>
+            <div><div class="title"><b>Lotus</b><span class="res res-win">WIN 13–7</span></div><div class="sub">Jett <b>21/12/4</b> · 228 ACS · 28m</div></div>
+            <div class="strip" aria-hidden="true"><span class="bar w"></span><span class="bar w"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar w"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar w"></span><span class="bar l"></span></div>
+            
+          </div>
+          
+        </article>
+
+        <article class="entry" id="m-split">
+          <div class="row">
+            <div class="gutter"><b>2d ago</b>Sun 22:05</div>
+            <div><div class="title"><b>Split</b><span class="res res-loss">LOSS 9–13</span></div><div class="sub">Omen <b>15/16/7</b> · 174 ACS · 35m</div></div>
+            <div class="strip" aria-hidden="true"><span class="bar l"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span></div>
+            
+          </div>
+          
+        </article>
+
+        <article class="entry" id="m-bind">
+          <div class="row">
+            <div class="gutter"><b>3d ago</b>Sat 19:30</div>
+            <div><div class="title"><b>Bind</b><span class="res res-win">WIN 13–11</span></div><div class="sub">Jett <b>23/15/5</b> · 219 ACS · 38m</div></div>
+            <div class="strip" aria-hidden="true"><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar w"></span></div>
+            
+          </div>
+          
+        </article>
+
+        <div class="actbreak" id="act2"><b>Act 2 · Episode 9</b><span>ended 6d ago</span></div>
+
+        <article class="entry" id="m-sunset">
+          <div class="row">
+            <div class="gutter"><b>6d ago</b>Wed 19:55</div>
+            <div><div class="title"><b>Sunset</b><span class="res res-win">WIN 13–10</span></div><div class="sub">Jett <b>19/14/5</b> · 214 ACS · 34m</div></div>
+            <div class="strip" aria-hidden="true"><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar l"></span><span class="bar w"></span></div>
+            <div class="chev"></div>
+          </div>
+        </article>
+
+        <article class="entry" id="m-icebox">
+          <div class="row">
+            <div class="gutter"><b>6d ago</b>Wed 18:10</div>
+            <div><div class="title"><b>Icebox</b><span class="res res-loss">LOSS 7–13</span></div><div class="sub">Omen <b>13/17/8</b> · 168 ACS · 37m</div></div>
+            <div class="strip" aria-hidden="true"><span class="bar w"></span><span class="bar l"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar l"></span><span class="bar w"></span><span class="bar l"></span><span class="bar l"></span></div>
+            <div class="chev"></div>
+          </div>
+        </article>
+
+        <div class="feedend">Earlier in Act 2 · 39 matches · Act 1 below</div>
+      </div>
+    </div>
+  </div>
+
+  <section class="spec" aria-label="Direction B specification">
+    <div>
+      <h4>Type scale</h4>
+      <ul>
+        <li><b>46px</b> act record (Outfit 800)</li>
+        <li><b>24px</b> match verdict</li>
+        <li><b>16px</b> map / section</li>
+        <li><b>12px</b> body, <b>10px</b> mono labels</li>
+        <li>All numerals JetBrains Mono, tabular</li>
+      </ul>
+    </div>
+    <div>
+      <h4>Colour roles</h4>
+      <table>
+        <tr><td><span class="sw" style="background:#a8f5cc"></span>Mint</td><td>win only</td></tr>
+        <tr><td><span class="sw" style="background:#ff8a7a"></span>Coral</td><td>loss only</td></tr>
+        <tr><td><span class="sw" style="background:#d0bcff"></span>Violet</td><td>now / selection only</td></tr>
+        <tr><td><span class="sw" style="background:#e8b73a"></span>Gold</td><td>stale / attention only</td></tr>
+        <tr><td><span class="sw" style="background:#cac4d0"></span>Neutral</td><td>teams, sides, deltas</td></tr>
+      </table>
+    </div>
+    <div>
+      <h4>Card policy + nav</h4>
+      <p>No cards: the feed is bands, hairlines and type. One filled surface exists — the expanded entry — and it is a reading state, not a container.</p>
+      <p><b>Nav:</b> zero destinations. The act switcher moves in time, the feed is the page, and ⌘K plus the ⋯ menu hold the tools. Match detail opens in place; there is no modal and no second page.</p>
+    </div>
+    <div>
+      <h4>Cost to build</h4>
+      <p><b>Medium.</b> One feed component + in-place expansion + act scrubber. Reuses the existing match list/detail data; the only new interaction is accordion state and scroll anchoring.</p>
+    </div>
+  </section>
+
+<script>
+  const feed = document.getElementById('feedwrap');
+  const entries = [...document.querySelectorAll('.entry')];
+  function closeAll(except) {
+    entries.forEach((e) => { if (e !== except) e.classList.remove('open'); });
+  }
+  entries.forEach((e) => {
+    const toggle = e.querySelector('[data-toggle]');
+    if (!toggle) return;
+    toggle.addEventListener('click', () => {
+      const isOpen = e.classList.contains('open');
+      closeAll(e);
+      e.classList.toggle('open', !isOpen);
+    });
+  });
+  function scrollFeedTo(el) {
+    const top = el.getBoundingClientRect().top - feed.getBoundingClientRect().top + feed.scrollTop - 52;
+    feed.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  }
+  function show(view) {
+    document.querySelectorAll('.viewswitch button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
+    if (view === 'overview') { closeAll(); feed.scrollTo({ top: 0, behavior: 'smooth' }); }
+    if (view === 'matches') { closeAll(); scrollFeedTo(document.getElementById('list-anchor')); }
+    if (view === 'detail') {
+      closeAll(document.getElementById('m-ascent'));
+      document.getElementById('m-ascent').classList.add('open');
+      scrollFeedTo(document.getElementById('m-ascent'));
+    }
+  }
+  document.querySelectorAll('.viewswitch button').forEach((b) => b.addEventListener('click', () => show(b.dataset.view)));
+</script>
+</body>
+</html>
