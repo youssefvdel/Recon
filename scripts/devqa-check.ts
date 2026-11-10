@@ -1226,6 +1226,15 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
     true
   );
 
+  // Site #4: the lite match result goes through the typed reader, and its
+  // parse is a pure function the reader can validate before calling.
+  check(
+    'the lite result parses through the typed reader',
+    /readMatchDetails<Record<string, 1 \| 0> \| null>/.test(trackerSrc2) &&
+      /function parseLiteResultRow\(payload: unknown\)/.test(trackerSrc2),
+    true
+  );
+
   // Site #13: party clustering reads through the validated reader.
   check(
     'party clustering uses the validated reader',
