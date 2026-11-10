@@ -1229,6 +1229,27 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
     true
   );
 
+  // Sites #1/#2: both mmr endpoints go through typed readers.
+  check(
+    'the mmr profile uses the validated reader',
+    /readMmrProfile\(ent\.puuid, shardFor\(region\)/.test(trackerSrc2) &&
+      !/assertRiotOk\(j, 'MMR'\)/.test(trackerSrc2),
+    true
+  );
+  // Scoped to the function: `TierAfterUpdate` legitimately appears elsewhere
+  // (parseLocalRank reads it from a different payload).
+  const cuFn = trackerSrc2.slice(
+    trackerSrc2.indexOf('export async function fetchCompetitiveUpdates'),
+    trackerSrc2.indexOf('export async function detectRegion')
+  );
+  check(
+    'competitive updates use the typed rows',
+    /readCompetitiveUpdates\(ent\.puuid, shardFor\(region\), count, queue\)/.test(cuFn) &&
+      !/TierAfterUpdate/.test(cuFn) &&
+      /g\.rrEarned/.test(cuFn),
+    true
+  );
+
   // Sites #6-#9: the live probes go through NoMatch readers, and the 404 and
   // failure paths stay distinct at the call site.
   check(
