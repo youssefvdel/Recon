@@ -625,21 +625,71 @@ export function withCrosshairColors(state: CrosshairState, idx: number, colors: 
   return data;
 }
 
-/** Persist a settings doc. True only when the service answers `{ data: ... }`.
- *  Hard 30s cap — a stalled network/Rust stage must surface as failure,
- *  never as a forever-spinning save button. */
+const PREF_GET_PATH = '/playerPref/v3/getPreference/Ares.PlayerSettings';
+const PREF_SAVE_PATH = '/playerPref/v3/savePreference';
+const SAVE_TIMEOUT_MS = 30000;
+const SAVE_VERIFY_TIMEOUT_MS = 10000;
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error(label)), ms)),
+  ]);
+}
+
+/** One place builds the write body: validate the doc, deflate it, and refuse an
+ *  empty compression before anything reaches the transport. */
+async function buildPlayerSettingsPayload(data: unknown): Promise<string> {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('CROSSHAIR_PAYLOAD_INVALID');
+  }
+  const doc = JSON.stringify(data);
+  if (!doc || doc.length > 2_000_000) throw new Error('CROSSHAIR_PAYLOAD_SIZE');
+  const compressed = await deflateRaw(doc);
+  if (typeof compressed !== 'string' || compressed.length === 0) {
+    throw new Error('CROSSHAIR_PAYLOAD_DEFLATE');
+  }
+  return JSON.stringify({ type: 'Ares.PlayerSettings', data: compressed });
+}
+
+/** Order-independent JSON, for the read-back comparison. */
+function canonicalJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(',')}]`;
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    return `{${Object.keys(o)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonicalJson(o[k])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(v);
+}
+
+/** Persist a settings doc and prove it landed.
+ *
+ *  `true` means: the payload was validated and deflated, the write answered the
+ *  `{ data: string }` shape, and a read-back of the same preference matched the
+ *  document we sent. A 200 that did not apply is the failure mode this codebase
+ *  keeps finding, so the read-back is the success condition, not the 200.
+ *  Hard 30 s write cap + 10 s verify cap: a stalled stage surfaces as failure,
+ *  never as a forever-spinning save button. Never throws. */
 export async function saveCrosshair(host: string, data: any): Promise<boolean> {
   try {
-    const { riotPut } = await import('./tracker');
-    const payload = JSON.stringify({
-      type: 'Ares.PlayerSettings',
-      data: await deflateRaw(JSON.stringify(data)),
-    });
-    const res = await Promise.race([
-      riotPut(host, '/playerPref/v3/savePreference', payload),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('SAVE_TIMEOUT')), 30000)),
-    ]);
-    return !!res && typeof res === 'object' && typeof res.data === 'string';
+    const { riotPutValidated, readRiotValidated } = await import('../sources/riot');
+    const payload = await buildPlayerSettingsPayload(data);
+    const res = await withTimeout(
+      riotPutValidated(host, PREF_SAVE_PATH, payload),
+      SAVE_TIMEOUT_MS,
+      'SAVE_TIMEOUT'
+    );
+    if (!res || typeof (res as { data?: unknown }).data !== 'string') return false;
+    const echo = await withTimeout(
+      readRiotValidated<{ data?: unknown }>(host, PREF_GET_PATH),
+      SAVE_VERIFY_TIMEOUT_MS,
+      'SAVE_VERIFY_TIMEOUT'
+    );
+    if (!echo || typeof echo.data !== 'string') return false;
+    return canonicalJson(JSON.parse(await inflateRaw(echo.data))) === canonicalJson(data);
   } catch {
     return false;
   }

@@ -1165,11 +1165,9 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
 }
 
 // --- raw PUT/POST are outside the validated surface: pinned, not expanded ---
-// GET is single-owner; writes are converging on the same rule. The remaining
-// raw call is the crosshair preference PUT, which carries user data, so the set
-// is asserted by file+function+count rather than by line (lines drift, the set
-// must not): a new raw call, or a second one in an existing file, fails here
-// until someone adds it deliberately and writes the validated path instead.
+// GET and writes now have validated owners. The pin is kept at zero: a new raw
+// call fails here until someone adds it deliberately and writes the validated
+// path instead. Counted by file+function, so it is line-drift safe.
 {
   const { readdirSync, readFileSync, statSync } = await import('node:fs');
   const { join, relative } = await import('node:path');
@@ -1200,8 +1198,9 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
     .sort()
     .map((k) => `${k} x${hits[k]}`)
     .join(', ');
-  const expected = ['src/utils/crosshair.ts riotPut x1'].join(', ');
-  check('raw PUT/POST call sites are pinned (validated writes are separate work)', actual, expected);
+  // No raw write calls remain. The expected set is empty on purpose: a new raw
+  // riotPut/riotPost fails here until it is converted deliberately.
+  check('no raw PUT/POST call sites remain', actual, '');
 }
 
 // --- the validated rank boundary (upstream audit finding) ------------------

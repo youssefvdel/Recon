@@ -593,6 +593,18 @@ export async function riotPostValidated(
   return validated(j as unknown);
 }
 
+/** Validated PUT, same rule as `riotPostValidated`: `assertRiotOk` before the
+ *  caller sees the payload. No retry: a write is not idempotent. */
+export async function riotPutValidated(
+  host: string,
+  path: string,
+  body: string
+): Promise<Validated<unknown>> {
+  const j = await riotPut(host, path, body);
+  assertRiotOk(j, 'write');
+  return validated(j as unknown);
+}
+
 /** The daily shop. A POST with an empty body, validated as a *read*: an error
  *  payload throws, and a payload carrying none of the three shop sections also
  *  throws — "not a shop" must never render as an empty shop. The deep offer

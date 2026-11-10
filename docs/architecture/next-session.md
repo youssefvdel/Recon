@@ -84,9 +84,12 @@ GET is validated end to end; `riotPut`/`riotPost` are still exported and called
 raw. The call sites are pinned by devqa (file + function + count), so this list can
 only change deliberately:
 
-- `src/utils/crosshair.ts:639` — `riotPut(host, '/playerPref/v3/savePreference', payload)`
-- **Converted:** `src/utils/prepick.ts` → `riotPostValidated`; `src/utils/store.ts`
-  → `readStorefront`. The devqa pin now lists only the crosshair PUT.
+No raw write calls remain. All three sites are converted:
+
+- `src/utils/prepick.ts` — `riotPostValidated` (ids validated before the path).
+- `src/utils/store.ts` — `readStorefront` (transport + shop-shape gate).
+- `src/utils/crosshair.ts` — `riotPutValidated` + payload builder + read-back.
+The devqa pin is kept at zero so a new raw write fails until it is deliberate.
 
 A validated write means **two** validations, not one:
 
@@ -115,17 +118,24 @@ parsing into an empty store and overwriting the cache. The caller's existing
 catch still returns the memory/localStorage snapshot, so a failed read keeps the
 last known shop. The deep offer model stays with the caller for now.
 
-**3. `crosshair.ts:639` — convert last, with read-back.** A true write: deflated
+**3. `crosshair.ts` — converted, with read-back.** A true write: deflated
 `Ares.PlayerSettings` envelope, response must be `{ data: string }`, and a wrong
-payload silently overwrites the player's preferences. Conversion: typed payload
-builder (validate `type`, non-empty deflate, size cap) before send; `assertRiotOk`
-+ envelope check after; on success read the preference back and compare before
-reporting `true`. Keep the 30 s timeout race and the `catch → false` contract.
+payload overwrites the player's preferences. `buildPlayerSettingsPayload` is the
+one place the body is built (object check, 2 MB cap, non-empty deflate) and
+`riotPutValidated` adds `assertRiotOk`. On a 200 + envelope, `saveCrosshair`
+reads the same preference back, inflates it and compares it **order-independently**
+(`canonicalJson`) before returning `true`. The 30 s write race and the
+`catch → false` contract are kept; the verify step gets its own 10 s cap.
+
+  **Unverified live:** the read-back comparison is implemented against the real
+  `getPreference` route but there is no Riot client in this environment, so only
+  type/static checks ran here. End-to-end proof of the comparison needs a Windows
+  run with a signed-in client.
 
 ### Order and receipts
 
-Only the crosshair PUT remains: a real write with a deflated payload and a
-read-back requirement, so it gets its own session. Each is its own commit, with the devqa pin updated in the same
+All three conversions are done; the ordering above was followed and is kept as
+the rationale for how each site was handled. Each is its own commit, with the devqa pin updated in the same
 write; the pin's expected list shrinking is the receipt that raw writes converted.
 
 ## Rules that carried this refactor and should carry the next one
