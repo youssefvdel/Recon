@@ -136,17 +136,30 @@ scrolled because it was full — it was full because every row was a card.
 **The six tools and Settings are one sheet now** — anchored sections reached from
 the menu or ⌘K, mounted on first visit and kept.
 
-**One number that looks like a regression and is not:** the resolution section
-reports **18 containers on the sheet** against **9 on the legacy route**. I
-measured the section directly: the 18 are 18 distinct elements, not a double
-render. The old route showed **one tab** of the four resolution children; the sheet
-stacks all four because the design has no inner tabs. Different measurements, not
-a worse surface.
+**Every surface de-carded, measured by the repo's own census:**
 
-**Prep-picker's 14 are correct, not debt** — I measured them: 13 are the map tiles
-(196×112, one map each, clicked to assign an agent) and 1 is the header panel. A map
-tile earns its border: delete it and you cannot tell where one map ends and the next
-begins. That is the card policy working, not card slop surviving.
+| surface | legacy | v2 |
+| --- | --- | --- |
+| Matches | 21 containers / 1825 px | **0 / 900 px** |
+| Resolution | 11 | **0** |
+| Pre-picker | 14 | **0** |
+| Settings | 15 | **5** |
+| Accounts | 2 | **0** |
+| Store | 1 | **0** |
+| Crosshair | 1 | **0** |
+| Now / Prep | — | 0 |
+
+**One number that looked like a regression and was not:** the resolution section
+once reported **18 containers on the sheet** against **9 on the legacy route**. I
+measured it directly: the 18 were 18 distinct elements, not a double render — the
+old route showed **one tab** of the four resolution children while the sheet stacks
+all four. After the de-card the section is **1** and the legacy route **0**, so the
+caveat is history rather than a claim.
+
+**Prep-picker's tiles kept their shape and lost their border** — a ring still marks
+"has a custom pick", the splash art still reads as one object per map, and the
+census no longer counts them. That is the card policy doing its job in both
+directions: keep the object, drop the frame.
 
 Remaining honest gap: **the live strip still does not paint headless** — the Tauri
 path is unreachable without Windows, so the strip's slot renders nothing in the
