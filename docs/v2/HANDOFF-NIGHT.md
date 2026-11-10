@@ -21,6 +21,14 @@ lost** — it is committed locally and needs one push when the line is back.
 | `352adb5` | Prep detail grid no longer prints `undefined / undefined / undefined`; empty rows are dropped, an empty expansion draws nothing |
 | `24b20f6` | contrast: `m3-outline` used as text maps to the muted text role; the contrast script now skips `<button disabled>` (WCAG 1.4.3 exempts inactive components) |
 
+## The HUD is provably untouched by the palette bridge
+
+The bridge only applies inside the v2 shell (`[data-theme]`). Checked on the
+legacy entry (`?legacy=1`, which is what the overlay window renders): the page has
+**no `[data-theme]` element**, a `m3-surface-container` card computes
+`rgb(35, 25, 47)` and the body `rgb(20, 14, 27)` — the original hexes, exactly as
+before. So the overlay keeps its own palette and the bridge cannot reach it.
+
 ## Verified locally, without the network
 
 - `bun run build:ui` → **0 TS errors**
