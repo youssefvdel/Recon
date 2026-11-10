@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useTrackerData } from '../hooks/useTrackerData';
 import { fetchTrnActStats, type TrnActStats } from '../utils/trn';
 import type { TrackerMatchDetail, TrackerMmrPoint } from '../types';
-import { shortMapName } from '../utils/tracker';
+import { shortMapName, tierName } from '../utils/tracker';
 import { Skeleton } from './primitives/Skeleton';
 import { ActHeader, type ActMetric } from './primitives/ActHeader';
 import { FeedRow } from './primitives/FeedRow';
@@ -49,7 +49,9 @@ export const Overview: React.FC = () => {
 
   const [playlist, setPlaylist] = useState('competitive');
   const [seasonId, setSeasonId] = useState('');
-  const [selStats, setSelStats] = useState<TrnActStats | null>(null);
+  /* Keyed by the act it was fetched for: a stale selection can never render the
+   * previous act's numbers, because the key no longer matches. */
+  const [selState, setSelState] = useState<{ id: string; stats: TrnActStats } | null>(null);
   const [selError, setSelError] = useState<string | null>(null);
   const [selLoading, setSelLoading] = useState(false);
   const [openMatch, setOpenMatch] = useState<TrackerMmrPoint | null>(null);
@@ -62,6 +64,7 @@ export const Overview: React.FC = () => {
   }, []);
 
   const isDefault = playlist === 'competitive' && !seasonId;
+  const selStats = selState && selState.id === seasonId ? selState.stats : null;
   const S = isDefault ? trn : selStats;
 
   /* A past act is fetched on demand, exactly as before. While it loads the page
@@ -72,8 +75,12 @@ export const Overview: React.FC = () => {
     setSelLoading(true);
     setSelError(null);
     fetchTrnActStats(profile.name, profile.tag, seasonId, playlist)
-      .then((r) => alive && setSelStats(r.stats))
-      .catch((e) => alive && setSelError(String(e?.message ?? e)))
+      .then((r) => alive && setSelState({ id: seasonId, stats: r.stats }))
+      .catch((e) => {
+        if (!alive) return;
+        setSelState(null);
+        setSelError(String(e?.message ?? e));
+      })
       .finally(() => alive && setSelLoading(false));
     return () => {
       alive = false;
@@ -99,7 +106,7 @@ export const Overview: React.FC = () => {
     if (d < HOUR) return `${Math.max(1, Math.round(d / 60_000))}m ago`;
     if (d < 24 * HOUR) return `${Math.round(d / HOUR)}h ago`;
     return `${Math.round(d / (24 * HOUR))}d ago`;
-  }, [isDefault, trn, trnFetchedAt]);
+  }, [isDefault, trn, trnFetchedAt, now]);
 
   const actLabel = isDefault
     ? seasonNames?.[profile?.currentSeasonId?.toLowerCase() ?? ''] ?? 'Current Act'
@@ -196,7 +203,9 @@ export const Overview: React.FC = () => {
   const status = selError
     ? `Could not load ${actLabel}: ${selError}`
     : clientClosed
-      ? `Riot Client closed — showing cached results${trnAge ? ` · as of ${trnAge}` : ''}`
+      ? `Riot Client closed — showing cached results${
+          trnAge === 'date unknown' ? ' · date unknown' : trnAge ? ` · as of ${trnAge}` : ''
+        }`
       : trnAge && trnAge !== 'date unknown'
         ? `Cached act data · as of ${trnAge}`
         : trnAge === 'date unknown' && trn
@@ -230,7 +239,12 @@ export const Overview: React.FC = () => {
     <div className="max-w-[940px] mx-auto w-full px-6 pt-6 pb-10 flex flex-col">
       <div className="flex items-start justify-between gap-4">
         <ActHeader
-          eyebrow={`${actLabel} · ${PLAYLISTS.find((p) => p.value === playlist)?.label ?? ''}`}
+          eyebrow={[
+            actLabel || (isDefault ? seasonNames?.[profile.currentSeasonId?.toLowerCase() ?? ''] ?? 'Current Act' : ''),
+            PLAYLISTS.find((p) => p.value === playlist)?.label ?? '',
+          ]
+            .filter(Boolean)
+            .join(' · ')}
           record={selLoading ? undefined : record}
           winPct={selLoading ? undefined : winPct !== undefined ? `${Math.round(winPct)}%` : undefined}
           metrics={selLoading ? [] : metrics}
@@ -296,7 +310,7 @@ export const Overview: React.FC = () => {
                 score={score}
                 sub={sub}
                 spark={<Sparkline values={spark} />}
-                onOpen={() => setOpenMatch(g)}
+                onOpen={detailsById?.[g.matchId] ? () => setOpenMatch(g) : undefined}
               />
             ))}
           </div>
@@ -319,6 +333,7 @@ export const Overview: React.FC = () => {
                 </span>
                 <span className="text-xs text-m3-on-surface truncate">{h.label}</span>
                 <span className="text-micro font-mono text-m3-outline tabular-nums">
+                  {h.tier > 0 ? `${tierName(h.tier)} · ` : ''}
                   {h.games} games{h.kd ? ` · ${h.kd.toFixed(2)} K/D` : ''}
                 </span>
               </div>
