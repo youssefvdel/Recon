@@ -17,7 +17,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -25,9 +25,10 @@ const TAIL_LINES = 20;
 
 const env = { ...process.env };
 // cargo lives in ~/.cargo/bin on this box, which a non-login PATH misses.
-env.PATH = [env.PATH, join(homedir(), ".cargo/bin"), "/usr/local/cargo/bin"]
-  .filter(Boolean)
-  .join(":");
+// Join with the platform delimiter (";" on Windows) — clobbering PATH with ":"
+// there hides bun/tsc from every child process.
+const extraPath = [join(homedir(), ".cargo/bin"), "/usr/local/cargo/bin"];
+env.PATH = [...new Set([env.PATH, ...extraPath].filter(Boolean))].join(delimiter);
 
 // Windows CreateProcess does not apply PATHEXT: spawning "bun"/"cargo" fails
 // when only bun.exe/cargo.exe exist. Use the running Bun binary and resolve
