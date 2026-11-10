@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTrackerData } from '../hooks/useTrackerData';
 import { fetchTrnActStats, type TrnActStats } from '../utils/trn';
-import type { TrackerMatchDetail, TrackerMmrPoint } from '../types';
+import type { TrackerMatchDetail } from '../types';
 import { shortMapName, tierName } from '../utils/tracker';
 import { actFetchKey } from '../utils/actFetchKey';
 import { Skeleton } from './primitives/Skeleton';
@@ -9,7 +9,6 @@ import { ActHeader, type ActMetric } from './primitives/ActHeader';
 import { FeedRow } from './primitives/FeedRow';
 import { Sparkline } from './primitives/Sparkline';
 import { StatusLine } from './primitives/StatusLine';
-import { MatchDetailModal } from './MatchDetailModal';
 import type { Outcome } from './primitives/colors';
 
 /* Overview, direction B ("Season Stream"): one 940px column, no cards.
@@ -57,7 +56,6 @@ export const Overview: React.FC = () => {
   const [selLoading, setSelLoading] = useState(false);
   /** Bumped by Retry: part of the fetch identity, so the effect really re-runs. */
   const [reloadKey, setReloadKey] = useState(0);
-  const [openMatch, setOpenMatch] = useState<TrackerMmrPoint | null>(null);
   /* Ages are relative, so the page needs a clock: one tick a minute keeps
    * "2h" from silently becoming "2h" three hours later. */
   const [now, setNow] = useState(() => Date.now());
@@ -325,7 +323,16 @@ export const Overview: React.FC = () => {
                 score={score}
                 sub={sub}
                 spark={<Sparkline values={spark} />}
-                onOpen={detailsById?.[g.matchId] ? () => setOpenMatch(g) : undefined}
+                onOpen={
+                  detailsById?.[g.matchId]
+                    ? () => {
+                        // The ledger owns the detail now; this asks it to open there.
+                        window.dispatchEvent(
+                          new CustomEvent('recon:goto-match', { detail: { matchId: g.matchId } })
+                        );
+                      }
+                    : undefined
+                }
               />
             ))}
           </div>
@@ -357,17 +364,6 @@ export const Overview: React.FC = () => {
         </section>
       )}
 
-      <MatchDetailModal
-        isOpen={!!openMatch}
-        onClose={() => setOpenMatch(null)}
-        detail={openMatch ? detailsById?.[openMatch.matchId] ?? null : null}
-        game={openMatch}
-        mapName={openMatch ? mapById?.[openMatch.matchId] ?? '' : ''}
-        queue={openMatch?.queueId ?? 'competitive'}
-        puuid={profile.puuid}
-        tierIcons={tierIcons ?? {}}
-        agentInfo={agentInfo ?? {}}
-      />
     </div>
   );
 };

@@ -169,7 +169,14 @@ export const App: React.FC = () => {
       setLiveNonce((n) => n + 1);
     };
     window.addEventListener('recon:goto-live', onGotoLive);
-    return () => window.removeEventListener('recon:goto-live', onGotoLive);
+    /* The Overview feed no longer opens a dialog: it asks the Matches ledger to
+     * expand that match. */
+    const onGotoMatch = () => setCurrentTab('matches');
+    window.addEventListener('recon:goto-match', onGotoMatch);
+    return () => {
+      window.removeEventListener('recon:goto-live', onGotoLive);
+      window.removeEventListener('recon:goto-match', onGotoMatch);
+    };
   }, []);
   const [displayInfo, setDisplayInfo] = useState<DisplayInfo | null>(null);
   const [shortcut, setShortcut] = useState<ShortcutBinding | null>(null);
