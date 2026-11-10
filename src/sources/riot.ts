@@ -83,9 +83,15 @@ let entCache: { at: number; ent: DirectEnt } | null = null;
 /** Bounded: one line per minute while the entitlement read keeps failing. */
 const ENT_FAIL_LOG_WINDOW_MS = 60_000;
 let entFailLoggedAt = 0;
+/* While entitlements are known-unavailable the detail reads are expected to
+ * fail; they are not errors, they are the situation. Marked so the failure log
+ * can say "signed out" instead of "transport error". */
+let entUnavailableUntil = 0;
+
 function logEntitlementsFailure(kind: string): void {
   try {
     const now = Date.now();
+    entUnavailableUntil = now + ENT_FAIL_LOG_WINDOW_MS;
     if (now - entFailLoggedAt < ENT_FAIL_LOG_WINDOW_MS) return;
     entFailLoggedAt = now;
     logger.warn('[riot] entitlements failed', { kind });
@@ -200,6 +206,13 @@ function logReadFailure(host: string, path: string, kind: string, status: number
     if (readFailLogAt.size > READ_FAIL_LOG_MAX_KEYS) {
       const drop = [...readFailLogAt.entries()].sort((a, b) => a[1] - b[1]).slice(0, 20);
       for (const [k] of drop) readFailLogAt.delete(k);
+    }
+    /* A detail read while signed out is not a fault: entitlements were already
+     * reported, so this line says what the situation IS rather than repeating a
+     * symptom as an error. One line, still bounded by the window above. */
+    if (now < entUnavailableUntil && shape.startsWith('/match-details/')) {
+      logger.warn('[tracker] detail unavailable (signed out)', { host, path: shape });
+      return;
     }
     logger.warn('[riot] read failed', { host, path: shape, status, kind });
   } catch {

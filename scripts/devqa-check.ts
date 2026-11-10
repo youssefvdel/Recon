@@ -1424,6 +1424,23 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('readSnapshot no longer discards a stale snapshot', /return null;\s*\}\s*\n\}/.test(parseBody) && !/SNAPSHOT_TTL/.test(parseBody), true);
 }
 
+// --- a signed-out detail read describes the situation, not a fault --------
+{
+  const { readFileSync } = await import('node:fs');
+  const riotSrc4 = readFileSync(new URL('../src/sources/riot.ts', import.meta.url), 'utf8');
+  check(
+    'the signed-out case says what it is',
+    /\[tracker\] detail unavailable \(signed out\)/.test(riotSrc4),
+    true
+  );
+  check(
+    'and is gated on entitlements being known-unavailable',
+    /now < entUnavailableUntil && shape\.startsWith\('\/match-details\/'\)/.test(riotSrc4),
+    true
+  );
+  check('the real transport error still reports as an error', /\[riot\] read failed/.test(riotSrc4), true);
+}
+
 // --- one line means one line ----------------------------------------------
 {
   const { logger, getRecentLogs } = await import('../src/utils/logger.ts');
