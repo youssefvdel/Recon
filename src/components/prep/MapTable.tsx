@@ -1,3 +1,4 @@
+import { num, signedInt as signed } from './cell';
 import React, { useMemo, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import type { TrnMapStat } from '../../utils/trn';
@@ -19,7 +20,7 @@ const COLS: { key: SortKey; label: string }[] = [
   { key: 'damageDeltaPerRound', label: 'DDΔ' },
 ];
 
-const signed = (n: number): string => (n > 0 ? `+${Math.round(n)}` : String(Math.round(n)));
+
 
 const Def: React.FC<{ label: string; value?: string | number | null }> = ({ label, value }) => {
   const text =
@@ -109,12 +110,12 @@ export const MapTable: React.FC<MapTableProps> = ({ rows, openKey, onOpenChange 
                     <span className="text-[13px] text-m3-on-surface truncate">{m.name}</span>
                   </span>
                 </td>
-                <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{m.winPct.toFixed(1)}%</td>
+                <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{num(m.winPct, 1, '%')}</td>
                 <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{m.matchesWon}</td>
                 <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{m.matchesLost}</td>
-                <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{m.kd.toFixed(2)}</td>
-                <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{m.adr.toFixed(1)}</td>
-                <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{m.acs.toFixed(1)}</td>
+                <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{num(m.kd, 2)}</td>
+                <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{num(m.adr, 1)}</td>
+                <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{num(m.acs, 1)}</td>
                 <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{signed(m.damageDeltaPerRound)}</td>
                 <td className="py-2 pr-3">
                   <span className="flex items-end gap-2">

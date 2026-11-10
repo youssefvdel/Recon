@@ -2172,6 +2172,18 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('no overall K/D under a side label (defense)', /defenseKd\s*\|\|\s*a?\.?kd/.test(agents), false);
   check('no overall K/D under a side label (attack)', /attackKd\s*\|\|\s*a?\.?kd/.test(agents), false);
   {
+    /* A missing stat used to crash the whole Prep view: `.toFixed` on undefined
+     * threw inside <AgentTable> and the error boundary replaced the page with
+     * "This view failed to load". And `String(Math.round(NaN))` printed the
+     * literal text "NaN" in the DD column. Both now go through one guard. */
+    const agentT = readFileSync(new URL('../src/components/prep/AgentTable.tsx', import.meta.url), 'utf8');
+    const mapT = readFileSync(new URL('../src/components/prep/MapTable.tsx', import.meta.url), 'utf8');
+    check('agent cells are guarded', /num\(a\.|signed\(a\./.test(agentT) && !/a\.\w+\.toFixed\(/.test(agentT), true);
+    check('map cells are guarded', /num\(m\.|signed\(m\./.test(mapT) && !/m\.\w+\.toFixed\(/.test(mapT), true);
+    check('no local signed() duplicate', /const signed = \(n: number\)/.test(agentT + mapT), false);
+  }
+
+  {
     const prep = readFileSync(new URL('../src/components/Prep.tsx', import.meta.url), 'utf8');
     const agentT = readFileSync(new URL('../src/components/prep/AgentTable.tsx', import.meta.url), 'utf8');
     const mapT = readFileSync(new URL('../src/components/prep/MapTable.tsx', import.meta.url), 'utf8');

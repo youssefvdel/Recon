@@ -1,3 +1,4 @@
+import { num, signedInt as signed } from './cell';
 import React, { useMemo, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import type { TrnAgentStat } from '../../utils/trn';
@@ -22,12 +23,12 @@ const COLS: { key: SortKey; label: string; align?: 'right' }[] = [
 ];
 
 const timeLabel = (a: TrnAgentStat): string => {
-  if (a.hours >= 1) return `${a.hours.toFixed(1)} hrs`;
+  if (a.hours >= 1) return `${num(a.hours, 1)} hrs`;
   const mins = Math.round((a.timePlayedSeconds ?? 0) / 60);
   return mins > 0 ? `${mins} mins` : '';
 };
 
-const signed = (n: number): string => (n > 0 ? `+${Math.round(n)}` : String(Math.round(n)));
+
 
 /** A definition-grid cell: label + value, and nothing at all when the value is
  *  absent. `0` means "we have no number here", never "zero". */
@@ -124,16 +125,16 @@ export const AgentTable: React.FC<AgentTableProps> = ({ rows, agentInfo, openKey
                 </td>
                 <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{timeLabel(a)}</td>
                 <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{a.matches}</td>
-                <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{a.winPct.toFixed(1)}%</td>
-                <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{a.kd.toFixed(2)}</td>
-                <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{a.adr.toFixed(1)}</td>
-                <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{a.acs.toFixed(1)}</td>
+                <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{num(a.winPct, 1, '%')}</td>
+                <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{num(a.kd, 2)}</td>
+                <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{num(a.adr, 1)}</td>
+                <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{num(a.acs, 1)}</td>
                 <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">
                   {signed(a.damageDeltaPerRound)}
                 </td>
-                <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{a.hsPct.toFixed(1)}%</td>
+                <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">{num(a.hsPct, 1, '%')}</td>
                 <td className="py-2 pr-3 font-mono tabular-nums text-m3-outline">
-                  {a.kast > 0 ? `${a.kast.toFixed(1)}%` : ''}
+                  {a.kast > 0 ? `${num(a.kast, 1, '%')}` : ''}
                 </td>
                 <td className="py-2 text-m3-outline">
                   <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
