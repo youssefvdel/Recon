@@ -25,6 +25,15 @@ IPC-absent empty shell. Per-route notes below say where a fixture command is sti
 | `before-settings.png` | Settings | Updates/startup/overlay/data/about sections; build string blank |
 | `before-dev.png` | Dev Dashboard (`?dev`) | Dev-only route; overlay/tracker simulators (not part of the player UI) |
 
+## Count note (2026-11-10)
+
+Container counts in this table were taken **before** `scripts/uicheck.ts` learned
+to exclude `<select>` from the census (fix/uicheck-controls). A `<select>` is an
+input control, so every count that includes one is **one higher** than the
+harness reports today. The de-carding tables in the v2 notes were all measured
+under the old rule; do not compare them to a post-fix run without adding the
+exclusion delta, or re-run both sides under the same rule.
+
 ## Measurements (1440×900)
 
 Definitions: **column** = the route's computed max-width column (else the main content area);
