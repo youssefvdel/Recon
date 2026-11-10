@@ -925,7 +925,7 @@ export type { PersistedRank } from '../cache/namespace';
 // external importers; a re-export does not bring the name into this scope).
 import { evictOldest, pruneSupersededCaches, persistLiveRank, readPersistedRank } from '../cache/namespace';
 import { inCurrentLobby, setCurrentLobbyPuuids } from '../live/lobbyScope';
-import { riotGet, getEntitlements, clearEntitlements, assertRiotOk, readMmr, readMatchHistoryPage, readMatchDetails } from '../sources/riot';
+import { riotGet, getEntitlements, clearEntitlements, assertRiotOk, readMmr, readMatchHistoryPage, readMatchDetails, readRiotValidated } from '../sources/riot';
 export { riotPut, riotPost, getEntitlements, clearEntitlements } from '../sources/riot';
 import {
   enqueueTrnSpread,
@@ -1788,13 +1788,18 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
               clearEntitlements();
               const freshEnt = await getEntitlements();
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const retryPlayer: any = await riotGet(
+              // Validated transport (docs/riotget-conversion.md #10/#11): the
+              // .catch stays — this is a presence-driven retry and a failure
+              // must preserve the last live-match state, not throw into the
+              // menu tick. The only change is that a failed read now arrives as
+              // a RiotError with a code instead of an error object.
+              const retryPlayer: any = await readRiotValidated(
                 glz,
                 loop === 'INGAME' ? `/core-game/v1/players/${freshEnt.puuid}` : `/pregame/v1/players/${freshEnt.puuid}`
               ).catch(() => null);
               if (retryPlayer?.MatchID) {
                 matchId = retryPlayer.MatchID;
-                matchData = await riotGet(
+                matchData = await readRiotValidated(
                   glz,
                   loop === 'INGAME' ? `/core-game/v1/matches/${matchId}` : `/pregame/v1/matches/${matchId}`
                 ).catch(() => null);

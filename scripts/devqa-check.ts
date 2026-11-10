@@ -1226,6 +1226,14 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
     true
   );
 
+  // Sites #10/#11: the presence-driven retry uses the validated transport and
+  // KEEPS its .catch — a failed probe preserves last-live-match state.
+  check(
+    'the presence retry uses the validated transport and keeps its catch',
+    (trackerSrc2.match(/readRiotValidated\(\s*glz,\s*loop === 'INGAME'/g) ?? []).length === 2,
+    true
+  );
+
   // Site #4: the lite match result goes through the typed reader, and its
   // parse is a pure function the reader can validate before calling.
   check(
