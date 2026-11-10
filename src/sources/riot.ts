@@ -614,6 +614,56 @@ export async function readCompetitiveUpdates(
   );
 }
 
+/** One entry of a match's `Loadouts` array, as Riot returns it. The model
+ *  (`loadout.ts`'s `parseLoadouts`) owns the field semantics. */
+export type LoadoutRow = Record<string, unknown>;
+
+/**
+ * All loadouts for the match the given puuid is in. `null` = the player is not
+ * in a match, or no loadout spelling answered 404-free but empty; an empty
+ * array is real data (the match exists and has no loadouts yet).
+ *
+ * The match id comes from the live-player read because the caller has the
+ * player, not the id; this is the one composite reader. Legacy `/coregame/`
+ * spelling is tried only after the canonical route 404s, so a real 403 throws
+ * instead of being masked.
+ */
+export async function readMatchLoadouts(
+  phase: 'pregame' | 'coregame',
+  puuid: string
+): Promise<NoMatch<LoadoutRow[]>> {
+  if (!puuid) throw new RiotError('NO_PUUID', 'readMatchLoadouts: puuid is required');
+  const player = await readLivePlayer(phase, puuid);
+  if (player === null) return null;
+  const matchId = String(player.matchId ?? '');
+  if (!matchId) return null;
+
+  const routes =
+    phase === 'pregame'
+      ? [
+          `/pregame/v1/matches/${matchId}/loadouts`,
+          `/core-game/v1/matches/${matchId}/loadouts`,
+          `/coregame/v1/matches/${matchId}/loadouts`,
+        ]
+      : [
+          `/core-game/v1/matches/${matchId}/loadouts`,
+          `/coregame/v1/matches/${matchId}/loadouts`,
+          `/pregame/v1/matches/${matchId}/loadouts`,
+        ];
+
+  let sawData = false;
+  for (const route of routes) {
+    const j = await riotGetNoMatch('glz', route);
+    if (j === null) continue; // this spelling does not exist — try the next
+    const raw = j as { Loadouts?: unknown; loadouts?: unknown };
+    const list = Array.isArray(raw?.Loadouts) ? raw.Loadouts : raw?.loadouts;
+    if (!Array.isArray(list)) continue;
+    if (list.length > 0) return validated(list as LoadoutRow[]);
+    sawData = true;
+  }
+  return sawData ? validated<LoadoutRow[]>([]) : null;
+}
+
 /* ------------------------------------------------------------------ *
  * Rank: the source read itself.
  *
