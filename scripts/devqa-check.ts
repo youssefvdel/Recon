@@ -842,22 +842,48 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
 {
   const { readdirSync, readFileSync, statSync } = await import('node:fs');
   const { join } = await import('node:path');
-  const root = new URL('../src/', import.meta.url).pathname;
+  // The audit criterion covers the Rust side too: a key in src-tauri/ is just
+  // as shippable as one in the bundle, and the direct transport sets its header
+  // there. Scan code/config extensions on both trees; skip build output.
+  const roots = [
+    new URL('../src/', import.meta.url).pathname,
+    new URL('../src-tauri/', import.meta.url).pathname,
+  ];
+  const root = roots[0];
+  const SCAN_EXT = /\.(ts|tsx|js|cjs|mjs|json|rs|toml|conf)$/;
+  const SKIP_DIRS = new Set([
+    'target',
+    'node_modules',
+    '.git',
+    'dist',
+    'dist-portable',
+    'gen',
+    'icons',
+    'webview2-runtime',
+  ]);
   const offenders: string[] = [];
   const walk = (dir: string): void => {
     for (const name of readdirSync(dir)) {
       const full = join(dir, name);
-      if (statSync(full).isDirectory()) walk(full);
-      else if (/\.(ts|tsx)$/.test(name)) {
-        const text = readFileSync(full, 'utf8');
-        if (text.includes('TRN-API-Key') || text.includes('trnApiKey')) offenders.push(full);
+      let st;
+      try {
+        st = statSync(full);
+      } catch {
+        continue;
       }
+      if (st.isDirectory()) {
+        if (!SKIP_DIRS.has(name)) walk(full);
+        continue;
+      }
+      if (!SCAN_EXT.test(name)) continue;
+      const text = readFileSync(full, 'utf8');
+      if (text.includes('TRN-API-Key') || text.includes('trnApiKey')) offenders.push(full);
     }
   };
-  walk(root);
+  for (const root of roots) walk(root);
   // actual/expected style: an empty string means clean, and a failure prints
   // exactly which files mention a key.
-  check('no TRN API key or key header anywhere in src/', offenders.join(','), '');
+  check('no TRN API key or key header anywhere in src/ or src-tauri/', offenders.join(','), '');
 
   // The payload is decided by `source=overwolf-2`, not by any key. One helper
   // forces it; this pins the helper's three shapes and the absence of the old
