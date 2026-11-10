@@ -143,6 +143,45 @@ async function withRiotSlot<R>(fn: () => Promise<R>): Promise<R> {
 /* NOT exported (step 1 of the data-layer design): the raw transport is the only
  * way to obtain an unvalidated Riot payload, so it stays inside this module.
  * Validated readers live in src/sources/riot.ts. */
+/* ------------------------------------------------------------------ *
+ * Failed-read log — bounded
+ *
+ * The alpha23 log had window/overlay lines only, so a Riot read that returned
+ * 404 for every player left no trace: the incident had to be reconstructed by
+ * probing the client from outside. One line per DISTINCT (host, path shape,
+ * kind) per window — a lobby of ten players logs once, not ten times, and a
+ * poll that fails every 3 s logs once a minute.
+ * ------------------------------------------------------------------ */
+const READ_FAIL_LOG_WINDOW_MS = 60_000;
+const READ_FAIL_LOG_MAX_KEYS = 120;
+const readFailLogAt = new Map<string, number>();
+
+/** Collapse ids in a path so the log key is a shape, not a player. */
+function pathShape(path: string): string {
+  return path
+    .replace(/\?.*$/, '')
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ':uuid')
+    .replace(/\/[A-Za-z0-9_-]{20,}(?=\/|$)/g, '/:id');
+}
+
+function logReadFailure(host: string, path: string, kind: string, status: number): void {
+  try {
+    const shape = pathShape(path);
+    const key = `${host}|${shape}|${kind}`;
+    const now = Date.now();
+    const last = readFailLogAt.get(key);
+    if (last !== undefined && now - last < READ_FAIL_LOG_WINDOW_MS) return;
+    readFailLogAt.set(key, now);
+    if (readFailLogAt.size > READ_FAIL_LOG_MAX_KEYS) {
+      const drop = [...readFailLogAt.entries()].sort((a, b) => a[1] - b[1]).slice(0, 20);
+      for (const [k] of drop) readFailLogAt.delete(k);
+    }
+    logger.warn('[riot] read failed', { host, path: shape, status, kind });
+  } catch {
+    /* logging must never throw into a read */
+  }
+}
+
 /** Raw GET. PRIVATE: every call site in src/ now goes through a validated
  *  reader, so the only way to obtain an unvalidated payload is inside this
  *  module. A devqa assertion fails if this is ever exported again. */
@@ -174,12 +213,20 @@ async function riotGet(host: string, path: string): Promise<any> {
     }
     // An answered read proves the client is alive and authenticated.
     onStatus('ok');
+    // A payload carrying an error field is handled by assertRiotOk in the
+    // caller; log it HERE so the failure exists in the file even when a caller
+    // forgets to look.
+    const failStatus = Number(j?.httpStatus ?? 0);
+    if (j?.errorCode || failStatus >= 400) {
+      logReadFailure(host, path, String(j?.errorCode ?? 'status'), failStatus);
+    }
     return j;
   } catch (e) {
     if (String(e).includes('RIOT_EXPIRED')) {
       clearEntitlements();
       return JSON.parse(await withRiotSlot(async () => call(await getEntitlements())));
     }
+    logReadFailure(host, path, 'transport', 0);
     const kind = onClassify(e);
     if (kind) {
       onStatus(

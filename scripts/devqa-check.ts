@@ -1377,6 +1377,53 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('the riotGet export does not outlive its reason', rawSites > 0 ? stillExported : !stillExported, true);
 }
 
+// --- the reader boundary logs its failures, bounded ------------------------
+{
+  const { readFileSync } = await import('node:fs');
+  const riotSrc2 = readFileSync(new URL('../src/sources/riot.ts', import.meta.url), 'utf8');
+  check(
+    'a failed read logs host, path, status and kind',
+    /logger\.warn\('\[riot\] read failed', \{ host, path: shape, status, kind \}\)/.test(riotSrc2),
+    true
+  );
+  check(
+    'the failure log is bounded by a window and a key cap',
+    /READ_FAIL_LOG_WINDOW_MS = 60_000/.test(riotSrc2) && /READ_FAIL_LOG_MAX_KEYS = 120/.test(riotSrc2),
+    true
+  );
+  check(
+    'paths are logged as shapes, not player ids',
+    /function pathShape\(path: string\)/.test(riotSrc2) && /':uuid'/.test(riotSrc2),
+    true
+  );
+  check(
+    'both failure paths are covered',
+    (riotSrc2.match(/logReadFailure\(/g) ?? []).length >= 3,
+    true
+  );
+}
+
+// --- A23-1: a failed refresh must not blank a board we have on disk --------
+{
+  const { readFileSync } = await import('node:fs');
+  const hookSrc = readFileSync(new URL('../src/hooks/useTrackerData.ts', import.meta.url), 'utf8');
+  check(
+    'a failed refresh renders the cached snapshot',
+    /cachedSnap\?\.profile[\s\S]{0,900}hasCached: true/.test(hookSrc),
+    true
+  );
+  check(
+    'and says why it is old',
+    hookSrc.includes('Riot client not signed in — showing cached results'),
+    true
+  );
+  check(
+    'cached match details are still merged',
+    /aggregateDetails\(region, cachedIds, cachedPuuid\)/.test(hookSrc),
+    true
+  );
+}
+
 if (failures > 0) {
   console.error(`${failures} failure(s)`);
   process.exit(1);
