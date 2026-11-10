@@ -105,6 +105,27 @@ Keep: the live fetch/poll/merge/harvest logic (extract to `useLiveLobby`), `spli
 `useLiveMatchActive` (TopBar only), `trnPlayerState`, `peekLivePlayerStatsAsOf`. Do **not** edit
 `components/hud/*`; the moment helper is duplicated locally, and step 9 can converge it.
 
+## Named deferral — loadout/skins viewer
+
+This is a recorded deferral, not a silent deletion. Until it returns, the user **cannot inspect a
+lobby player's equipped skins/loadout from the live surface**; the rest of the row (rank, peak, party,
+level, Tracker state) is unaffected. `LoadoutViewer.tsx` stays in the tree unused by this surface.
+
+The return must be a **right-side drawer** with `role="region"`, no `aria-modal`, no focus trap, no
+backdrop, and **no keydown owner of its own** — the match body is the single Escape owner. Reopening the
+old dialog would recreate the Escape collision this step just removed. Tracked in `open-work.md` by the
+Lead.
+
+## Known risk — an unverified surface replaced
+
+`LiveMatchView` is the only surface in the project that has **never been verified in a real match**.
+Replacing it with `LiveSection` means the next live test is also the **first** test of its replacement.
+
+That is acceptable because the old path is not lost — it is recoverable from git history (`d7a99ef` /
+`alpha32` tag). It is not acceptable to discover that later: the first live lobby after this merge must
+be treated as a QA run of the new section (strip moment, row states, no layout push), not as a routine
+check of an already-proven view.
+
 ## Build shape
 
 - `src/components/live/useLiveLobby.ts` — current fetch/poll/listen/merge/harvest logic, no visuals.
