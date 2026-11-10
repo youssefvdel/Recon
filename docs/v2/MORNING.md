@@ -8,7 +8,8 @@ server, not from memory.
 | What | URL |
 | --- | --- |
 | **The app, running on Linux, with data** | http://192.168.100.2:5174/?fixture=lobby |
-| **The v2 shell (new frame, surfaces landing)** | http://192.168.100.2:5174/?v2=1 |
+| **The v2 app — now the default** | http://192.168.100.2:5173/?fixture=lobby |
+| The old shell (kept for one release) | http://192.168.100.2:5173/?fixture=lobby&legacy=1 |
 | **All three, one page** | http://192.168.100.2:8110/ |
 | Theme A — Nocturne (editorial dark, serif display, violet) | http://192.168.100.2:8110/board-a.html |
 | Theme B — Graphite (near-black, lime, condensed) | http://192.168.100.2:8110/board-b.html |
@@ -107,6 +108,17 @@ players were being shown a perfect KAST.
 Replaced with the four-way definition, with the number change called out in the
 commit body — a silently corrected stat is worse than the wrong one, because
 screenshots get compared across versions.
+
+## The rebuild is the app
+
+The new shell is the default at `5173`: 56px bar, three destinations, a ⌘K palette
+wired to one registry, six tools as anchored sections of a single sheet, Graphite
+tokens. `?legacy=1` keeps the old shell reachable for one release — an
+unreachable fallback is not a fallback.
+
+**The HUD is untouched by the flip** and that was checked in `tauri.conf.json`, not
+assumed: the overlay window loads `index.html#overlay`, and the new entry routes
+any `#overlay` / `overlay` / `dev` window to the old tree.
 
 ## The rebuild: three surfaces done, measured
 
