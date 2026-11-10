@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Overview } from './Overview';
 import { MatchHistory } from './MatchHistory';
-import { TrackerMaps } from './TrackerMaps';
-import { TrackerAgents } from './TrackerAgents';
+import { Prep } from './Prep';
 import { motion, AnimatePresence } from 'framer-motion';
 
-export type TrackerSubTab = 'overview' | 'matches' | 'agents' | 'maps';
+export type TrackerSubTab = 'overview' | 'matches' | 'prep';
 
 interface SubTabItem {
   id: TrackerSubTab;
@@ -15,8 +14,7 @@ interface SubTabItem {
 const TABS: SubTabItem[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'matches', label: 'Matches' },
-  { id: 'agents', label: 'Agents' },
-  { id: 'maps', label: 'Maps' },
+  { id: 'prep', label: 'Prep' },
 ];
 
 export const TrackerView: React.FC<{
@@ -28,7 +26,7 @@ export const TrackerView: React.FC<{
   const [subTab, setSubTab] = useState<TrackerSubTab>(() => {
     try {
       const saved = localStorage.getItem('recon_active_subtab') as TrackerSubTab;
-      if (saved && ['overview', 'matches', 'agents', 'maps'].includes(saved)) {
+      if (saved && ['overview', 'matches', 'prep'].includes(saved)) {
         return saved;
       }
     } catch {}
@@ -112,17 +110,12 @@ export const TrackerView: React.FC<{
             </motion.div>
           )}
 
-          {subTab === 'agents' && (
-            <motion.div key="agents" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
-              <TrackerAgents />
+          {subTab === 'prep' && (
+            <motion.div key="prep" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
+              <Prep />
             </motion.div>
           )}
 
-          {subTab === 'maps' && (
-            <motion.div key="maps" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
-              <TrackerMaps />
-            </motion.div>
-          )}
         </AnimatePresence>
       </div>
     </div>
