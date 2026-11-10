@@ -1662,10 +1662,10 @@ export interface TrnAgentStat {
   kills: number;
   deaths: number;
   assists: number;
-  adr: number;
-  acs: number;
-  damageDeltaPerRound: number;
-  hsPct: number;
+  adr: number | null;
+  acs: number | null;
+  damageDeltaPerRound: number | null;
+  hsPct: number | null;
   timePlayedSeconds: number;
   hours: number;
   kast: number;
@@ -1848,14 +1848,14 @@ export interface TrnMapStat {
   matchesLost: number;
   winPct: number | null;
   kd: number | null;
-  adr: number;
-  acs: number;
-  damageDeltaPerRound: number;
+  adr: number | null;
+  acs: number | null;
+  damageDeltaPerRound: number | null;
 
   kills: number;
   deaths: number;
   assists: number;
-  headshotsPct: number;
+  headshotsPct: number | null;
   timePlayedSeconds: number;
 
   aces: number;
@@ -1978,6 +1978,13 @@ export function mergeAgentStats(all: TrnAgentStat[][]): TrnAgentStat[] {
     if (matches === 0) continue;
     const w = (pick: (a: TrnAgentStat) => number): number =>
       wavg(items.map((a) => ({ m: a.matches, v: pick(a) })));
+    /* For stats that can be absent: weight only the agents that carry it. */
+    const wOpt = (pick: (a: TrnAgentStat) => number | null): number | null => {
+      const pairs = items
+        .map((a) => ({ m: a.matches, v: pick(a) }))
+        .filter((p): p is { m: number; v: number } => p.v != null && Number.isFinite(p.v));
+      return pairs.length === 0 ? null : wavg(pairs);
+    };
     const kills = items.reduce((n, a) => n + a.kills, 0);
     const deaths = items.reduce((n, a) => n + a.deaths, 0);
     const assists = items.reduce((n, a) => n + a.assists, 0);
@@ -2008,10 +2015,10 @@ export function mergeAgentStats(all: TrnAgentStat[][]): TrnAgentStat[] {
       kills,
       deaths,
       assists,
-      adr: w((a) => a.adr),
-      acs: w((a) => a.acs),
-      damageDeltaPerRound: Math.round(w((a) => a.damageDeltaPerRound)),
-      hsPct: w((a) => a.hsPct),
+      adr: wOpt((a) => a.adr),
+      acs: wOpt((a) => a.acs),
+      damageDeltaPerRound: (() => { const d = wOpt((a) => a.damageDeltaPerRound); return d == null ? null : Math.round(d); })(),
+      hsPct: wOpt((a) => a.hsPct),
       timePlayedSeconds,
       hours: Math.round((timePlayedSeconds / 3600) * 10) / 10,
       kast: w((a) => a.kast),
@@ -2074,6 +2081,13 @@ export function mergeMapStats(all: TrnMapStat[][]): TrnMapStat[] {
     if (matchesPlayed === 0) continue;
     const w = (pick: (m: TrnMapStat) => number): number =>
       wavg(items.map((m) => ({ m: m.matchesPlayed, v: pick(m) })));
+    /* For stats that can be absent: weight only the maps that carry it. */
+    const wOpt = (pick: (m: TrnMapStat) => number | null): number | null => {
+      const pairs = items
+        .map((m) => ({ m: m.matchesPlayed, v: pick(m) }))
+        .filter((p): p is { m: number; v: number } => p.v != null && Number.isFinite(p.v));
+      return pairs.length === 0 ? null : wavg(pairs);
+    };
     const matchesWon = items.reduce((n, m) => n + m.matchesWon, 0);
     const matchesLost = items.reduce((n, m) => n + m.matchesLost, 0);
     const kills = items.reduce((n, m) => n + m.kills, 0);
@@ -2099,13 +2113,13 @@ export function mergeMapStats(all: TrnMapStat[][]): TrnMapStat[] {
       matchesLost,
       winPct: pctOf(matchesWon, matchesPlayed),
       kd: safeRatio(kills, deaths),
-      adr: w((m) => m.adr),
-      acs: w((m) => m.acs),
-      damageDeltaPerRound: Math.round(w((m) => m.damageDeltaPerRound)),
+      adr: wOpt((m) => m.adr),
+      acs: wOpt((m) => m.acs),
+      damageDeltaPerRound: (() => { const d = wOpt((m) => m.damageDeltaPerRound); return d == null ? null : Math.round(d); })(),
       kills,
       deaths,
       assists: items.reduce((n, m) => n + m.assists, 0),
-      headshotsPct: w((m) => m.headshotsPct),
+      headshotsPct: wOpt((m) => m.headshotsPct),
       timePlayedSeconds: items.reduce((n, m) => n + m.timePlayedSeconds, 0),
       aces: items.reduce((n, m) => n + m.aces, 0),
       clutches: items.reduce((n, m) => n + m.clutches, 0),

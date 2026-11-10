@@ -52,6 +52,11 @@ function absent(rel: string, needle: string): void {
   check(`${rel} does not contain: ${needle}`, read(rel).includes(needle), false);
 }
 
+// 1b. The same Math.max(1, rounds) inflation in the Prep fallbacks.
+absent('src/components/prep/usePrepData.ts', 'Math.max(1, d.rounds)');
+absent('src/components/prep/usePrepData.ts', 'winPct: m > 0 ? (d.won / m) * 100 : 0');
+absent('src/components/prep/usePrepData.ts', 'winPct: played > 0 ? (d.won / played) * 100 : 0');
+absent('src/components/prep/usePrepData.ts', 'hsPct: d.hits > 0 ? (d.headshots / d.hits) * 100 : 0');
 // 2. Unknown rank must not become tier 22 and name a rank the player lacks.
 absent('src/components/hud/HudCanvas.tsx', 'userTier || 22');
 // 1. Math.max(1, rounds) inflating ACS/ADR 10-30x.
