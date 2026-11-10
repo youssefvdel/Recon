@@ -6,11 +6,12 @@ state that no longer exists; this one is the live picture.
 
 ## Shipping state
 
-- `v0.5.0-alpha31` (tag on `0aee253`) — Tab show-path fix (`d0f221d`), Retry fix,
-  2a (match body extracted). **Published, not mirrored, recorded as superseded.**
-- `v0.5.0-alpha30` — last build on the LAN mirror.
-- `alpha32` is **cut-ready but blocked** on the 2b/2c rework below, not on CI.
-  Notes are finalised at `/home/youssefvdel/tmp/recon-alpha32-notes.md`.
+- **`v0.5.0-alpha32` — RELEASED and MIRRORED** (tag on `d7a99ef`; setup 253,076,784 B,
+  sha256 `f6ca1ff5…6630`). Carries the whole Matches rework, the single-Escape-owner
+  fix, the dead `/coregame/` route removal, the storefront validated read, and the
+  overlay Tab-show trimming. `http://192.168.100.2:8099/Recon_0.5.0-alpha32_x64-setup.exe`
+- `alpha31` — published, never verified or mirrored; superseded.
+- Notes: `/home/youssefvdel/tmp/recon-alpha32-notes.md`.
 
 ## In flight — Matches (migration step 2)
 
