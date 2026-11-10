@@ -308,7 +308,7 @@ export async function riotPost(host: string, path: string): Promise<any> {
   }
 }
 
-export function assertRiotOk(j: any, what: string): void {
+function assertRiotOk(j: any, what: string): void {
   const status = Number(j?.httpStatus ?? 0);
   const code = String(j?.errorCode ?? '');
   if (code || status >= 400) {
