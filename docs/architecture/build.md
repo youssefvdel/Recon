@@ -1,8 +1,8 @@
 # Build, bundle and update chain (rewrite basis)
 
-From `git tag` to a user restarting on a new build, as of v0.5.0-alpha17.
+From `git tag` to a user restarting on a new build, as of v0.5.0-alpha22.
 Evidence: the workflows, `tauri.conf.json`, `updater.rs`, `fetch-webview2.mjs`,
-`hooks.nsh`, and Actions runs 42545702186 (alpha17) / 42531675568 (alpha9).
+`hooks.nsh`, and Actions runs 42545702186 (alpha17) / 42663086991 (alpha22).
 
 ## 1. Pipeline
 
@@ -27,6 +27,12 @@ Release steps (alpha17 ~13 min total; alpha9 ~15 min):
 tauri-build validates `bundle.resources` even for tests and `--no-bundle`, then
 runs frontend, `cargo test --lib`, the build, Authenticode, and uploads one
 artifact (`recon-windows-x64`, 7 days). No portable zip.
+
+Two lessons from the 2026-11-10 red run:
+- `tauri-build` validates `bundle.resources` at compile time: `cargo test`,
+  `cargo check` and `--no-bundle` all need `webview2-runtime/` on disk.
+- A workflow simplification is proven only by a dispatched run on its branch.
+  The 10-step branch CI read correctly and could not compile the crate.
 
 ## 2. Artifacts
 

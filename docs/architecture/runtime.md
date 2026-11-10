@@ -1,113 +1,125 @@
-# Recon runtime — what actually runs on the PC (alpha16, measured)
+# Recon runtime — what actually runs on the PC (alpha22, measured)
 
-Capture window: **2026-11-09 03:31–03:40 Africa/Cairo**, `Youssef-PC` 192.168.100.3, read-only.
-Installed build: **0.5.0-alpha16** (`%LOCALAPPDATA%\Recon\recon.exe`, mtime 2026-11-09 03:10:12).
-The app was running when the snapshot was taken and **exited at ~03:36** (no crash event, no WER
-report, no Application-log entry). Everything below was measured live; items that were not are
-marked **not measured — PC in use**.
+Captured read-only on `Youssef-PC` 192.168.100.3: alpha22 launch **2026-11-09 19:34**, baseline
+re-check **2026-11-10 02:30** (app still running, idle). Previous alpha16 snapshot kept only where
+it differs. Installed build: **0.5.0-alpha22**, `recon.exe` mtime 2026-11-09 19:25:42, 38,453,760 B.
 
-## 1. Process tree at idle
-
-Measured 03:32–03:34 while alpha16 was idle (no game).
+## 1. Process tree at idle (2026-11-10 02:30)
 
 | PID | Parent | Process | Role | Working set |
 | --- | --- | --- | --- | --- |
-| 13756 | 23396 (identity **not measured — PC in use**) | `recon.exe` | app core, session 1 | 37.9 MB |
-| 3204 | 13756 | `msedgewebview2.exe` | **our** WebView2 browser host | 57.2 MB |
-| 4340 | 3204 | `msedgewebview2.exe` | renderer (main window) | 117.1 MB |
-| 2596 | 3204 | `msedgewebview2.exe` | renderer (second webview — overlay/dev) | 81.6 MB |
-| 19716 | 3204 | `msedgewebview2.exe` | gpu-process | 49.4 MB |
-| 14760 | 3204 | `msedgewebview2.exe` | utility (network) | 22.2 MB |
-| 22332 | 3204 | `msedgewebview2.exe` | utility | 4.0 MB |
-| 15668 | 3204 | `msedgewebview2.exe` | crashpad-handler | 2.9 MB |
-| 1796 | 15668 | `msedgewebview2.exe` | crashpad-handler child | 2.3 MB |
+| 10740 | — (parent not captured) | `recon.exe` | app core, **session 2**, started 19:34:24 | 10.7 MB (priv 27.8) |
+| 23532 | 10740 | `msedgewebview2.exe` | **our** WebView2 browser host | 25.3 MB |
+| 19680 | 23532 | `msedgewebview2.exe` | renderer (main window) | 37.3 MB |
+| 24560 | 23532 | `msedgewebview2.exe` | renderer (second webview) | 13.8 MB |
+| 9740 | 23532 | `msedgewebview2.exe` | gpu-process | 8.4 MB |
+| 9564 | 23532 | `msedgewebview2.exe` | utility (network) | 12.8 MB |
+| 12756 | 23532 | `msedgewebview2.exe` | utility | 2.8 MB |
+| 13000 | 23532 | `msedgewebview2.exe` | crashpad-handler | 1.0 MB |
 
-- **9 processes**, **2 renderers**, **≈337 MB** total working set.
-- **The host is OURS, not the system one**: host exe is
-  `%LOCALAPPDATA%\Recon\webview2-runtime\msedgewebview2.exe` (bundled, **v157.0.4341.42**),
-  launched with `--webview-exe-name=recon.exe` and
-  `--user-data-dir=%LOCALAPPDATA%\com.recon.utility\EBWebView`.
-- `recon.exe` command line at idle: just its own path, no debug or runtime flags.
-- **Decoy to keep out of diagrams:** a second WebView2 group (8952 browser + 9676 renderer +
-  2264 gpu + 4328/9452 utility + 9084 crashpad) belongs to **SearchHost.exe**, uses the
-  **system** runtime `%ProgramFiles(x86)%\Microsoft\EdgeWebView\Application\157.0.4341.42\` and its
-  own profile under `%LOCALAPPDATA%\Packages\MicrosoftWindows.Client.CBS_...\LocalState\EBWebView`.
+- **7 processes ours** (1 app + 6 WebView2), **2 renderers**, ≈102 MB total working set.
+- **Host is OURS, not the system one**: `C:\Users\youssefvdel\AppData\Local\Recon\webview2-runtime\msedgewebview2.exe`,
+  version **157.0.4341.42**, launched with `--webview-exe-name=recon.exe`,
+  `--user-data-dir=%LOCALAPPDATA%\com.recon.utility\EBWebView`. `HOST_IS_BUNDLED=True`.
+- **Decoy:** second WebView2 group (23264 browser, 23140 renderer, 3100 gpu, 10444/13932 utility,
+  9240 crashpad) belongs to **SearchHost.exe**, runs the **system** runtime and its own profile
+  under `%LOCALAPPDATA%\Packages\MicrosoftWindows.Client.CBS_...\LocalState\EBWebView`.
+- alpha16 (2026-11-09 03:32) for comparison: 9 processes, 2 renderers, ≈337 MB — renderer memory
+  was 117 MB + 82 MB; alpha22 sits at 37 MB + 14 MB after its idle period.
 
 ## 2. Ports
 
-- **9223: LISTENING on `127.0.0.1:9223`, owner `recon.exe` (13756)** — loopback only, correct bind.
-- HTTP probes to `/`, `/json/version`, `/json/list`, `/health` returned **no bytes** (curl code 000):
-  it is **not** an HTTP/CDP endpoint on this build. Actual protocol **not measured — PC in use**.
-- No other listening sockets in the Recon PID set.
-- Outbound at idle from utility 14760: `185.199.111.133:443` (GitHub Pages range) and
-  `172.67.141.245:443` (Cloudflare). Destination service names **not measured**.
+- **9223: `127.0.0.1:9223` LISTENING, owner `recon.exe` (10740)** — loopback only, correct bind.
+  Same binding as alpha16. HTTP probes still return no bytes; protocol **not measured**.
+- No other listeners in the Recon PID set.
+- Idle outbound: one ESTABLISHED from utility 9564 → `185.199.108.133:443` (GitHub Pages range).
+  No tracker.gg / pvp.net connection at idle.
 
-## 3. Disk footprint
+## 3. Disk footprint (unchanged by alpha22 except the exe)
 
-| Path | Files | Bytes | Notes |
-| --- | --- | --- | --- |
-| `%LOCALAPPDATA%\Recon` (install) | 260 | **749,251,379** (714.6 MiB) | mostly the bundled runtime |
-| ├ `recon.exe` | 1 | 38,461,440 | 2026-11-09 03:10:12 |
-| ├ `uninstall.exe` | 1 | 81,169 | 2026-11-09 03:21:15 |
-| └ `webview2-runtime\` | 258 | ≈710,708,770 | v157.0.4341.42 |
-| `%LOCALAPPDATA%\com.recon.utility\EBWebView` (profile) | 666 | **109,289,776** (104.2 MiB) | |
-| ├ `Default\` | 517 | 40,086,072 | |
-| ├ `Default\Cache\` | 123 | 24,140,564 | |
-| ├ `Default\Local Storage\` | 9 | 2,584,128 | leveldb, see §4 |
-| ├ `Default\Service Worker\` | 10 | 270,518 | |
-| └ `Default\Network\` | 13 | 118,249 | |
-| `%APPDATA%\com.recon.utility` | 8 | 7,816,241 | |
-| ├ `trn-cache\` | 3 | 7,808,266 | 2,473,240 + 1,671,865 + 3,663,161 |
-| └ `accounts\` | 5 | 7,975 | accounts.json 509, recon-id 28, 2×3530 yaml, heartbeat 378 |
-| `%APPDATA%\Recon` | 2 | 668 | settings.json 173, monitor_res_cache.json 495 |
+| Path | Files | Bytes |
+| --- | --- | --- |
+| `%LOCALAPPDATA%\Recon` (install) | 260 | **749,240,739** (714.6 MiB) |
+| ├ `recon.exe` | 1 | 38,453,760 |
+| ├ `uninstall.exe` | 1 | 81,169 |
+| └ `webview2-runtime\` (v157.0.4341.42) | 258 | ≈710,705,810 |
+| `%LOCALAPPDATA%\com.recon.utility\EBWebView` | 666 | **109,289,776** (104.2 MiB) |
+| ├ `Default\Cache\` | 123 | 24,140,564 |
+| ├ `Default\Local Storage\` | 10 | 2,598,207 |
+| └ `Default\Network\` | 13 | 118,249 |
+| `%APPDATA%\com.recon.utility` | 11 | ~7.8 MB (trn-cache grows per fetch) |
+| `%APPDATA%\Recon` | 2 | 668 (settings.json 173, monitor_res_cache.json 495) |
 
-## 4. localStorage state (leveldb, `Default\Local Storage\leveldb`)
+## 4. localStorage after an alpha22 launch
 
-- Files: `000005.ldb` 203,182 · `000081.ldb` 1,873,941 · `000084.ldb` 466,674 ·
-  `MANIFEST-000001` 5,608 · `LOG.old` 1,205 · empty `000083.log`/`LOG`/`LOCK`.
-  **Total .ldb on disk 2,543,797 B** (includes tombstoned/superseded generations, not live payload).
-- Heuristic parse of live entries: **37 distinct keys, ≈730 chars of values** (parser is
-  approximate; treat ±10–20% and the key *set* as reliable, exact byte totals as approximate).
-- Largest parsed keys: `recon_live_player_stats_v2` 237 · `recon_match_v6_fd8cd7c7` 121 ·
-  `recon_sidebar_mini_v2` 68 · `recon_match_v6_631eb5df` 55 ·
-  `recon_tracker_snapshot_v1:<puuid>` 51 · `recon_live_round_seq_4b49d707` 42 · `aspect_tracker_shard` 40.
-- Generation census inside the leveldb: **`recon_match_v6_*` 19 keys / 29 refs** (superseded
-  ballast still on disk) · **`recon_match_v7_*` 10 keys / 10 refs** · `recon_trn_cache_*` 1 ·
-  `recon_tracker_snapshot_v1` 2 · `aspect_*` 6 · `truestretch_*` 0.
-- Quota numbers on record for this machine (code comments, measured by QA, not re-measured now):
-  origin budget **~5 MB**; at one point **~5.24 M chars** with **11 `recon_match_v6_*` and 0
-  `recon_match_v7_*`** — full storage made the version bump a silent no-op; TRN measured
-  **4.76 MB of ~5 MB**, where a **256 KiB write succeeded and a 512 KiB write threw
-  `QuotaExceededError`**; largest TRN payload **2,176,778 chars**. Bodies now live in `trn-cache\`.
+- `.ldb` files: `000005` 203,182 · `000081` 1,873,941 · `000084` 466,674 · **`000087` 27,742**
+  (new at alpha22 start) · MANIFEST 5,608. **Total .ldb 2,571,539 B.**
+- Parsed: **39 keys, ≈838 chars live** (heuristic ±; key set reliable).
+- **Superseded generations are tombstoned, not live.** The `.ldb` files still carry **21 superseded
+  key names on disk** (`recon_match_v6_*` 19 · `recon_live_player_stats_v2` 1 ·
+  `recon_trn_cache_v1` 1), but the live `localStorage` measured app-side by QA is **0** for all of
+  them. Per-table distribution proves compaction lag, not a leak: `000005` (Nov 8) 17 ·
+  `000081` (Nov 9 03:11) 13 · `000084` (03:22) 1 · **`000087` (the only table written by alpha22,
+  19:35:27) 0**. Deleted keys survive in old blocks until LevelDB compacts them — do not report
+  this as a cache leak.
+- New generation present: `recon_match_v7_*` 10 keys, `recon_live_player_stats_v3` (107 chars),
+  `recon_trn_cache_v2`.
+- Largest: `recon_live_player_stats_v2` 237 · `recon_match_v6_fd8cd7c7` 121 ·
+  `recon_live_player_stats_v3` 107 · `recon_sidebar_mini_v2` 68.
+- Quota history on this machine (code comments, QA-measured): ~5 MB origin budget; once **5.24 M
+  chars** full with 11 v6 entries and 0 v7 (bump silently no-op'd); TRN bodies measured **4.76 MB
+  of ~5 MB**, 256 KiB write OK / 512 KiB threw `QuotaExceededError`.
 
-## 5. Launch sequence (observed)
+## 5. First working log baseline (`%LOCALAPPDATA%\com.recon.utility\logs`)
 
-| Time (2026-11-09) | Event |
+Files at 02:30: `recon-startup.log` 0 B (19:34:24) · `Recon.log` 1,583 B, 9 lines (last write 19:36:26).
+
+- First line: `[2026-11-09][19:34:27][INFO][app_lib] [window] main frame delta 16x9 px @ 1x -> min size 1226x809 logical`
+- Last line: `[2026-11-09][19:36:26][WARN][app_lib::win::overlay] overlay edit mode force-exited (user exit)`
+- **0 ERROR**, **2 WARN** — both `overlay edit mode force-exited (user exit)` at 19:36:23 and 19:36:26.
+- Rest of the 9 lines: 6 × `[display] DisplayConfig bridge` / `GDI ... bridged to PnP` for
+  DISPLAY1 (HWP2866), DISPLAY2 (DELA0E2), DISPLAY3 (PHLC401).
+- **No line written after 19:36:26** while the app stayed running — idle produces no log output.
+
+## 6. Launch sequence (alpha22, measured)
+
+| Time 2026-11-09 | Event |
 | --- | --- |
-| 03:21:15 | `uninstall.exe` written by the installer |
-| 03:21:37 | `recon.exe` starts (22 s later) |
-| 03:22:41 | first localStorage write after start (`000084.ldb` mtime, 64 s after start) |
-| ~03:36 | `recon.exe` exits; webview tree gone; no crash artifacts |
+| 19:25:42 | new `recon.exe` written (alpha22) |
+| 19:34:24 | `recon.exe` starts (PID 10740); `recon-startup.log` created |
+| 19:34:27 | first `Recon.log` line (window min-size) |
+| 19:34:44–19:34:58 | **3 TRN cache files written** (1.71 MB, 191 KB, 3.97 MB) — startup TRN fetch |
+| 19:35:09 | display enumeration (3 monitors bridged) |
+| 19:36:23 / 19:36:26 | 2 overlay `WARN` lines |
+| — | no lines since; process still alive at 02:30 |
 
-- Cold start evidence: bundled runtime dir written **2026-11-08 22:50:26**, exe **03:10:12**,
-  `--minimized` boot-to-tray path exists (`settings.json` has `start_minimized: true`).
-- **Warm-start ordering not measured — PC in use** (no relaunch allowed; the running instance
-  exited before the stop order).
-- Window creation is `.visible(false)` then shown; tray built with tooltip
-  `Recon • Valorant Companion`, `show_menu_on_left_click(false)`.
+Cold-start artifacts: bundled runtime dir dated 2026-11-08 22:50; `settings.json` has
+`start_minimized: true`; `--minimized` boot-to-tray path exists. **Warm-start ordering not measured**
+(could not relaunch).
 
-## 6. What the user sees when something fails
+## 7. Failure evidence / user-facing error surface
 
-- **WebView2 runtime missing** (guard runs first, before any window):
-  title `Recon - WebView2 runtime missing`; body `Recon cannot start because the WebView2 runtime
-  is missing.` + `Debloated Windows images often remove it. Press OK to open the official Microsoft
-  installer, run it, then start Recon again.`; icon error; then opens
-  `https://go.microsoft.com/fwlink/p/?LinkId=2124703`; process **exits with code 3**.
-- **Nothing on screen for storage failures**: localStorage quota errors were swallowed and the
-  cache simply stayed stale — the app kept running with old data (the 5.24 M char case above).
-- App exit at ~03:36 produced **no error surface** (no dialog, no event-log entry, no WER).
+- **WebView2 missing:** `MessageBox` title `Recon - WebView2 runtime missing`, body
+  `Recon cannot start because the WebView2 runtime is missing.` + `Debloated Windows images often
+  remove it. Press OK to open the official Microsoft installer, run it, then start Recon again.`;
+  opens `https://go.microsoft.com/fwlink/p/?LinkId=2124703`; process exits **code 3**.
+- **Storage quota failures: invisible** — swallowed, app keeps running on stale cache.
+- Tray tooltip `Recon • Valorant Companion`, left-click opens the menu (`show_menu_on_left_click(false)`).
 
-## 7. Gaps to fill later (explicitly not measured — PC in use)
+## 8. Unverified claim: match board (AGENT SELECT / IN MATCH)
 
-Warm-start timing · 9223 protocol · parent of `recon.exe` · live-match behaviour · window titles
-at runtime · outbound destination names.
+**No VALORANT match ran on alpha22, so the claim stays unverified.** Evidence at 02:30:
+
+- No `VALORANT-Win64-Shipping.exe` process; only `RiotClientServices.exe` (16868) + crash handler.
+- `%LOCALAPPDATA%\VALORANT\Saved\Logs\ShooterGame.log` last closed **2026-11-09 04:43:45** —
+  15 h before alpha22 was installed.
+- Prefetch: only `VALORANT-138-0-1-4874.EXE` (2026-10-23); no Win64-Shipping prefetch entry present.
+- `Recon.log`: 0 lines matching board/agent/prematch/TRN.
+- Board-state values in localStorage are **stale from the previous build**:
+  `recon_live_player_stats_v3.fetchedAt` = 2026-11-09 **03:29:18**, `recon_tracker_snapshot_v1.savedAt`
+  = 2026-11-09 **03:22:29** — both before alpha22 (19:25).
+- `trn-cache` newest files are the 19:34:44–19:34:58 startup fetches; nothing newer.
+
+## 9. Gaps (not measured — would need a relaunch or a live match)
+
+Warm-start timing · 9223 protocol · `recon.exe` parent · live match board behaviour · window titles.
