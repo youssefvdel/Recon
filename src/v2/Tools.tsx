@@ -115,26 +115,42 @@ export const Tools: React.FC<ToolsProps> = ({ anchor, onAnchorApplied }) => {
   const s = useToolsState();
   const [armed, setArmed] = useState(false);
 
-  /* Jump one frame after the forced section painted: the heading exists either
-     way, but its body has to be in the flow or the scroll lands past it. Only
-     then do the observers arm, so a deep link mounts the section it asked for
-     and not the four it skipped over. */
+  /* A deep link has to survive the page growing under it: the forced section
+     paints first, then the observers arm and their sections mount, and a mount
+     above the target moves it. So the target is pinned to the top of the scroll
+     for a bounded number of layout changes — a ResizeObserver, not a timer —
+     and stops as soon as the page has settled. */
+  const pin = useRef<ToolAnchor | null>(null);
+
   useEffect(() => {
     if (!anchor) {
       setArmed(true);
       return;
     }
-    const frame = requestAnimationFrame(() => {
-      const el = document.getElementById(anchor);
-      if (el) {
-        el.scrollIntoView({ block: 'start', behavior: 'auto' });
-        el.querySelector<HTMLElement>('h2')?.focus({ preventScroll: true });
-      }
-      setArmed(true);
-      onAnchorApplied();
-    });
-    return () => cancelAnimationFrame(frame);
+    pin.current = anchor;
+    const el = document.getElementById(anchor);
+    el?.scrollIntoView({ block: 'start', behavior: 'auto' });
+    /* Keyboard users land on the heading, not at the top of the page. */
+    el?.querySelector<HTMLElement>('h2')?.focus({ preventScroll: true });
+    setArmed(true);
+    onAnchorApplied();
   }, [anchor, onAnchorApplied]);
+
+  useEffect(() => {
+    let left = 12;
+    const ro = new ResizeObserver(() => {
+      const id = pin.current;
+      if (!id) return;
+      if (left-- <= 0) {
+        pin.current = null;
+        ro.disconnect();
+        return;
+      }
+      document.getElementById(id)?.scrollIntoView({ block: 'start', behavior: 'auto' });
+    });
+    ro.observe(document.documentElement);
+    return () => ro.disconnect();
+  }, []);
 
   return (
     <div className="max-w-[940px] mx-auto w-full px-6 pt-8 pb-16">
@@ -147,9 +163,7 @@ export const Tools: React.FC<ToolsProps> = ({ anchor, onAnchorApplied }) => {
       </Section>
 
       <Section id="prepick" label={TOOL_SECTIONS[2].label} force={anchor === 'prepick'} armed={armed}>
-        <div style={PANE}>
-          <PrepickView />
-        </div>
+        <PrepickView embedded />
       </Section>
 
       <Section id="resolution" label={TOOL_SECTIONS[3].label} force={anchor === 'resolution'} armed={armed}>
