@@ -130,6 +130,23 @@ fn append_startup_log(identifier: &str, level: log::Level, msg: &str) {
 /// `tauri-plugin-log` is now registered, but its setup runs late: the guard and
 /// a failed `Builder::run` both execute before it, and those are exactly the
 /// lines worth having.
+/// Startup breadcrumb. Written through `log_line`, so it lands in
+/// `Recon.log` once the plugin is attached and in `recon-startup.log` before
+/// that — which is the only window where a hang is currently invisible.
+///
+/// The sequence is the diagnosis: `run() entered` -> `preflight passed` ->
+/// `entering run()` -> `setup reached`. If a future "no window" report stops at
+/// `entering run()`, the stall is Tauri creating the config window and its
+/// WebView2 controller, not our setup — today that state is indistinguishable
+/// from a dead app because nothing has been written yet.
+fn boot_marker(identifier: &str, msg: &str) {
+    log_line(
+        identifier,
+        log::Level::Info,
+        &format!("[boot] {msg}"),
+    );
+}
+
 pub(crate) fn log_line(identifier: &str, level: log::Level, msg: &str) {
     if log::max_level() == log::LevelFilter::Off {
         append_startup_log(identifier, level, msg);
@@ -252,9 +269,19 @@ pub fn run() {
     let context = tauri::generate_context!();
     let log_id = context.config().identifier.clone();
 
+    boot_marker(
+        &log_id,
+        &format!(
+            "run() entered v{} args={:?}",
+            env!("CARGO_PKG_VERSION"),
+            std::env::args().collect::<Vec<_>>()
+        ),
+    );
+
     // Debloated Windows images often ship without WebView2. Fail with a
     // repair dialog instead of the cryptic webview-creation error.
     webview_guard::ensure_webview2_or_exit(&log_id);
+    boot_marker(&log_id, "webview2 preflight passed");
 
     // Copy any pre-rename data out of %LOCALAPPDATA%\TrueStretchStudio before
     // the first read below; copy-only, per file, idempotent, failures logged.
@@ -314,10 +341,17 @@ pub fn run() {
             }
         }));
 
+    boot_marker(
+        &log_id,
+        "builder ready; entering run() - Tauri creates the config window here",
+    );
+
     let setup_log_id = log_id.clone();
     let run_result = builder
         .manage(app_state)
         .setup(move |app| {
+            boot_marker(&setup_log_id, "setup reached - config windows exist");
+
             // Boot-to-tray: the Run entry passes --minimized at login, so the
             // main window stays hidden and the tray icon owns the session.
             // A tray click (or single-instance re-launch) shows it again.
