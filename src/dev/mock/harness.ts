@@ -1,4 +1,4 @@
-import { storageFixture } from '../fixtures/tracker';
+import { coreGamePayload, fakeEntitlementToken, storageFixture } from '../fixtures/tracker';
 
 /** The Linux dev harness: one mock boundary, at the same place the real app
  *  enters Tauri — `window.__TAURI_INTERNALS__.invoke`.
@@ -52,7 +52,34 @@ const staticAnswers: Record<string, unknown> = {
   get_valorant_configs: [],
   get_windows: [],
   get_all_monitors: [],
-  local_presences: JSON.stringify({ presences: [] }),
+  /* Self-presence is where the live parser reads the loop state and the score:
+   * the private blob is base64 of the same shape the Rust command returns. */
+  local_presences: JSON.stringify({
+    presences: [
+      {
+        puuid: '11111111-2222-3333-4444-555555555555',
+        game_name: 'Youssef',
+        game_tag: 'EUW',
+        private: btoa(
+          JSON.stringify({
+            matchPresenceData: {
+              sessionLoopState: 'INGAME',
+              queueId: 'competitive',
+              partyOwnerMatchScoreAllyTeam: 6,
+              partyOwnerMatchScoreEnemyTeam: 4,
+            },
+            partyId: 'party-1',
+          })
+        ),
+      },
+    ],
+  }),
+  local_entitlements: {
+    access_token: fakeEntitlementToken(),
+    entitlements: ['valorant'],
+    puuid: '11111111-2222-3333-4444-555555555555',
+  },
+  local_client_version: 'release-13.09-shipping-12-1234567',
   is_riot_client_running: true,
   check_channel_update: { available: false, version: null },
 };
@@ -73,12 +100,21 @@ export function installDevHarness(): void {
   }
   if (fixture === 'empty') localStorage.clear();
 
-  const invoke = async (cmd: string): Promise<unknown> => {
+  const invoke = async (cmd: string, args?: unknown): Promise<unknown> => {
     if (fixture === 'error') {
       throw new Error(`[harness] ${cmd} failed: Riot Client is closed`);
     }
     if (cmd in staticAnswers) return staticAnswers[cmd];
-    if (cmd === 'riot_direct_get') return { httpStatus: 404, errorCode: 'RESOURCE_NOT_FOUND' };
+    /* The transport is routed by path, because the live parser asks three
+     * different endpoints and a blanket answer keeps the phase at idle. */
+    if (cmd === 'riot_direct_get') {
+      const path = String((args as { path?: string })?.path ?? '');
+      if (fixture === 'lobby') {
+        if (/^\/core-game\/v1\/players\//.test(path)) return { MatchID: 'live-1' };
+        if (/^\/core-game\/v1\/matches\/live-1/.test(path)) return coreGamePayload();
+      }
+      return { httpStatus: 404, errorCode: 'RESOURCE_NOT_FOUND' };
+    }
     if (cmd === 'get_entitlements' || cmd === 'detect_entitlements') {
       throw new Error('Riot client not responding — launch it and retry.');
     }
@@ -89,7 +125,7 @@ export function installDevHarness(): void {
   };
 
   (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
-    invoke: (cmd: string) => invoke(cmd),
+    invoke: (cmd: string, args?: unknown) => invoke(cmd, args),
     transformCallback: (cb: unknown) => cb,
     metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
   };

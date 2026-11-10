@@ -34,7 +34,13 @@ export function useLiveLobby(): LiveLobby {
 
   const loadState = useCallback(async () => {
     try {
-      setState(await fetchLiveMatchState(undefined, true));
+      const fresh = await fetchLiveMatchState(undefined, true);
+      /* A forced read that comes back idle WITH an error is "we could not ask",
+       * not "there is no match": the Riot client is unreachable, so the seeded
+       * lobby is still the best evidence we have. Replacing it would blank a
+       * live match on a failed poll. */
+      if (fresh?.phase === 'idle' && fresh.error) return;
+      setState(fresh);
     } catch {
       /* a failed first read leaves the previous state in place */
     }
