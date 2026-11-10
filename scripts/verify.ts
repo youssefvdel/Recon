@@ -25,10 +25,12 @@ const TAIL_LINES = 20;
 
 const env = { ...process.env };
 // cargo lives in ~/.cargo/bin on this box, which a non-login PATH misses.
-// Join with the platform delimiter (";" on Windows) — clobbering PATH with ":"
-// there hides bun/tsc from every child process.
+// Windows spells the variable "Path", and its value must keep the platform
+// delimiter (";"): rebuilding it from a missing env.PATH leaves only the two
+// cargo dirs, and every child then fails with "bun is not installed in %PATH%".
 const extraPath = [join(homedir(), ".cargo/bin"), "/usr/local/cargo/bin"];
-env.PATH = [...new Set([env.PATH, ...extraPath].filter(Boolean))].join(delimiter);
+const pathKey = Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+env[pathKey] = [...new Set([env[pathKey], ...extraPath].filter(Boolean))].join(delimiter);
 
 // Windows CreateProcess does not apply PATHEXT: spawning "bun"/"cargo" fails
 // when only bun.exe/cargo.exe exist. Use the running Bun binary and resolve
