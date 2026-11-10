@@ -88,7 +88,12 @@ check(
 );
 
 // --- Rust shapes (source text): own-process counters, zero new deps ---
-const perfRs = await Bun.file('src-tauri/src/perf.rs').text();
+// perf.rs is a module tree now: read the whole surface so a split cannot
+// empty this contract check.
+const perfRs = (await Promise.all(
+  (await Array.fromAsync(new Bun.Glob('src-tauri/src/perf/**/*.rs').scan('.')))
+    .map((f) => Bun.file(f).text()),
+)).join('\n');
 const cargo = await Bun.file('src-tauri/Cargo.toml').text();
 const libRs = await Bun.file('src-tauri/src/lib.rs').text();
 const dashboard = await Bun.file('src/components/DevDashboard.tsx').text();
@@ -185,7 +190,10 @@ check('three sample series', perfRs.includes('pub webview_mb') && perfRs.include
 check('three timeline stats', perfRs.includes('pub webview: PerfStats') && perfRs.includes('pub total: PerfStats'), true);
 
 // --- frontend shapes: dev-gated poll, SVG sparklines, readouts ---
-check('command registered', libRs.includes('perf::perf_poll'), true);
+// Assert the handler entry, not its module path: the command moved from
+// `perf::perf_poll` to `perf::sample::perf_poll` when perf.rs became a tree,
+// and a contract check should survive a refactor that keeps the contract.
+check('command registered', /^\s*[A-Za-z_:]*perf_poll,\s*$/m.test(libRs), true);
 check('mod registered', libRs.includes('mod perf;'), true);
 check('dashboard polls dev-gated', dashboard.includes('if (!import.meta.env.DEV) return;'), true);
 check('dashboard uses shared cadence', dashboard.includes('PERF_POLL_MS'), true);
