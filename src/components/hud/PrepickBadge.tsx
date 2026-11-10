@@ -32,7 +32,7 @@ export const PrepickBadge: React.FC<PrepickBadgeProps> = ({ icon, agent }) => (
       <span className="text-m3-outline font-normal"> • hover only</span>
     </span>
   </div>
-  <span className="ml-1 w-1.5 h-1.5 rounded-full bg-m3-mint shrink-0" />
+  <span className="ml-1 w-1.5 h-1.5 rounded-full bg-m3-primary shrink-0" />
 </div>
 );
 

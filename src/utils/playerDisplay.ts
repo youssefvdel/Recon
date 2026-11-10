@@ -73,18 +73,15 @@ export function shortAct(label?: string): string {
     .trim();
 }
 
-/** K/D with the same colour bands everywhere: green ≥1.2, mint ≥1.0, rose below. */
+/** K/D text. Colour is not part of the value: mint/coral mean a resolved
+ *  win/loss and nothing else, so a stat never borrows them — emphasis is weight. */
 export function formatKd(kd?: number | string): { text: string; color: string } {
   if (kd == null || kd === '' || kd === 0) return { text: '—', color: 'text-zinc-500' };
   const num = typeof kd === 'number' ? kd : parseFloat(kd);
   if (isNaN(num) || num <= 0) return { text: '—', color: 'text-zinc-500' };
   const text = num.toFixed(2);
   const color =
-    num >= 1.2
-      ? 'text-emerald-400 font-bold'
-      : num >= 1.0
-      ? 'text-m3-mint font-semibold'
-      : 'text-rose-400 font-medium';
+    num >= 1 ? 'text-m3-on-surface font-semibold' : 'text-m3-on-surface-variant font-medium';
   return { text, color };
 }
 

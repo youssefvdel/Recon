@@ -123,7 +123,7 @@ export const MetaTiles: React.FC<MetaTilesProps> = ({
     <div className="flex flex-col gap-1.5">
       <div className="px-1 text-[9px] font-mono text-m3-on-surface-variant flex items-center justify-between border-b border-m3-outline-subtle/55 pb-1">
         <span>Blitz Live Meta ({rankTierLabel})</span>
-        <span className="text-m3-mint font-bold">Top 3 · Win% · Pick%</span>
+        <span className="text-m3-on-surface-variant font-bold">Top 3 · Win% · Pick%</span>
       </div>
       {metaPicks.slice(0, 3).map((b) => {
         const norm = b.agent.toLowerCase();
@@ -167,7 +167,7 @@ export const MetaTiles: React.FC<MetaTilesProps> = ({
               </span>
             </div>
 
-            <div className="text-right font-mono text-[10px] font-bold text-m3-mint tabular-nums whitespace-nowrap" data-tip="Lobby Win Rate">
+            <div className="text-right font-mono text-[10px] font-bold text-m3-on-surface tabular-nums whitespace-nowrap" data-tip="Lobby Win Rate">
               {b.winRate}%
             </div>
 
@@ -189,7 +189,7 @@ export const MetaTiles: React.FC<MetaTilesProps> = ({
             ? 'Your agent pool (all maps, this act)'
             : 'Sample preview'}
         </span>
-        <span className="text-m3-mint font-bold">
+        <span className="text-m3-on-surface-variant font-bold">
           {personalScope === 'preview' ? 'Demo' : 'Win & K/D'}
         </span>
       </div>
@@ -215,11 +215,7 @@ export const MetaTiles: React.FC<MetaTilesProps> = ({
         const role = meta?.role || stat.role || 'Agent';
         const kd = stat.kd.toFixed(2);
         const kdColor =
-          stat.kd >= 1.2
-            ? 'text-emerald-400 font-bold'
-            : stat.kd >= 1.0
-            ? 'text-m3-mint font-semibold'
-            : 'text-rose-400 font-medium';
+          stat.kd >= 1 ? 'text-m3-on-surface font-semibold' : 'text-m3-on-surface-variant font-medium';
         return (
           <div
             key={stat.agent}
@@ -259,7 +255,7 @@ export const MetaTiles: React.FC<MetaTilesProps> = ({
 
             {/* Win % */}
             <div className="text-right font-mono text-[10px] font-bold tabular-nums whitespace-nowrap" data-tip="Win Rate">
-              <span className={stat.winPct >= 50 ? 'text-m3-mint' : 'text-m3-on-surface-variant'}>
+              <span className={stat.winPct >= 50 ? 'text-m3-on-surface' : 'text-m3-on-surface-variant'}>
                 {formatPct(stat.winPct, 1)}
               </span>
             </div>
@@ -320,7 +316,7 @@ export const MetaTiles: React.FC<MetaTilesProps> = ({
                     {b.matches >= 1000 ? `${(b.matches / 1000).toFixed(1)}k` : b.matches}g
                   </span>
                 </div>
-                <span className="text-right font-mono text-[10px] font-bold text-m3-mint tabular-nums whitespace-nowrap" data-tip="Win rate">
+                <span className="text-right font-mono text-[10px] font-bold text-m3-on-surface tabular-nums whitespace-nowrap" data-tip="Win rate">
                   {b.winRate}%
                 </span>
                 <span className="text-right font-mono text-[9px] text-m3-on-surface-variant tabular-nums whitespace-nowrap" data-tip="Pick rate">

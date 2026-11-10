@@ -62,7 +62,7 @@ export const EditChrome: React.FC<EditChromeProps> = ({
     {isEditMode && (
       <div className="fixed top-4 inset-x-0 mx-auto w-fit z-50 pointer-events-auto flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-m3-surface-container/[0.85] border border-m3-primary/40 shadow-2xl">
         <div className="flex items-center gap-2 pr-2 border-r border-m3-outline-subtle/55">
-          <span className="w-2.5 h-2.5 rounded-full bg-m3-mint shadow-[0_0_8px_rgba(58,227,116,0.8)]" />
+          <span className="w-2.5 h-2.5 rounded-full bg-m3-primary" />
           <span className="font-display font-black text-xs text-m3-on-surface tracking-wider uppercase">
             HUD Edit Mode
           </span>
@@ -101,7 +101,7 @@ export const EditChrome: React.FC<EditChromeProps> = ({
         <button
           type="button"
           onClick={() => void exitEditMode()}
-          className="px-4 py-1.5 rounded-xl bg-m3-mint text-m3-on-primary text-xs font-extrabold shadow-md border border-white/20 hover:brightness-110 flex items-center gap-1.5 cursor-pointer transition-all ml-1"
+          className="px-4 py-1.5 rounded-xl bg-m3-primary text-m3-on-primary text-xs font-extrabold shadow-md border border-white/20 hover:brightness-110 flex items-center gap-1.5 cursor-pointer transition-all ml-1"
         >
           <Check className="w-4 h-4 stroke-[2.5]" />
           <span>Lock HUD (Esc)</span>
@@ -137,7 +137,7 @@ export const EditChrome: React.FC<EditChromeProps> = ({
               onClick={() => saveConfig({ ...config, showPregame: !config.showPregame })}
               className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
                 config.showPregame
-                  ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
+                  ? 'bg-m3-primary/20 text-m3-primary border-m3-primary/40'
                   : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/55'
               }`}
             >
@@ -174,7 +174,7 @@ export const EditChrome: React.FC<EditChromeProps> = ({
               onClick={() => saveConfig({ ...config, showLobby: !config.showLobby })}
               className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
                 config.showLobby
-                  ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
+                  ? 'bg-m3-primary/20 text-m3-primary border-m3-primary/40'
                   : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/55'
               }`}
             >
@@ -211,7 +211,7 @@ export const EditChrome: React.FC<EditChromeProps> = ({
               onClick={() => saveConfig({ ...config, showTopAgents: !config.showTopAgents })}
               className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
                 config.showTopAgents
-                  ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
+                  ? 'bg-m3-primary/20 text-m3-primary border-m3-primary/40'
                   : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/55'
               }`}
             >
@@ -250,7 +250,7 @@ export const EditChrome: React.FC<EditChromeProps> = ({
             onClick={() => saveConfig({ ...config, showPrepick: !config.showPrepick })}
             className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
               config.showPrepick
-                ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
+                ? 'bg-m3-primary/20 text-m3-primary border-m3-primary/40'
                 : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/55'
             }`}
           >
@@ -264,7 +264,7 @@ export const EditChrome: React.FC<EditChromeProps> = ({
         }`}>
           <div className="flex flex-col">
             <span className="text-xs font-bold text-m3-on-surface flex items-center gap-1.5 min-w-0">
-              <Shield className="w-3.5 h-3.5 text-m3-mint" />
+              <Shield className="w-3.5 h-3.5 text-m3-primary" />
               <span>Starting Side (Atk/Def)</span>
             </span>
             <span className="text-[10px] text-m3-on-surface-variant">Show in Agent Select & HUD</span>
@@ -274,7 +274,7 @@ export const EditChrome: React.FC<EditChromeProps> = ({
             onClick={() => saveConfig({ ...config, showStartingSide: !config.showStartingSide })}
             className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
               config.showStartingSide
-                ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
+                ? 'bg-m3-primary/20 text-m3-primary border-m3-primary/40'
                 : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/55'
             }`}
           >
@@ -299,7 +299,7 @@ export const EditChrome: React.FC<EditChromeProps> = ({
               onClick={() => saveConfig({ ...config, showCrosshair: !config.showCrosshair })}
               className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
                 config.showCrosshair
-                  ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
+                  ? 'bg-m3-primary/20 text-m3-primary border-m3-primary/40'
                   : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/55'
               }`}
             >
@@ -336,7 +336,7 @@ export const EditChrome: React.FC<EditChromeProps> = ({
                   onClick={() => saveConfig({ ...config, crosshair: { ...xhair, outlineOn: !xhair.outlineOn } })}
                   className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
                     xhair.outlineOn
-                      ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
+                      ? 'bg-m3-primary/20 text-m3-primary border-m3-primary/40'
                       : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/55'
                   }`}
                 >
@@ -374,7 +374,7 @@ export const EditChrome: React.FC<EditChromeProps> = ({
                   onClick={() => saveConfig({ ...config, crosshair: { ...xhair, dotOn: !xhair.dotOn } })}
                   className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black border transition-colors cursor-pointer shrink-0 whitespace-nowrap ${
                     xhair.dotOn
-                      ? 'bg-m3-mint/20 text-m3-mint border-m3-mint/40'
+                      ? 'bg-m3-primary/20 text-m3-primary border-m3-primary/40'
                       : 'bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/55'
                   }`}
                 >

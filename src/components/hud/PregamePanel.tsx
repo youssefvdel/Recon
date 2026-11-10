@@ -37,7 +37,7 @@ export const PregamePanel: React.FC<PregamePanelProps> = ({
   {/* Header: Map • Starting Side Badge */}
   <div className="flex items-center justify-between px-1">
     <div className="flex items-center gap-2 min-w-0">
-      <span className="w-2 h-2 rounded-full bg-m3-mint shadow-[0_0_8px_rgba(58,227,116,0.8)]" />
+      <span className="w-2 h-2 rounded-full bg-m3-primary" />
       <span className="font-display font-black text-m3-on-surface text-xs tracking-wider uppercase">
         {matchState?.mapName || 'Ascent'} • Team Scout
       </span>
@@ -57,20 +57,16 @@ export const PregamePanel: React.FC<PregamePanelProps> = ({
       <ServerChip serverName={matchState?.serverName} />
       {showStartingSide && matchState?.startingSide && (
         <span
-          className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-mono font-extrabold uppercase shrink-0 border ${
-            matchState.startingSide === 'Defense'
-              ? 'bg-m3-mint/15 text-m3-mint border-m3-mint/30'
-              : 'bg-m3-coral/15 text-m3-coral border-m3-coral/30'
-          }`}
+          className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-mono font-extrabold uppercase shrink-0 border bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/55"
         >
           {matchState.startingSide === 'Defense' ? (
             <>
-              <Shield className="w-3 h-3 text-m3-mint" />
+              <Shield className="w-3 h-3 text-m3-on-surface-variant" />
               <span>Starting Defense</span>
             </>
           ) : (
             <>
-              <Swords className="w-3 h-3 text-m3-coral" />
+              <Swords className="w-3 h-3 text-m3-on-surface-variant" />
               <span>Starting Attack</span>
             </>
           )}

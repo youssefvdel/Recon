@@ -122,7 +122,7 @@ export const PregameTeamColumn: React.FC<{
                         (e.currentTarget as HTMLElement).style.display = 'none';
                       }}
                       className={`w-[26px] h-[26px] rounded-lg object-cover border ${
-                        locked ? 'border-m3-mint/60' : hasPick ? 'border-amber-300/60' : 'border-m3-outline-subtle/55'
+                        locked ? 'border-m3-primary/60' : hasPick ? 'border-amber-300/60' : 'border-m3-outline-subtle/55'
                       } pointer-events-none select-none`}
                     />
                   ) : (
@@ -184,7 +184,7 @@ export const PregameTeamColumn: React.FC<{
                   </div>
                   <span className="text-[9.5px] font-mono font-semibold">
                     {locked ? (
-                      <span className="flex items-center gap-1 text-m3-mint">
+                      <span className="flex items-center gap-1 text-m3-primary">
                         <Check className="w-2.5 h-2.5 stroke-[3]" />
                         {p.agentName}
                       </span>
@@ -247,7 +247,7 @@ export const PregameTeamColumn: React.FC<{
               {/* Win % */}
               <div className="text-right font-mono text-[11px] font-semibold tabular-nums whitespace-nowrap" data-tip="Act Win Rate">
                 {p.winPct != null ? (
-                  <span className={p.winPct >= 50 ? 'text-m3-mint' : 'text-m3-on-surface-variant'}>
+                  <span className={p.winPct >= 50 ? 'text-m3-on-surface' : 'text-m3-on-surface-variant'}>
                     {formatPct(p.winPct, 0)}
                   </span>
                 ) : privLocked ? (
@@ -491,7 +491,7 @@ export const VerticalSquadColumn: React.FC<{
           {/* Act-wide win rate */}
           <div className="text-right font-mono text-[10px] tabular-nums whitespace-nowrap" data-tip="Act-wide win rate">
             {p.winPct != null ? (
-              <span className={p.winPct >= 50 ? 'text-m3-mint font-semibold' : 'text-rose-400'}>
+              <span className={p.winPct >= 50 ? 'text-m3-on-surface font-semibold' : 'text-m3-on-surface-variant'}>
                 {formatPct(p.winPct, 0)}
               </span>
             ) : privLocked ? (

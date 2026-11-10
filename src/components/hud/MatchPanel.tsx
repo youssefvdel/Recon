@@ -53,11 +53,7 @@ export const MatchPanel: React.FC<MatchPanelProps> = ({
       {/* Side we start on — only Riot tells us this before the game */}
       {showStartingSide && matchState?.startingSide && !matchState?.isDeathmatch && (
         <span
-          className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-extrabold uppercase border ${
-            matchState.startingSide === 'Defense'
-              ? 'bg-m3-mint/15 text-m3-mint border-m3-mint/30'
-              : 'bg-m3-coral/15 text-m3-coral border-m3-coral/30'
-          }`}
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-extrabold uppercase border bg-m3-surface-container-high/60 text-m3-on-surface-variant border-m3-outline-subtle/55"
           data-tip={`Starting side: ${matchState.startingSide}`}
         >
           {matchState.startingSide === 'Defense' ? (
@@ -103,14 +99,14 @@ export const MatchPanel: React.FC<MatchPanelProps> = ({
       <>
         <VerticalSquadColumn
           title="Your Team"
-          tagColor="text-m3-primary"
+          tagColor="text-m3-on-surface"
           players={yourTeam}
           tierIcons={tierIcons}
         />
         {enemyTeam.length > 0 ? (
           <VerticalSquadColumn
             title="Enemy Team"
-            tagColor="text-rose-400"
+            tagColor="text-m3-on-surface-variant"
             players={enemyTeam}
             tierIcons={tierIcons}
           />

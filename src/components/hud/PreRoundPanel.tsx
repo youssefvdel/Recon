@@ -155,9 +155,7 @@ export const PreRoundPanel: React.FC<PreRoundPanelProps> = ({
         {showScore && showSide && <span className="text-m3-outline/60">·</span>}
         {showSide && side && (
           <span
-            className={`text-[11px] font-mono font-bold uppercase tracking-wider ${
-              side === 'Defense' ? 'text-m3-mint' : 'text-m3-coral'
-            }`}
+            className="text-[11px] font-mono font-bold uppercase tracking-wider text-m3-on-surface-variant"
           >
             {side === 'Defense' ? 'DEF' : 'ATK'}
           </span>
@@ -166,13 +164,13 @@ export const PreRoundPanel: React.FC<PreRoundPanelProps> = ({
 
       <TeamStrip
         label="YOUR TEAM"
-        labelClass="text-m3-primary/80"
+        labelClass="text-m3-on-surface"
         players={yourTeam}
         tierIcons={tierIcons}
       />
       <TeamStrip
         label="ENEMY"
-        labelClass="text-m3-coral/80"
+        labelClass="text-m3-on-surface-variant"
         players={enemyTeam}
         tierIcons={tierIcons}
       />
