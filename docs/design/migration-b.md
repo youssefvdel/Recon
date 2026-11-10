@@ -58,3 +58,24 @@ final step. Each step is one mergeable commit.
 Each step is a commit on `main`; reverting step N leaves steps 0..N-1 working because no step removes a
 surface before its replacement is merged. The old `Overview` is the only file replaced wholesale in
 step 1, so its revert is one file.
+
+## Step 2 — split into 2a / 2b / 2c (decided 2026-11-10)
+
+The step is three commits, not one. 2a is banked: `MatchDetailBody` extracted, the
+modal wrapper is 19 lines of chrome and no behaviour changed.
+
+**2b — the ledger expansion. The decision this step needs, recorded here so it is
+not re-litigated:**
+
+> **One expansion at a time. Opening another row collapses the previous. Escape
+> collapses the open row, and does nothing when none is open.**
+
+Reasons: the expanded body is tall (scoreboard + sticky rail + round detail +
+economy), so two open at once makes the ledger unreadable and "which match am I
+looking at" ambiguous. The round rail is a single controlled `selectedRound`, so a
+second expansion would require per-row selection state — the exact duplication this
+refactor keeps deleting. `openIds: Set` becomes `expandedId: string | null`, and the
+row's existing summary stays inside that one expansion.
+
+**2c — delete `MatchDetailModal.tsx`** (19 lines) and update both importers: Matches,
+and Overview, whose feed currently opens the modal.
