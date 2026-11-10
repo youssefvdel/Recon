@@ -12,7 +12,9 @@ import {
 /** Role order for the grouped agent picker (in-game roster order). */
 const ROLE_ORDER = ['duelist', 'initiator', 'controller', 'sentinel'];
 
-export const PrepickView: React.FC = () => {
+/** `embedded` drops the page's own scroll shell and padding: inside the Tools
+ *  sheet the page scrolls, and a nested scroller would trap the wheel. */
+export const PrepickView: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const [config, setConfig] = useState<PrepickConfig>(() => getPrepickConfig());
   const [maps, setMaps] = useState<ValorantMapInfo[]>([]);
   const [agents, setAgentsList] = useState<{ id: string; name: string; icon: string; role: string }[]>([]);
@@ -164,11 +166,17 @@ export const PrepickView: React.FC = () => {
     : '';
 
   return (
-    <div className="h-full min-h-0 flex flex-col bg-m3-surface overflow-y-auto custom-scrollbar px-4 sm:px-8 py-5 select-none">
-      <div className="max-w-5xl mx-auto w-full space-y-5 pb-12">
+    <div
+      className={
+        embedded
+          ? 'select-none'
+          : 'h-full min-h-0 flex flex-col bg-m3-surface overflow-y-auto custom-scrollbar px-4 sm:px-8 py-5 select-none'
+      }
+    >
+      <div className={embedded ? 'w-full space-y-5' : 'max-w-5xl mx-auto w-full space-y-5 pb-12'}>
         {/* Control deck: master toggle + default fallback in one row.
             Replaces the old header card + fallback banner pair. */}
-        <div className="flex items-center gap-3.5 p-3.5 sm:p-4 rounded-3xl bg-m3-surface-container-low border border-m3-outline-subtle flex-wrap">
+        <div className="flex items-center gap-3.5 py-3.5 sm:py-4 border-b border-m3-outline-subtle flex-wrap">
           <button
             type="button"
             role="switch"
@@ -265,11 +273,11 @@ export const PrepickView: React.FC = () => {
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
             {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="h-28 rounded-2xl bg-m3-surface-container-high animate-pulse" />
+              <div key={i} className="h-28 bg-m3-surface-container-high/60 animate-pulse" />
             ))}
           </div>
         ) : filteredMaps.length === 0 ? (
-          <div className="p-6 rounded-2xl bg-m3-surface-container-low border border-m3-outline-subtle text-center text-xs text-m3-outline">
+          <div className="p-6 border-b border-m3-outline-subtle text-center text-xs text-m3-outline">
             No maps match “{mapSearch}”.
           </div>
         ) : (
@@ -287,10 +295,10 @@ export const PrepickView: React.FC = () => {
                 <div
                   key={m.uuid || m.name}
                   onClick={() => setActivePickerTarget(mapKey)}
-                  className={`group relative h-28 rounded-2xl border overflow-hidden cursor-pointer transition-all ${
+                  className={`group relative h-28 rounded-2xl overflow-hidden cursor-pointer transition-all ring-1 ${
                     hasCustom
-                      ? 'border-m3-primary/60 hover:border-m3-primary shadow-sm hover:shadow-md'
-                      : 'border-m3-outline-subtle hover:border-m3-outline'
+                      ? 'ring-m3-primary/60 hover:ring-m3-primary shadow-sm hover:shadow-md'
+                      : 'ring-white/10 hover:ring-m3-outline'
                   }`}
                 >
                   {/* Map Splash Background with instant blur-up:
