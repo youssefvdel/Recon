@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useTrackerData } from '../hooks/useTrackerData';
 import { fetchTrnActStats, type TrnActStats } from '../utils/trn';
 import type { TrackerMatchDetail, TrackerMmrPoint } from '../types';
+import { shortMapName } from '../utils/tracker';
 import { Skeleton } from './primitives/Skeleton';
 import { ActHeader, type ActMetric } from './primitives/ActHeader';
 import { FeedRow } from './primitives/FeedRow';
@@ -26,8 +27,8 @@ export const shortAct = (label: string): string => {
 };
 
 const HOUR = 3_600_000;
-const relAge = (when: number): string => {
-  const d = Date.now() - when;
+const relAge = (when: number, now: number): string => {
+  const d = now - when;
   if (!Number.isFinite(d) || d < 0) return '';
   if (d < HOUR) return `${Math.max(1, Math.round(d / 60_000))}m`;
   if (d < 24 * HOUR) return `${Math.round(d / HOUR)}h`;
@@ -37,18 +38,28 @@ const relAge = (when: number): string => {
 const myTeamIn = (detail: TrackerMatchDetail | undefined, puuid: string): string | null =>
   detail?.players?.find((p) => p.puuid?.toLowerCase() === puuid?.toLowerCase())?.team ?? null;
 
-const PLAYLISTS = [{ value: 'competitive', label: 'Competitive' }];
+const PLAYLISTS = [
+  { value: 'competitive', label: 'Competitive' },
+  { value: 'unrated', label: 'Unrated' },
+];
 
 export const Overview: React.FC = () => {
-  const { profile, seasonNames, seasonOrder, agentInfo, agg, trn, trnPrev, trnAgents, games, mapById, detailsById, isLoading, clientClosed, refresh } =
+  const { profile, seasonNames, seasonOrder, agentInfo, tierIcons, agg, trn, trnPrev, trnAgents, trnFetchedAt, games, mapById, detailsById, isLoading, clientClosed, refresh } =
     useTrackerData();
 
-  const [playlist] = useState('competitive');
+  const [playlist, setPlaylist] = useState('competitive');
   const [seasonId, setSeasonId] = useState('');
   const [selStats, setSelStats] = useState<TrnActStats | null>(null);
   const [selError, setSelError] = useState<string | null>(null);
   const [selLoading, setSelLoading] = useState(false);
   const [openMatch, setOpenMatch] = useState<TrackerMmrPoint | null>(null);
+  /* Ages are relative, so the page needs a clock: one tick a minute keeps
+   * "2h" from silently becoming "2h" three hours later. */
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   const isDefault = playlist === 'competitive' && !seasonId;
   const S = isDefault ? trn : selStats;
@@ -76,6 +87,19 @@ export const Overview: React.FC = () => {
     const order = (seasonOrder?.length ? seasonOrder : [...played]).filter((id) => id !== current && played.has(id));
     return order.map((id) => ({ value: id, label: seasonNames?.[id] ?? shortAct(id) }));
   }, [profile, seasonOrder, seasonNames]);
+
+  /* Cached act metrics are not fresh by default: the current act's TRN blob is
+   * timestamped, so an old fetch is reported as old. A past-act fetch is made on
+   * selection and is self-evidently fresh. */
+  const trnAge = useMemo(() => {
+    if (!isDefault || !trn) return '';
+    if (!trnFetchedAt) return 'date unknown';
+    const d = Date.now() - trnFetchedAt;
+    if (d < 0) return '';
+    if (d < HOUR) return `${Math.max(1, Math.round(d / 60_000))}m ago`;
+    if (d < 24 * HOUR) return `${Math.round(d / HOUR)}h ago`;
+    return `${Math.round(d / (24 * HOUR))}d ago`;
+  }, [isDefault, trn, trnFetchedAt]);
 
   const actLabel = isDefault
     ? seasonNames?.[profile?.currentSeasonId?.toLowerCase() ?? ''] ?? 'Current Act'
@@ -105,11 +129,12 @@ export const Overview: React.FC = () => {
   ) : undefined;
 
   const topAgent = isDefault ? trnAgents?.[0] : undefined;
+  const topAgentMeta = topAgent
+    ? Object.values(agentInfo ?? {}).find((a) => a.name?.toLowerCase() === topAgent.agent?.toLowerCase())
+    : undefined;
   const agentLine = topAgent ? (
     <span className="inline-flex items-center gap-1.5">
-      {agentInfo?.[topAgent.agent]?.icon && (
-        <img src={agentInfo[topAgent.agent].icon} alt="" className="w-5 h-5 object-contain" />
-      )}
+      {topAgentMeta?.icon && <img src={topAgentMeta.icon} alt="" className="w-5 h-5 object-contain" />}
       <span>
         {topAgent.agent} · {topAgent.matches} games
         {topAgent.winPct > 0 ? ` · ${Math.round(topAgent.winPct)}% win` : ''}
@@ -141,39 +166,57 @@ export const Overview: React.FC = () => {
       const acs = me && me.rounds > 0 ? Math.round(me.score / me.rounds) : undefined;
       const sub = [me?.agent, kda, acs !== undefined ? `${acs} ACS` : ''].filter(Boolean).join(' · ') || undefined;
       const rounds = detail?.rounds;
-      const spark = rounds && team ? rounds.map((r) => (r.winningTeam === team ? 2 : 1)) : [];
-      return { g, map: mapById?.[g.matchId], age: g.when ? relAge(g.when) : undefined, verdict, score, sub, spark };
+      const spark: Outcome[] = rounds && team ? rounds.map((r) => (r.winningTeam === team ? 'win' : 'loss')) : [];
+      const map = mapById?.[g.matchId] ?? (g.mapId ? shortMapName(g.mapId, mapById ?? {}) : undefined);
+      return { g, map, age: g.when ? relAge(g.when, now) : undefined, verdict, score, sub, spark };
     });
-  }, [games, detailsById, mapById, profile?.puuid]);
+  }, [games, detailsById, mapById, profile?.puuid, now]);
 
   const history = useMemo(() => {
     if (!profile?.seasons) return [];
     const current = profile.currentSeasonId?.toLowerCase();
+    const orderIdx = (id: string): number => {
+      const i = seasonOrder?.indexOf(id.toLowerCase()) ?? -1;
+      return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+    };
     return profile.seasons
-      .filter((s) => s.id.toLowerCase() !== current)
-      .filter((s) => s.games > 0)
+      .filter((s) => s.games > 0 && s.id.toLowerCase() !== current)
+      .sort((a, b) => orderIdx(a.id) - orderIdx(b.id))
+      .slice(0, 3)
       .map((s) => ({
         id: s.id,
-        label: seasonNames?.[s.id.toLowerCase()] ?? shortAct(s.id),
+        // Never the raw season id: an unknown act gets a neutral label.
+        label: seasonNames?.[s.id.toLowerCase()] ?? 'Past act',
         games: s.games,
-        kd: trnPrev?.[s.id]?.kd,
+        tier: s.tier,
+        kd: trnPrev?.[s.id.toLowerCase()]?.kd ?? trnPrev?.[s.id]?.kd,
       }));
-  }, [profile, seasonNames, trnPrev]);
+  }, [profile, seasonNames, seasonOrder, trnPrev]);
 
   const status = selError
     ? `Could not load ${actLabel}: ${selError}`
     : clientClosed
-      ? 'Riot Client closed — showing cached results'
-      : undefined;
+      ? `Riot Client closed — showing cached results${trnAge ? ` · as of ${trnAge}` : ''}`
+      : trnAge && trnAge !== 'date unknown'
+        ? `Cached act data · as of ${trnAge}`
+        : trnAge === 'date unknown' && trn
+          ? 'Cached act data · date unknown'
+          : undefined;
 
   if (!profile) {
     return (
       <div className="max-w-[940px] mx-auto w-full px-6 pt-6 pb-10">
-        {isLoading || clientClosed ? (
+        {isLoading && !clientClosed ? (
           <Skeleton lines={3} />
         ) : (
+          /* Loading that can never resolve is a lie with a spinner on it: when
+           * the client is closed, say so and offer the way out. */
           <div className="flex flex-col items-start gap-3 text-xs text-m3-outline font-mono">
-            <span>No Riot profile yet — open Riot Client and refresh.</span>
+            <span>
+              {clientClosed
+                ? 'Riot Client closed — no cached profile yet. Open Riot Client and refresh.'
+                : 'No Riot profile yet — open Riot Client and refresh.'}
+            </span>
             <button type="button" onClick={() => refresh()} className="text-m3-primary hover:underline cursor-pointer">
               Retry
             </button>
@@ -187,7 +230,7 @@ export const Overview: React.FC = () => {
     <div className="max-w-[940px] mx-auto w-full px-6 pt-6 pb-10 flex flex-col">
       <div className="flex items-start justify-between gap-4">
         <ActHeader
-          eyebrow={`${actLabel} · ${PLAYLISTS[0].label}`}
+          eyebrow={`${actLabel} · ${PLAYLISTS.find((p) => p.value === playlist)?.label ?? ''}`}
           record={selLoading ? undefined : record}
           winPct={selLoading ? undefined : winPct !== undefined ? `${Math.round(winPct)}%` : undefined}
           metrics={selLoading ? [] : metrics}
@@ -198,10 +241,14 @@ export const Overview: React.FC = () => {
           <select
             aria-label="Playlist"
             value={playlist}
-            disabled
-            className="bg-transparent appearance-none cursor-default uppercase tracking-wider"
+            onChange={(e) => setPlaylist(e.target.value)}
+            className="bg-transparent appearance-none cursor-pointer uppercase tracking-wider hover:text-m3-on-surface"
           >
-            <option value="competitive">Competitive</option>
+            {PLAYLISTS.map((p) => (
+              <option key={p.value} value={p.value}>
+                {p.label}
+              </option>
+            ))}
           </select>
           {seasonOptions.length > 0 && (
             <select
@@ -265,7 +312,11 @@ export const Overview: React.FC = () => {
                 key={h.id}
                 className="grid grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-4 py-2.5 border-b border-m3-outline-subtle/50"
               >
-                <span className="text-micro font-mono text-m3-outline tabular-nums">{h.games}</span>
+                <span className="flex items-center">
+                  {tierIcons?.[h.tier] ? (
+                    <img src={tierIcons[h.tier]} alt="" className="w-6 h-6 object-contain" />
+                  ) : null}
+                </span>
                 <span className="text-xs text-m3-on-surface truncate">{h.label}</span>
                 <span className="text-micro font-mono text-m3-outline tabular-nums">
                   {h.games} games{h.kd ? ` · ${h.kd.toFixed(2)} K/D` : ''}
@@ -284,7 +335,7 @@ export const Overview: React.FC = () => {
         mapName={openMatch ? mapById?.[openMatch.matchId] ?? '' : ''}
         queue={openMatch?.queueId ?? 'competitive'}
         puuid={profile.puuid}
-        tierIcons={{}}
+        tierIcons={tierIcons ?? {}}
         agentInfo={agentInfo ?? {}}
       />
     </div>

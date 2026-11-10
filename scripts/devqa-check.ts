@@ -1467,6 +1467,41 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('readSnapshot no longer discards a stale snapshot', /return null;\s*\}\s*\n\}/.test(parseBody) && !/SNAPSHOT_TTL/.test(parseBody), true);
 }
 
+// --- Overview: the judge's four blockers stay fixed -----------------------
+{
+  const { existsSync, readFileSync } = await import('node:fs');
+  const ov = readFileSync(new URL('../src/components/Overview.tsx', import.meta.url), 'utf8');
+  const sp = readFileSync(new URL('../src/components/primitives/Sparkline.tsx', import.meta.url), 'utf8');
+
+  // 1. a cached act metric carries its age
+  check('the status line can say how old the act data is', /as of \$\{trnAge\}/.test(ov), true);
+  check('and says so when the date is unknown', /date unknown/.test(ov), true);
+
+  // 2. no spinner that cannot resolve
+  check('a closed client with no profile gets a reason, not a skeleton', /clientClosed[\s\S]{0,160}no cached profile yet/.test(ov), true);
+  check('the skeleton is gated on loading AND an open client', /isLoading && !clientClosed \?/.test(ov), true);
+
+  // 3. act history
+  check('act history is ordered by seasonOrder and limited', /seasonOrder\?\.indexOf\(id\.toLowerCase\(\)\)/.test(ov) && /\.slice\(0, 3\)/.test(ov), true);
+  check('games are printed once', (ov.match(/\{h\.games\} games/g) ?? []).length, 1);
+  check('K/D reads the lowercase key', ov.includes('trnPrev?.[s.id.toLowerCase()]?.kd'), true);
+  check('an unknown act never renders a raw id', ov.includes("'Past act'"), true);
+  check('history rows carry a rank emblem', ov.includes('tierIcons?.[h.tier]'), true);
+
+  // 4. sparkline colour is the outcome contract
+  check('sparkline bars are tinted by outcome', /outcomeTone\(v\)/.test(sp), true);
+  check('and no longer grey', /bg-m3-outline\/60/.test(sp), false);
+
+  // smaller set
+  check('the Unrated playlist is back and selectable', /value: 'unrated'/.test(ov) && /onChange=\{\(e\) => setPlaylist/.test(ov), true);
+  check('feed map falls back to shortMapName', /shortMapName\(g\.mapId/.test(ov), true);
+  check('feed ages tick with a clock', ov.includes('setInterval(() => setNow(Date.now()), 60_000)'), true);
+  check('the modal gets the real tier icons', /tierIcons=\{tierIcons \?\? \{\}\}/.test(ov), true);
+  check('the top-agent icon is found by name, not by key', /Object\.values\(agentInfo \?\? \{\}\)\.find/.test(ov), true);
+  check('useCountUp is deleted', existsSync(new URL('../src/hooks/useCountUp.ts', import.meta.url)), false);
+  check('OverviewSkeletons is deleted', /OverviewSkeletons/.test(readFileSync(new URL('../src/components/TrackerSkeletons.tsx', import.meta.url), 'utf8')), false);
+}
+
 // --- Overview is one column, not a card grid ------------------------------
 {
   const { readFileSync } = await import('node:fs');
