@@ -522,7 +522,7 @@ export const CustomResolution: React.FC<CustomResolutionProps> = ({
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -4, scale: 0.98 }}
                   transition={{ duration: 0.12 }}
-                  className="absolute left-0 right-0 top-full mt-1.5 z-50 rounded-xl bg-m3-surface-container border border-m3-outline-subtle shadow-2xl p-1.5 custom-scrollbar max-h-48 overflow-y-auto"
+                  className="absolute left-0 right-0 top-full mt-1.5 z-50 border-t border-m3-outline-subtle shadow-2xl p-1.5 custom-scrollbar max-h-48 overflow-y-auto"
                 >
                   {supportedRates.map((r) => {
                     const isSelected = r === hz;

@@ -46,15 +46,26 @@ if (!rootEl) {
     /* App is imported AFTER the harness: its module graph (the tracker store
      * included) reads localStorage at import time, so seeding has to happen
      * first or the store hydrates from an empty cache. */
-    /* `?v2` renders the rebuilt shell instead of the shipping app. The shell is
-     * the frame only (step 1); the old app stays the default until every surface
-     * renders from the new one. */
-    const useV2 = new URLSearchParams(window.location.search).has('v2');
+    /* The rebuilt shell is the app now. Three windows still need the old entry:
+     * `overlay` (the HUD) and `dev` (the dev dashboard) render their own trees,
+     * and `?legacy=1` is the escape hatch that keeps the old shell reachable for
+     * one release — an unreachable fallback is not a fallback.
+     *
+     * Decided here rather than inside App because App *is* the old shell: the
+     * overlay must not be routed through the new one. */
+    const q = new URLSearchParams(window.location.search);
+    const hash = window.location.hash;
+    const label = (window as unknown as { __TAURI_INTERNALS__?: { metadata?: { currentWindow?: { label?: string } } } })
+      .__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
+    const legacy =
+      q.has('legacy') ||
+      hash.includes('overlay') || q.has('overlay') ||
+      label === 'overlay' || label === 'dev';
     const { default: App } = await import('./App.tsx');
     const { Shell } = await import('./v2/Shell');
     createRoot(rootEl).render(
       <StrictMode>
-        <ErrorBoundary>{useV2 ? <Shell /> : <App />}</ErrorBoundary>
+        <ErrorBoundary>{legacy ? <App /> : <Shell />}</ErrorBoundary>
       </StrictMode>,
     );
   })();

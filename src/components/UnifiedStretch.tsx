@@ -533,7 +533,7 @@ export const UnifiedStretch: React.FC<UnifiedStretchProps> = ({
       </div>
 
       {/* SENSITIVITY CALCULATOR — reference only, never changes your game sens */}
-      <section className="rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-2.5 shrink-0">
+      <section className="border-t border-m3-outline-subtle p-2.5 shrink-0">
         <div className="flex items-center gap-1.5 px-1 pb-2">
           <Calculator className="w-3.5 h-3.5 text-m3-primary shrink-0" />
           <span className="text-[11px] font-bold text-m3-on-surface">Sensitivity Calculator</span>
@@ -611,7 +611,7 @@ export const UnifiedStretch: React.FC<UnifiedStretchProps> = ({
       </section>
 
       {/* BOTTOM: borderless full-width, horizontal inner grid */}
-      <section className="rounded-xl bg-m3-surface-container border border-m3-outline-subtle p-2.5 flex flex-col gap-2 shrink-0">
+      <section className="border-t border-m3-outline-subtle p-2.5 flex flex-col gap-2 shrink-0">
         <div className="flex items-center justify-between gap-2 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-7 h-7 rounded-lg bg-m3-primary-container border border-m3-primary/30 flex items-center justify-center text-m3-primary shrink-0">
@@ -692,7 +692,7 @@ export const UnifiedStretch: React.FC<UnifiedStretchProps> = ({
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -4, scale: 0.98 }}
                     transition={{ duration: 0.12 }}
-                    className="absolute left-0 right-0 top-full mt-1.5 z-50 rounded-xl bg-m3-surface-container border border-m3-outline-subtle shadow-2xl p-1 custom-scrollbar max-h-56 overflow-y-auto"
+                    className="absolute left-0 right-0 top-full mt-1.5 z-50 border-t border-m3-outline-subtle shadow-2xl p-1 custom-scrollbar max-h-56 overflow-y-auto"
                   >
                     {windows.length === 0 ? (
                       <div className="px-3 py-2 text-[11px] text-m3-outline text-center">

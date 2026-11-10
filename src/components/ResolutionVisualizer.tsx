@@ -268,7 +268,7 @@ export const ResolutionVisualizer: React.FC<ResolutionVisualizerProps> = ({
   return (
     <div className="h-full min-h-0 flex flex-col gap-2.5 max-w-6xl mx-auto overflow-hidden [@media(max-height:720px)]:overflow-y-auto">
       {/* Sleek Top Toolbar: Agent Selection + View Mode + Apply CTA */}
-      <div className="px-3 py-1.5 rounded-2xl bg-m3-surface-container border border-m3-outline-subtle shadow-m3-1 shrink-0 flex items-center justify-between gap-3">
+      <div className="px-3 py-1.5 border-t border-m3-outline-subtle shadow-m3-1 shrink-0 flex items-center justify-between gap-3">
         {/* Left: Agent picker — icon-only M3 buttons, everything fits, zero scroll.
             Selected agent name + role always shown in the simulator OSD below. */}
         <div className="flex-1 min-w-0 flex items-center overflow-visible p-1 -m-1">

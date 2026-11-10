@@ -76,8 +76,10 @@ const V2_ROUTES: Route[] = [
 ];
 
 const PASSES: Pass[] = [
-  { name: 'old', base: `${BASE}?fixture=lobby`, routes: OLD_ROUTES },
-  { name: 'v2', base: `${BASE}?fixture=lobby&v2=1`, routes: V2_ROUTES },
+  /* The old shell is no longer the default: it is reachable only with an
+   * explicit ?legacy=1, so the comparison has to ask for it by name. */
+  { name: 'old', base: `${BASE}?fixture=lobby&legacy=1`, routes: OLD_ROUTES },
+  { name: 'v2', base: `${BASE}?fixture=lobby`, routes: V2_ROUTES },
 ];
 
 const PROBE = String.raw`(() => {
@@ -99,8 +101,14 @@ const PROBE = String.raw`(() => {
   const badCells = cells.filter((c) => /\b(?:NaN|undefined|Infinity)\b/.test(c.text) || c.text === '—' || c.text === '— —');
   const badBody = /\b(?:NaN|undefined|Infinity)\b/.test(text);
 
+  /* A tool route deep-links to ONE section of the tools sheet. Counting the
+   * whole page there would report every other section's chrome as if this route
+   * carried it — the number would be about the sheet, not the surface. So the
+   * census is scoped to the section the hash names; other routes are unaffected. */
+  const anchor = (window.location.hash || '').replace(/^#/, '');
+  const scope = anchor ? main.querySelector('[data-tools-section="' + anchor + '"]') : null;
   let cards = 0;
-  for (const el of main.querySelectorAll('*')) {
+  for (const el of (scope ?? main).querySelectorAll('*')) {
     const s = getComputedStyle(el);
     const r = el.getBoundingClientRect();
     if (r.width * r.height <= 10000) continue;
