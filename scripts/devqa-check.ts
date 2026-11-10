@@ -1490,6 +1490,74 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('the player panel is a drawer, not a dialog', /aria-modal=["'{]?true/.test(drawer), false);
 }
 
+// --- advanced scoreboard: every value names its derivation ----------------
+{
+  const { computeAdvancedStats } = await import('../src/live/advancedStats.ts');
+  const me = 'p-me';
+  const mate = 'p-mate';
+  const foe = 'p-foe';
+  const player = (puuid: string, kills: number, deaths: number, assists: number, damage: number, loadout: number) => ({
+    puuid, kills, deaths, assists, headshots: 0, bodyshots: 0, legshots: 0,
+    damageDealt: damage, damageTaken: 0,
+    economy: { loadoutValue: loadout, remaining: 0, spent: loadout },
+  });
+  /* Mirrors Riot's roundResults[].playerStats[] shape that parseRoundDetails
+   * consumes: per-round lines, with the kill feed carried separately. */
+  const detail = {
+    matchId: 'm1',
+    when: 0,
+    mapId: 'ascent',
+    queue: 'competitive',
+    teamScore: { Blue: 2, Red: 2 },
+    rounds: [],
+    players: [
+      { puuid: me, team: 'Blue' },
+      { puuid: mate, team: 'Blue' },
+      { puuid: foe, team: 'Red' },
+    ],
+    kills: [
+      // Round 0: I open the round (earliest kill = first blood) and am traded.
+      { round: 1, killerPuuid: me, victimPuuid: foe, killerTeam: 'Blue', victimTeam: 'Red', timeInRound: 90, weapon: 'Vandal', assists: [] },
+      { round: 1, killerPuuid: foe, victimPuuid: me, killerTeam: 'Red', victimTeam: 'Blue', timeInRound: 60, weapon: 'Vandal', assists: [] },
+      { round: 1, killerPuuid: mate, victimPuuid: foe, killerTeam: 'Blue', victimTeam: 'Red', timeInRound: 55, weapon: 'Phantom', assists: [] },
+      // Round 1: I get a kill but not first blood.
+      { round: 2, killerPuuid: mate, victimPuuid: foe, killerTeam: 'Blue', victimTeam: 'Red', timeInRound: 95, weapon: 'Vandal', assists: [] },
+      { round: 2, killerPuuid: me, victimPuuid: foe, killerTeam: 'Blue', victimTeam: 'Red', timeInRound: 40, weapon: 'Vandal', assists: [] },
+    ],
+    roundDetails: [
+      { roundNum: 0, winningTeam: 'Blue', players: [player(me, 1, 1, 0, 100, 800), player(mate, 1, 0, 0, 50, 800), player(foe, 1, 2, 0, 40, 800)] },
+      { roundNum: 1, winningTeam: 'Blue', players: [player(me, 1, 0, 0, 200, 1600), player(mate, 1, 0, 1, 80, 1600), player(foe, 0, 2, 0, 20, 1600)] },
+      { roundNum: 2, winningTeam: 'Red', players: [player(me, 0, 1, 0, 300, 0), player(mate, 0, 1, 0, 10, 0), player(foe, 2, 0, 0, 120, 0)] },
+      { roundNum: 3, winningTeam: 'Red', players: [player(me, 0, 0, 1, 400, 0), player(mate, 0, 1, 0, 30, 0), player(foe, 1, 0, 0, 90, 0)] },
+    ],
+  } as any;
+
+  const a = computeAdvancedStats(detail, me);
+  // ADR = damage dealt (100+200+300+400) / 4 rounds.
+  check('ADR is damage over rounds', a.adr, 250);
+  // KAST = rounds with kill (0,1), survived (1), assist (3) — round 2 was a
+  // plain untraded death, so 3 of 4.
+  check('KAST counts kill/assist/survive/trade', Math.round(a.kastPct ?? 0), 75);
+  // First blood = earliest kill of a round, held by me in round 0 only.
+  check('first bloods are the earliest kill per round', a.firstBloods, 1);
+  // Traded = my round-0 death was avenged by a teammate in the same round.
+  check('traded deaths need the avenger in the same round', a.tradedDeaths, 1);
+  // Average loadout over every round that carries the field: (800+1600+0+0)/4.
+  // A 0 is a real value here — an eco round spent nothing — not a missing one.
+  check('average loadout uses every round that has the field', a.avgLoadout, 600);
+
+  // Absence: no round data and no kill times must produce no numbers at all.
+  const bare = computeAdvancedStats({ ...detail, roundDetails: undefined, kills: [] } as any, me);
+  check('no round data means no KAST', bare.kastPct, undefined);
+  check('no round data means no ADR', bare.adr, undefined);
+  check('no round data means no loadout average', bare.avgLoadout, undefined);
+  const untimed = computeAdvancedStats(
+    { ...detail, kills: detail.kills.map((k: any) => ({ ...k, timeInRound: undefined })) } as any,
+    me
+  );
+  check('untimed kills mean no first blood, not zero', untimed.firstBloods, undefined);
+}
+
 // --- step 4: Prep is one route, and no fallback value is invented ---------
 {
   const { existsSync, readFileSync } = await import('node:fs');
