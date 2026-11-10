@@ -922,7 +922,7 @@ export type { PersistedRank } from '../cache/namespace';
 // external importers; a re-export does not bring the name into this scope).
 import { evictOldest, pruneSupersededCaches, persistLiveRank, readPersistedRank } from '../cache/namespace';
 import { inCurrentLobby, setCurrentLobbyPuuids } from '../live/lobbyScope';
-import { riotGet, getEntitlements, clearEntitlements, readMmr, readMatchHistoryPage, readMatchDetails, readRiotValidated, readLivePlayer, readLiveMatchById, readMmrProfile, readCompetitiveUpdates } from '../sources/riot';
+import { riotGet, getEntitlements, clearEntitlements, readMmr, readMatchHistoryPage, readMatchDetails, readRiotValidated, readLivePlayer, readLiveMatchById, readMmrProfile, readCompetitiveUpdates, readHistoryPageWithTime } from '../sources/riot';
 export { riotPut, riotPost, getEntitlements, clearEntitlements } from '../sources/riot';
 import {
   enqueueTrnSpread,
@@ -1294,16 +1294,11 @@ export async function fetchPlayer24hRecord(
       const entries: { id: string; at: number; queue: string }[] = [];
       for (let page = 0; page < 5; page++) {
         const start = page * 20;
-        const j = await riotGet(
-          shardFor(region),
-          `/match-history/v1/history/${puuid}?startIndex=${start}&endIndex=${start + 20}`
-        );
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rows = ((Array.isArray(j?.History) ? j.History : []) as any[]).map((h) => ({
-          id: String(h?.MatchID ?? ''),
-          at: Number(h?.GameStartTime ?? 0),
-          queue: String(h?.QueueID ?? ''),
-        }));
+        // Validated reader (docs/riotget-conversion.md #5, decision B): the
+        // timestamped page keeps the 24h cutoff and the sort here, but a Riot
+        // error now throws RiotError into this function's catch — where the
+        // record is preserved and marked failed.
+        const rows = await readHistoryPageWithTime(puuid, shardFor(region), start, start + 20);
         if (rows.length === 0) break;
         entries.push(...rows);
         const oldest = rows[rows.length - 1]?.at ?? 0;

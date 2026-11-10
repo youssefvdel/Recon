@@ -1229,6 +1229,13 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
     true
   );
 
+  // Site #5: the timestamped page keeps the cutoff/sort here; the read is typed.
+  check(
+    'the 24h record pages through the timestamped reader',
+    /readHistoryPageWithTime\(puuid, shardFor\(region\), start, start \+ 20\)/.test(trackerSrc2),
+    true
+  );
+
   // Sites #1/#2: both mmr endpoints go through typed readers.
   check(
     'the mmr profile uses the validated reader',
@@ -1317,7 +1324,7 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   // failure mode this whole refactor exists to remove is a comment nobody
   // recomputes.
   const rawSites = (trackerSrc2.match(/await riotGet\(/g) ?? []).length;
-  const stated = Number((riotSrc.match(/makes (\d+) raw `riotGet` calls/) ?? [])[1] ?? -1);
+  const stated = Number((riotSrc.match(/makes (\d+) raw `riotGet` calls?/) ?? [])[1] ?? -1);
   check('the header states the real number of raw call sites', stated, rawSites);
 
   // Two states, both asserted. While sites remain, the header may not claim
