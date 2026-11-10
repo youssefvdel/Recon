@@ -119,3 +119,25 @@ and defaults, `CustomDropdown`, `shortAct`, `Skeleton` primitive. No HUD files.
   `components/prep` → none.
 - Loading: `Skeleton lines={4}` once per section; empty: one 11px line per section, no card.
 - `bun run build:ui` 0, `bun run lint` 0, all `scripts/*-check.ts` pass; no HUD file in the diff.
+
+## Ruling (2026-11-10): the fallback invents six more values — zero them
+
+The five "named non-reproductions" above are the `||`-style defaults. The local
+fallback (computed from cached match details) invents a further six, which are
+**worse**, because a derived-looking number reads as measured:
+
+| Site | Invention |
+| --- | --- |
+| `TrackerAgents.tsx:127` | `defenseKd: kd * 1.05` — overall K/D scaled, printed as the defence side |
+| `:130` | `attackKd: kd * 0.95` — same, attack |
+| `:137` | `attackKills: Math.round(d.kills * 0.48)` + deaths/assists 0.48, defence 0.52 — invented proportions |
+| `:125` | `defenseRoundsWon: Math.round(rds * 0.28)` + lost 0.22, attack 0.26 / 0.24 — same |
+| `:128` | `defusesPerMatch: 0.5` |
+| `:132` | `plantsPerMatch: 1.8` |
+
+**Ruling: they become absent.** Not carried into the moved fallback, not
+re-defaulted, not rendered as zero. An attack/defence split we did not observe is
+not a smaller fact — it is a different fact.
+
+The devqa pin must cover all eleven literals plus the `* 1.05` / `* 0.95`
+multipliers, so a future "small estimate" cannot reappear unlabelled.
