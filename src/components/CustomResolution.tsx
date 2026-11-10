@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import type { DisplayInfo } from '../types';
 import { logger } from '../utils/logger';
+import { displayUnread } from '../utils/displayFacts';
 import {
   applyResolution,
   savePreferredStretchedRes,
@@ -35,9 +36,10 @@ export const CustomResolution: React.FC<CustomResolutionProps> = ({
   defaultW,
   defaultH,
 }) => {
-  const nativeW = displayInfo?.native_width || 2560;
-  const nativeH = displayInfo?.native_height || 1440;
-  const defaultHz = displayInfo?.current_hz || 260;
+  const nativeW = displayInfo?.native_width ?? 0;
+  const nativeH = displayInfo?.native_height ?? 0;
+  const displayUnverified = displayUnread(displayInfo);
+  const defaultHz = displayInfo?.current_hz ?? 0;
 
   const [width, setWidth] = useState<number>(() => defaultW || Math.round(nativeH * 1.451));
   const [height, setHeight] = useState<number>(() => defaultH || nativeH);
@@ -251,6 +253,12 @@ export const CustomResolution: React.FC<CustomResolutionProps> = ({
   }, [isTesting]);
 
   const startSafeTest = async (overrideW?: number, overrideH?: number, overrideHz?: number) => {
+    /* Without a read display there is no safe-mode restore target, so a test
+     * switch could not be undone automatically. Refuse instead of inventing. */
+    if (displayUnverified) {
+      showToast('Display info was not read — the safe-mode restore target is unknown. Refresh display info first.', 'warning');
+      return;
+    }
     const tw = overrideW ?? width;
     const th = overrideH ?? height;
     const thz = overrideHz ?? hz;
@@ -260,9 +268,9 @@ export const CustomResolution: React.FC<CustomResolutionProps> = ({
     }
 
     const currentSafe = {
-      width: displayInfo?.current_width || nativeW,
-      height: displayInfo?.current_height || nativeH,
-      hz: displayInfo?.current_hz || defaultHz,
+      width: displayInfo?.current_width ?? nativeW,
+      height: displayInfo?.current_height ?? nativeH,
+      hz: displayInfo?.current_hz ?? defaultHz,
     };
     setSafeMode(currentSafe);
     setIsTesting(true);

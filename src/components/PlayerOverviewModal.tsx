@@ -24,15 +24,15 @@ export interface SelectedPlayerInfo {
   assists: number;
   score: number;
   rounds: number;
-  acs: number;
-  kd: number;
-  adr: number;
+  acs: number | null;
+  kd: number | null;
+  adr: number | null;
   hsPct: number;
   kast?: number;
   fk: number;
   fd: number;
   mk: number;
-  trs: number;
+  trs: number | null;
   /** True when TRS came from calculateTrsFallback, not tracker.gg. */
   trsEstimated?: boolean;
 }
@@ -281,7 +281,7 @@ export const PlayerOverviewModal: React.FC<Props> = ({
             <div className="rounded-2xl bg-m3-surface-container-low border border-m3-outline-subtle p-4">
               <div className="text-[10px] font-bold uppercase tracking-wider text-m3-outline mb-3 flex items-center justify-between">
                 <span>Match Scoreboard Snapshot</span>
-                {player.trs > 0 && (
+                {player.trs != null && player.trs > 0 && (
                   <span className="text-m3-primary font-mono font-bold">
                     TRS: {player.trs}
                     {player.trsEstimated ? ' (est.)' : ''}
@@ -297,14 +297,14 @@ export const PlayerOverviewModal: React.FC<Props> = ({
                 </div>
                 <div className="p-2.5 rounded-xl bg-m3-surface-container border border-m3-outline-subtle/50">
                   <div className="text-[10px] font-bold uppercase tracking-wider text-m3-outline">K/D Ratio</div>
-                  <div className={`font-display font-extrabold text-base mt-0.5 ${player.kd >= 1 ? 'text-m3-mint' : 'text-m3-coral'}`}>
-                    {player.kd.toFixed(2)}
+                  <div className={`font-display font-extrabold text-base mt-0.5 ${player.kd != null && player.kd >= 1 ? 'text-m3-mint' : 'text-m3-coral'}`}>
+                    {player.kd != null && Number.isFinite(player.kd) ? player.kd.toFixed(2) : '—'}
                   </div>
                 </div>
                 <div className="p-2.5 rounded-xl bg-m3-surface-container border border-m3-outline-subtle/50">
                   <div className="text-[10px] font-bold uppercase tracking-wider text-m3-outline">ACS</div>
                   <div className="font-display font-extrabold text-base text-m3-on-surface mt-0.5">
-                    {player.acs}
+                    {player.acs ?? '—'}
                   </div>
                 </div>
                 <div className="p-2.5 rounded-xl bg-m3-surface-container border border-m3-outline-subtle/50">

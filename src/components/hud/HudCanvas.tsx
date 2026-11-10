@@ -394,19 +394,19 @@ export const OverlayView: React.FC = () => {
     .filter((a) => a.matches > 0)
     .map((a) => {
       const local = localMapStats.find((s) => s.agent.toLowerCase() === a.name.toLowerCase());
-      const wins = Math.round((a.winPct / 100) * a.matches);
+      const wins = a.winPct == null ? 0 : Math.round((a.winPct / 100) * a.matches);
       return {
         agent: a.name,
         role: local?.role,
         matches: a.matches,
         wins,
         losses: Math.max(0, a.matches - wins),
-        winPct: Number(a.winPct.toFixed(1)),
+        winPct: a.winPct == null ? null : Number(a.winPct.toFixed(1)),
         kd: local?.kd ?? 0,
         hsPct: local?.hsPct ?? 0,
       };
     })
-    .sort((a, b) => b.matches - a.matches || b.winPct - a.winPct);
+    .sort((a, b) => b.matches - a.matches || (b.winPct ?? -1) - (a.winPct ?? -1));
 
   // 2. The player's REAL agent pool across every map (act-wide), so we never
   //    pretend they have no history just because this map is new to them.
@@ -418,11 +418,11 @@ export const OverlayView: React.FC = () => {
       matches: a.matches,
       wins: a.wins,
       losses: a.losses,
-      winPct: Number(a.winPct.toFixed(1)),
-      kd: Number(a.kd.toFixed(2)),
+      winPct: a.winPct == null ? null : Number(a.winPct.toFixed(1)),
+      kd: a.kd == null ? null : Number(a.kd.toFixed(2)),
       hsPct: Number((a.hsPct ?? 0).toFixed(0)),
     }))
-    .sort((a, b) => b.matches - a.matches || b.winPct - a.winPct);
+    .sort((a, b) => b.matches - a.matches || (b.winPct ?? -1) - (a.winPct ?? -1));
 
   // Scope of the personal view: this map's real record, else their whole pool.
   const mapGames = trnMap?.matchesPlayed ?? localMapStats.reduce((n, s) => n + s.matches, 0);
@@ -433,29 +433,33 @@ export const OverlayView: React.FC = () => {
   const thinMapSample = !hasMapHistory && mapGames > 0;
 
   // 3. Does the player have an agent they actually win with here?
-  const hasWinningAgentOnMap = mapScopedStats.some((s) => s.matches >= 2 && s.winPct >= 50);
+  const hasWinningAgentOnMap = mapScopedStats.some((s) => s.matches >= 2 && (s.winPct ?? -1) >= 50);
 
   // 4. Live rank-tuned map meta from Blitz (this map, this rank). Replaces the
   //    hardcoded table, which was stale within a patch or two.
-  // One tier const for label + fetch + peek: the label must never claim a
-  // Diamond meta while the fetch runs the unranked slice (or vice versa).
-  const userTier = profile?.tier || 0;
-  const metaTier = userTier || 22;
-  const rankTierLabel = getRankTierLabel(metaTier);
+  // One tier const for label + fetch + peek. Unknown rank is NOT tier 22: the
+  // panel must never name a rank the player does not have. No tier -> no label,
+  // no fetch, no tiles.
+  const userTier = profile?.tier && profile.tier > 0 ? profile.tier : null;
+  const rankTierLabel = userTier != null ? getRankTierLabel(userTier) : null;
   const [metaPicks, setMetaPicks] = useState<BlitzAgentStat[]>(
-    () => peekBlitzAgentStats(activeMapName, metaTier) ?? []
+    () => (userTier != null ? peekBlitzAgentStats(activeMapName, userTier) ?? [] : [])
   );
 
   useEffect(() => {
+    if (userTier == null) {
+      setMetaPicks([]);
+      return;
+    }
     let alive = true;
-    fetchBlitzAgentStats(activeMapName, metaTier).then((rows) => {
+    fetchBlitzAgentStats(activeMapName, userTier).then((rows) => {
       // Keep the last good list if Blitz is unreachable or has no sample.
       if (alive && rows.length > 0) setMetaPicks(rows);
     });
     return () => {
       alive = false;
     };
-  }, [activeMapName, metaTier]);
+  }, [activeMapName, userTier]);
 
   // Agent select is the one moment a suggestion is actionable — and the HUD is
   // click-through while the overlay is locked, so a toggle the user has to click

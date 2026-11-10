@@ -116,14 +116,17 @@ const PlayerCardContainer: React.FC<{
 }> = ({ player, cardSrc, onImgError }) => {
   return (
     <div className="flex-1 min-h-0 w-full max-w-[200px] rounded-2xl bg-m3-surface-container-low border border-m3-outline-subtle/80 hover:border-m3-primary/50 shadow-m3-2 overflow-hidden relative flex flex-col justify-between transition-colors group">
-      {/* Level Chip floating cleanly inside the top */}
-      <div className="absolute top-2 inset-x-0 flex justify-center z-20 pointer-events-none">
-        <div className="bg-m3-surface-dim border border-m3-outline-subtle/80 rounded-full px-2 py-0.5 font-mono text-[10px] font-bold text-m3-primary shadow-m3-1 flex items-center gap-1 select-none">
-          <span className="text-m3-outline text-[8px]">&lt;</span>
-          <span>{player.accountLevel || 1}</span>
-          <span className="text-m3-outline text-[8px]">&gt;</span>
+      {/* Level Chip. Unknown level is unknown: the old `|| 1` claimed level 1
+          when Riot did not send one. Absent renders no chip at all. */}
+      {player.accountLevel > 0 && (
+        <div className="absolute top-2 inset-x-0 flex justify-center z-20 pointer-events-none">
+          <div className="bg-m3-surface-dim border border-m3-outline-subtle/80 rounded-full px-2 py-0.5 font-mono text-[10px] font-bold text-m3-primary shadow-m3-1 flex items-center gap-1 select-none">
+            <span className="text-m3-outline text-[8px]">&lt;</span>
+            <span>{player.accountLevel}</span>
+            <span className="text-m3-outline text-[8px]">&gt;</span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Full Vertical Card Artwork */}
       {cardSrc ? (

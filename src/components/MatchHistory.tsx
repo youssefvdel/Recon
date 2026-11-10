@@ -13,6 +13,7 @@ import { nextExpandedId } from '../utils/expansion';
 import { ScoreBadge, scoreTier } from './ScoreBadge';
 import { StatValue } from './StatValue';
 import { formatKd, formatPct } from '../utils/format';
+import { pctOf, safeRatio } from '../utils/absent';
 
 const ago = (ms: number): string => {
   if (!ms) return '';
@@ -640,7 +641,7 @@ export const MatchHistory: React.FC<{
       m.set(r.agent, e);
     }
     return [...m.entries()]
-      .map(([name, e]) => ({ name, ...e, wr: e.n > 0 ? (e.w / e.n) * 100 : 0, kd: e.d > 0 ? e.k / e.d : e.k }))
+      .map(([name, e]) => ({ name, ...e, wr: pctOf(e.w, e.n), kd: safeRatio(e.k, e.d) }))
       .sort((a, b) => b.n - a.n)
       .slice(0, 3);
   }, [rows]);
@@ -770,7 +771,7 @@ export const MatchHistory: React.FC<{
                         <div className="text-micro font-mono text-m3-outline">K/D {formatKd(a.kd)}</div>
                       </div>
                       <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-m3-outline-subtle/50">
-                        <span className="block h-full bg-m3-mint" style={{ width: `${Math.round(a.wr)}%` }} />
+                        <span className="block h-full bg-m3-mint" style={{ width: `${Math.round(a.wr ?? 0)}%` }} />
                       </span>
                     </div>
                   );

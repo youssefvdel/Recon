@@ -3,6 +3,7 @@ import type { TrnAgentStat, TrnMapStat } from '../../utils/trn';
 import { fetchTrnAgents, fetchTrnMaps, mergeAgentStats, mergeMapStats } from '../../utils/trn';
 import { useTrackerData } from '../../hooks/useTrackerData';
 import { shortAct } from '../Overview';
+import { perRound, pctOf } from '../../utils/absent';
 
 /** Data for both Prep sections: one act selection, two fetches, and the local
  *  fallbacks derived from cached match details.
@@ -160,7 +161,11 @@ export function usePrepData() {
 
     return Array.from(byAgent.entries()).map(([name, d]): TrnAgentStat => {
       const m = d.won + d.lost;
-      const rds = Math.max(1, d.rounds);
+      /* No rounds -> no per-round stat. `Math.max(1, rounds)` divided ADR/ACS
+       * by 1 when the count was missing and inflated them 10-30x. */
+      const adr = perRound(d.damage, d.rounds);
+      const acs = perRound(d.score, d.rounds);
+      const dd = perRound(d.damage - d.damageTaken, d.rounds);
       const kd = d.deaths > 0 ? d.kills / d.deaths : d.kills;
 
       return {
@@ -169,16 +174,16 @@ export function usePrepData() {
         matches: m,
         wins: d.won,
         losses: d.lost,
-        winPct: m > 0 ? (d.won / m) * 100 : 0,
+        winPct: pctOf(d.won, m),
         kd,
         kda: d.deaths > 0 ? (d.kills + d.assists) / d.deaths : d.kills + d.assists,
         kills: d.kills,
         deaths: d.deaths,
         assists: d.assists,
-        adr: d.damage / rds,
-        acs: d.score / rds,
-        damageDeltaPerRound: Math.round((d.damage - d.damageTaken) / rds),
-        hsPct: d.hits > 0 ? (d.headshots / d.hits) * 100 : 0,
+        adr,
+        acs,
+        damageDeltaPerRound: dd == null ? null : Math.round(dd),
+        hsPct: pctOf(d.headshots, d.hits),
         timePlayedSeconds: Math.round(d.timeMs / 1000),
         hours: Math.round((d.timeMs / (3600 * 1000)) * 10) / 10,
         /* No KAST from a local fallback: it has no derivation here. */
@@ -303,7 +308,9 @@ export function usePrepData() {
 
     return Array.from(byMap.entries()).map(([name, d]): TrnMapStat => {
       const played = d.won + d.lost;
-      const rds = Math.max(1, d.rounds);
+      const adr = perRound(d.damage, d.rounds);
+      const acs = perRound(d.score, d.rounds);
+      const dd = perRound(d.damage - d.damageTaken, d.rounds);
       const topAgents = Array.from(d.agentCounts.entries())
         .map(([agName, agStat]) => {
           const icon =
@@ -312,7 +319,7 @@ export function usePrepData() {
             name: agName,
             icon,
             matches: agStat.matches,
-            winPct: agStat.matches > 0 ? (agStat.wins / agStat.matches) * 100 : 0,
+            winPct: pctOf(agStat.wins, agStat.matches),
           };
         })
         .sort((a, b) => b.matches - a.matches)
@@ -325,15 +332,15 @@ export function usePrepData() {
         matchesPlayed: played,
         matchesWon: d.won,
         matchesLost: d.lost,
-        winPct: played > 0 ? (d.won / played) * 100 : 0,
+        winPct: pctOf(d.won, played),
         kd: d.deaths > 0 ? d.kills / d.deaths : d.kills,
-        adr: d.damage / rds,
-        acs: d.score / rds,
-        damageDeltaPerRound: Math.round((d.damage - d.damageTaken) / rds),
+        adr,
+        acs,
+        damageDeltaPerRound: dd == null ? null : Math.round(dd),
         kills: d.kills,
         deaths: d.deaths,
         assists: d.assists,
-        headshotsPct: d.hits > 0 ? (d.headshots / d.hits) * 100 : 0,
+        headshotsPct: pctOf(d.headshots, d.hits),
         timePlayedSeconds: Math.round(d.timeMs / 1000),
         aces: 0,
         clutches: 0,

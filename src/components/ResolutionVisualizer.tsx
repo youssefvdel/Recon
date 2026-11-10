@@ -7,6 +7,7 @@ import {
   Square,
 } from 'lucide-react';
 import type { DisplayInfo } from '../types';
+import { displayUnread } from '../utils/displayFacts';
 
 interface ResolutionVisualizerProps {
   displayInfo: DisplayInfo | null;
@@ -213,8 +214,10 @@ export const ResolutionVisualizer: React.FC<ResolutionVisualizerProps> = ({
   const [activePresetName, setActivePresetName] = useState<string>('1.45:1');
   const [viewMode, setViewMode] = useState<'single' | 'split'>('split');
 
-  const nativeH = displayInfo?.native_height || 1440;
-  const currentHz = displayInfo?.current_hz || 260;
+  const nativeH = displayInfo?.native_height ?? 0;
+  const currentHz = displayInfo?.current_hz ?? 0;
+  /* No fallback hardware: an unread display is UNVERIFIED, not 1440p@260. */
+  const displayUnverified = displayUnread(displayInfo);
 
   // Calculate calculated width for current selected ratio
   const calcWidth = Math.round(nativeH * selectedRatio);
@@ -321,13 +324,20 @@ export const ResolutionVisualizer: React.FC<ResolutionVisualizerProps> = ({
           </div>
 
           <button
+            disabled={displayUnverified}
             onClick={() => onApplyResolution(evenWidth, nativeH, currentHz)}
             className="px-3.5 py-1.5 rounded-full bg-m3-primary hover:bg-m3-primary/90 active:bg-m3-primary/80 text-m3-on-primary text-xs font-semibold shadow-m3-1 hover:shadow-m3-2 active:scale-[0.98] transition-all flex items-center space-x-1.5 cursor-pointer shrink-0"
           >
             <Check className="w-3.5 h-3.5 text-m3-on-primary" />
             <span>
-              Apply <span className="font-mono tabular-nums">{evenWidth}×{nativeH}</span> @{' '}
-              <span className="font-mono tabular-nums">{currentHz}Hz</span>
+              {displayUnverified ? (
+                'UNVERIFIED — display not read'
+              ) : (
+                <>
+                  Apply <span className="font-mono tabular-nums">{evenWidth}×{nativeH}</span> @{' '}
+                  <span className="font-mono tabular-nums">{currentHz}Hz</span>
+                </>
+              )}
             </span>
           </button>
         </div>
@@ -348,7 +358,7 @@ export const ResolutionVisualizer: React.FC<ResolutionVisualizerProps> = ({
               </div>
               <div className="flex items-center space-x-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" />
-                <span className="text-emerald-400 font-bold tabular-nums">{currentHz}Hz ACTIVE</span>
+                <span className="text-emerald-400 font-bold tabular-nums">{displayUnverified ? 'UNVERIFIED — display not read' : `${currentHz}Hz ACTIVE`}</span>
               </div>
             </div>
 
@@ -550,7 +560,7 @@ export const ResolutionVisualizer: React.FC<ResolutionVisualizerProps> = ({
                         )}
                       </div>
                       <span className="font-mono tabular-nums text-xs text-m3-outline font-semibold">
-                        {Math.round(nativeH * preset.ratio)}×{nativeH}
+                        {displayUnverified ? '—' : `${Math.round(nativeH * preset.ratio)}×${nativeH}`}
                       </span>
                     </div>
                   </button>
