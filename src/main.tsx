@@ -46,12 +46,15 @@ if (!rootEl) {
     /* App is imported AFTER the harness: its module graph (the tracker store
      * included) reads localStorage at import time, so seeding has to happen
      * first or the store hydrates from an empty cache. */
+    /* `?v2` renders the rebuilt shell instead of the shipping app. The shell is
+     * the frame only (step 1); the old app stays the default until every surface
+     * renders from the new one. */
+    const useV2 = new URLSearchParams(window.location.search).has('v2');
     const { default: App } = await import('./App.tsx');
+    const { Shell } = await import('./v2/Shell');
     createRoot(rootEl).render(
       <StrictMode>
-        <ErrorBoundary>
-          <App />
-        </ErrorBoundary>
+        <ErrorBoundary>{useV2 ? <Shell /> : <App />}</ErrorBoundary>
       </StrictMode>,
     );
   })();
