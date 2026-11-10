@@ -97,6 +97,13 @@ no theme is limited to decorative dots.
 and traded deaths earned nothing. Riot's KAST is four-way, so the column
 systematically **under-reports**: five assisted rounds with no deaths scored zero.
 
+**And it was worse than "under-reports".** An independent recount from a real
+capture proved the traded-death term also merged each round with the next
+(`a === b || a === b + 1` on 0-based round numbers). Result on the capture:
+traded deaths **15 / 23 / 23 → 4 / 6 / 14**, and **KAST% 100.00 / 100.00 / 96.43 →
+82.14 / 75.00 / 71.43** — up to **−25 percentage points**. Two of the three
+players were being shown a perfect KAST.
+
 Replaced with the four-way definition, with the number change called out in the
 commit body — a silently corrected stat is worse than the wrong one, because
 screenshots get compared across versions.
