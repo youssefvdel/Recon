@@ -101,6 +101,11 @@ export const Overview: React.FC = () => {
   const trnAge = useMemo(() => {
     if (!isDefault || !trn) return '';
     if (!trnFetchedAt) return 'date unknown';
+    /* Reading the clock IS the job of this memo: its output is "how old is this
+     * data", so it must re-read time when `now` ticks. Silenced explicitly
+     * rather than left as a warning the baseline absorbs — a warning everyone
+     * agrees to ignore is how the next real one gets ignored too. */
+    // eslint-disable-next-line react-hooks/purity
     const d = Date.now() - trnFetchedAt;
     if (d < 0) return '';
     if (d < HOUR) return `${Math.max(1, Math.round(d / 60_000))}m ago`;
