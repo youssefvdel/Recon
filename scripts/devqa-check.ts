@@ -1229,6 +1229,22 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
     true
   );
 
+  // Sites #6-#9: the live probes go through NoMatch readers, and the 404 and
+  // failure paths stay distinct at the call site.
+  check(
+    'the live probes use the NoMatch readers',
+    /readLivePlayer\('coregame', ent\.puuid\)/.test(trackerSrc2) &&
+      /readLivePlayer\('pregame', ent\.puuid\)/.test(trackerSrc2) &&
+      /readLiveMatchById\('coregame', matchId\)/.test(trackerSrc2) &&
+      /readLiveMatchById\('pregame', matchId\)/.test(trackerSrc2),
+    true
+  );
+  check(
+    'the probes no longer hand-roll the legacy fallback',
+    /riotGet\(glz, `\/coregame\/v1\/players/.test(trackerSrc2),
+    false
+  );
+
   // Sites #6-#9, caller half: a FAILED probe is not an empty menu.
   const failedProbeMarks = (trackerSrc2.match(/probeFailed = true;/g) ?? []).length;
   check('both live probes mark a failure', failedProbeMarks, 2);

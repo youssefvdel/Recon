@@ -925,7 +925,7 @@ export type { PersistedRank } from '../cache/namespace';
 // external importers; a re-export does not bring the name into this scope).
 import { evictOldest, pruneSupersededCaches, persistLiveRank, readPersistedRank } from '../cache/namespace';
 import { inCurrentLobby, setCurrentLobbyPuuids } from '../live/lobbyScope';
-import { riotGet, getEntitlements, clearEntitlements, assertRiotOk, readMmr, readMatchHistoryPage, readMatchDetails, readRiotValidated } from '../sources/riot';
+import { riotGet, getEntitlements, clearEntitlements, assertRiotOk, readMmr, readMatchHistoryPage, readMatchDetails, readRiotValidated, readLivePlayer, readLiveMatchById } from '../sources/riot';
 export { riotPut, riotPost, getEntitlements, clearEntitlements } from '../sources/riot';
 import {
   enqueueTrnSpread,
@@ -1743,15 +1743,16 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
 
     // 1. Check Coregame (in-match)
     try {
-      const corePlayer = await riotGet(glz, `/core-game/v1/players/${ent.puuid}`).catch(() =>
-        riotGet(glz, `/coregame/v1/players/${ent.puuid}`)
-      );
-      if (corePlayer?.MatchID) {
-        matchId = corePlayer.MatchID;
-        matchData = await riotGet(glz, `/core-game/v1/matches/${matchId}`).catch(() =>
-          riotGet(glz, `/coregame/v1/matches/${matchId}`)
-        );
-        if (matchData && !matchData.httpStatus) {
+      // Validated reader (docs/riotget-conversion.md #6/#7): null means Riot
+      // answered 404 — "not in a match" — and a failed read throws, which the
+      // catch below turns into probeFailed. The reader owns the legacy
+      // `/coregame/` retry, and it only retries after a 404, so a real 403 is
+      // no longer masked by the fallback.
+      const corePlayer = await readLivePlayer('coregame', ent.puuid);
+      if (corePlayer?.matchId) {
+        matchId = corePlayer.matchId;
+        matchData = await readLiveMatchById('coregame', matchId);
+        if (matchData) {
           phase = 'coregame';
         }
       }
@@ -1762,11 +1763,12 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
     // 2. Check Pregame (agent select) if not in coregame
     if (phase === 'idle') {
       try {
-        const prePlayer = await riotGet(glz, `/pregame/v1/players/${ent.puuid}`);
-        if (prePlayer?.MatchID) {
-          matchId = prePlayer.MatchID;
-          matchData = await riotGet(glz, `/pregame/v1/matches/${matchId}`);
-          if (matchData && !matchData.httpStatus) {
+        // Sites #8/#9, same contract as #6/#7.
+        const prePlayer = await readLivePlayer('pregame', ent.puuid);
+        if (prePlayer?.matchId) {
+          matchId = prePlayer.matchId;
+          matchData = await readLiveMatchById('pregame', matchId);
+          if (matchData) {
             phase = 'pregame';
             // Safe Agent Pre-Picker: safely hover preferred agent once per match
             import('./prepick')
