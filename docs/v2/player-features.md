@@ -59,8 +59,8 @@ Sources we own: local Riot client readers (`mmr`, `match-history`, `match-detail
 | Store wishlist + Night Market alert | `readStorefront` exists (`src/sources/riot.ts:612`) | **Yes**, needs polling + notification design |
 | Clip markers (3k/4k/ace round, weapon, time) | `roundDetails` kills/rounds | **Yes** (markers only — no video capture) |
 | Battle-pass progress | not in the reader set; local `/contracts`-style read needed | Medium — new read, verify endpoint |
-| Interactive minimap / kill heatmap | kill `playerLocations`/`victimLocation` and plant locations are in `match-details` | Medium — needs map-coordinate calibration + UI |
-| Per-map kill/death heatmaps | computed from match details | Medium — same calibration |
+| Interactive minimap / kill heatmap | raw payload has top-level `kills[].victimLocation` + `kills[].playerLocations[].location` and per-round `plantLocation`/`defuseLocation`; **our parser drops them** | Medium–large — parser change + per-map transform |
+| Per-map kill/death heatmaps | same payload; parser drops locations | Medium — same parser change + calibration |
 | Weapon stats (personal) | per-kill `finishingDamage.damageItem` + `gameData` weapon names | Yes — low effort |
 | Playtime | `matchInfo.gameLengthMillis` summed | Yes — low effort |
 | Ability impact (flashes, molotov damage) | **not in Riot's match data** — Riot dev-rel #729 confirms | No |
@@ -93,7 +93,7 @@ Order = player value × confidence we can ship it from data we already read.
    honest; actual video capture stays out of scope.
 7. **Weapon/playtime stats** — low effort, low risk.
 
-Roadmap (documented, not tonight): interactive minimap + heatmaps (map calibration),
+Roadmap (documented, not tonight): interactive minimap + heatmaps (parser must keep kill locations first, then per-map calibration),
 battle-pass progress (new local read), OBS/browser overlay, lineup library (content),
 mobile companion, esports data (external source), aim/crosshair vision (new pipeline).
 
@@ -135,10 +135,19 @@ mobile companion, esports data (external source), aim/crosshair vision (new pipe
 
 ## 6. Notes / open questions
 
-- ACS vs Performance Score: one third-party blog says patch 13.06 replaced the
-  scoreboard ACS with a 0–500 Performance Score
-  ([RankSurge](https://ranksurge.games/blogs/news/valorant-stats-explained)) — **single
-  source**, verify against a live client before relabelling our "ACS" UI.
+- ACS vs Performance Score: **settled 2026-11-10.** Riot's 13.06 notes say "Average
+  Combat Score (ACS) is out and Performance Score is in"
+  ([playvalorant.com 13.06](https://playvalorant.com/en-us/news/game-updates/valorant-patch-notes-13-06/)),
+  but the match-details payload still carries only `score` — verified on our own
+  13.09 match (`players[].stats.score` 7,853 over 28 rounds; per-round
+  `roundResults[].playerStats[].score`; no performance/ACS field). Our ACS is
+  score ÷ rounds, computed by us, so the label stays `ACS` (hover can show `score`).
+- Kill/plant coordinates (**verified 2026-11-10** against a live 13.09 match,
+  `192364f1-…`): top-level `kills[].victimLocation` and
+  `kills[].playerLocations[].location` (plus `roundResults[].plantLocation` /
+  `defuseLocation`). Integer **world units** (Unreal cm — e.g. plant at
+  `{x:7070,y:10983}`), not normalised 0–1 and not pixels; a minimap needs a per-map
+  transform. Our parser currently drops all of them.
 - "Night Market" is in the storefront payload **[inference: from the store UI/API
   shape]**; verify before shipping alerts.
 - The "25 matches" premium limit in the party thread is Tracker.gg's own cap, not
