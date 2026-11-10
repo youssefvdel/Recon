@@ -158,3 +158,33 @@ launch came at 06:25:16. `MainWindowHandle 0`, empty title — no visible main w
   From `600fcf4` it is capped at **256 KB, size-based, keeping one generation**
   (`recon-startup.log.1`) — a crash loop must not erase the evidence of the crash before it.
   Not yet exercised: the file is far below the cap on this machine, so rotation is designed-only.
+
+## 11. alpha32 cold launch (2026-11-10 12:44:04) — perf baseline
+
+Installed from the LAN mirror `~/Services/recon-mirror/Recon_0.5.0-alpha32_x64-setup.exe`
+(253,076,784 B, SHA-256 `f6ca1ff5…d2846630`, matches `SHA256SUMS`; latest.json v0.5.0-alpha32),
+NSIS `/S` silent install, exit 0, installed exe `0.5.0-alpha32`.
+
+- Launch: `recon.exe` PID 18276, `--minimized`; all **four `[boot]` markers contiguous and in order**
+  in `Recon.log` at 12:44:04 (`run() entered v0.5.0-alpha32` → `webview2 preflight passed` →
+  `builder ready; entering run()` → `setup reached`). `[window] boot-to-tray: --minimized, main
+  window hidden`. No visible window (window list showed none).
+- **One `[ERROR]` on this cold launch** (the only `[ERROR]` in 277 log lines):
+  `[ERROR][tauri_runtime_wry] failed to create webview: WebView2 error: WindowsError(Error { code:
+  HRESULT(0x8007139F), message: "The group or resource is not in the correct state to perform the
+  requested operation." })`. The app still created both webviews — the bridge reports 2 windows
+  (`main`, `overlay`) — so the failing creation is not the one the UI uses; still unexplained.
+- **`[perf] overlay show` — zero lines, and this time it means something:** `show_overlay` and
+  `hide_overlay` were invoked 3× via the Tauri MCP bridge (`execute_js` → `invoke`), each returning
+  `ok`; the log grew by **0 lines** (277 before and after) and `[perf]` count is **0**. The perf line
+  only fires above 5 ms, so **three real overlay shows each completed under 5 ms** (`stale` path
+  included on the first show).
+- Process tree at idle: `recon.exe` 18276 (sess 1, WS 18.4 MB) + 5 WebView2 procs — browser 17608
+  (73.9 MB), renderer 18240 (71.2), gpu 2352 (46.0), utility 14724 (17.6), utility 6588 (3.4). Host
+  exe `%LOCALAPPDATA%\Recon\webview2-runtime\msedgewebview2.exe` v157.0.4341.42, bundled.
+- `127.0.0.1:9223` LISTENING, owner 18276 (the Tauri MCP bridge, loopback only).
+- Storage after launch: 4 `.ldb` files (203,182 / 1,874,288 / 1,078,384 / 22,768 B); parse shows
+  **34 keys, ≈612 chars live**; largest `recon_prepick_maps_v2` 136, `recon_match_v6_fd8cd7c7` 121,
+  `recon_sidebar_mini_v2` 76, `recon_tracker_snapshot_v1:<puuid>` 51. `recon_match_v6_*` names still
+  appear in old blocks (tombstones awaiting compaction — same conclusion as §4).
+- Launch artefacts: installer left in `%TEMP%` (removed after capture); app remains running in tray.
