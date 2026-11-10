@@ -184,7 +184,11 @@
   --m3-error: var(--negative);
   --m3-on-error: #1b0503;
 
-  --m3-outline: var(--outline);
+  /* `m3-outline` is used as a TEXT colour in the legacy surfaces (inactive tabs,
+   * secondary labels), not only as a border. Mapping it to a border token made
+   * 10px labels render at 2.35:1, so it maps to the muted text role instead;
+   * the variant/subtle tokens stay as hairlines. */
+  --m3-outline: var(--on-surface-muted);
   --m3-outline-variant: var(--outline);
   --m3-outline-subtle: var(--outline);
   --m3-on-surface: var(--on-surface);

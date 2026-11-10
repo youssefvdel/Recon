@@ -87,6 +87,10 @@ const PROBE = String.raw`(() => {
     if (!hasText) continue;
     const cs = getComputedStyle(el);
     if (cs.visibility === 'hidden' || cs.display === 'none' || parseFloat(cs.opacity) === 0) continue;
+    /* WCAG 1.4.3 exempts inactive components: a disabled button is allowed to be
+     * dim. Flagging it produces a failure nobody can act on without destroying
+     * the affordance, so it is skipped rather than reported. */
+    if (el.closest('[disabled], [aria-disabled="true"]')) continue;
     const r = el.getBoundingClientRect(); if (r.width < 1 || r.height < 1) continue;
     const fg = parse(cs.color); if (!fg) continue;
     const bg = effectiveBg(el);
