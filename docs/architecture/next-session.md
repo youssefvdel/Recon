@@ -85,8 +85,9 @@ raw. The call sites are pinned by devqa (file + function + count), so this list 
 only change deliberately:
 
 - `src/utils/crosshair.ts:639` — `riotPut(host, '/playerPref/v3/savePreference', payload)`
-- `src/utils/prepick.ts:181` — `riotPost(glz, '/pregame/v1/matches/{id}/select/{agentId}')`
 - `src/utils/store.ts:289` — `riotPost(pdHostFor(region), '/store/v3/storefront/{puuid}')`
+- **Converted:** `src/utils/prepick.ts` now goes through `riotPostValidated`; the
+  devqa pin no longer lists it.
 
 A validated write means **two** validations, not one:
 
@@ -100,13 +101,12 @@ No retries for writes: a call that failed may already have landed.
 
 ### Per site
 
-**1. `prepick.ts:181` — safe to convert first.** POST, no body, fire-and-forget
-(`.catch(() => {})`), response unused, and the match is latched before the call so
-a duplicate hover cannot fire. Conversion: a `riotPostValidated(host, path)` that
-calls `riotPost`, runs `assertRiotOk`, returns `Validated<unknown>`; validate
-`matchId` and `agentId` non-empty before the call; keep the catch. Today every
-failure disappears; after, the call stays fire-and-forget but a validation bug is
-visible to the trace.
+**1. `prepick.ts` — converted.** POST, no body, fire-and-forget. `matchId` and
+`agentId` are validated as UUIDs before they are interpolated into the path (a
+path-injection guard as much as a correctness one), the call goes through
+`riotPostValidated` (which runs `assertRiotOk` after the send), and the silent
+`.catch(() => {})` stays — a failed hover is not user-facing. The devqa pin
+shrinking by one site is the receipt.
 
 **2. `store.ts:289` — safe after a response-shape pass.** A read-shaped POST (empty
 body) returning storefront JSON that the function parses (`SkinsPanelLayout`,
@@ -125,8 +125,8 @@ reporting `true`. Keep the 30 s timeout race and the `catch → false` contract.
 
 ### Order and receipts
 
-prepick (fire-and-forget) → storefront (read-shaped POST) → crosshair (real write
-with read-back). Each is its own commit, with the devqa pin updated in the same
+storefront (read-shaped POST) → crosshair (real write with read-back). prepick is
+already converted. Each is its own commit, with the devqa pin updated in the same
 write; the pin's expected list shrinking is the receipt that raw writes converted.
 
 ## Rules that carried this refactor and should carry the next one

@@ -1202,7 +1202,6 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
     .join(', ');
   const expected = [
     'src/utils/crosshair.ts riotPut x1',
-    'src/utils/prepick.ts riotPost x1',
     'src/utils/store.ts riotPost x1',
   ].join(', ');
   check('raw PUT/POST call sites are pinned (validated writes are separate work)', actual, expected);

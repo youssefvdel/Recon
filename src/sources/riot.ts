@@ -568,6 +568,18 @@ export async function readRiotValidated<T = { data?: unknown; [k: string]: unkno
   return validated(j as T);
 }
 
+/** Validated POST for routes with no reusable model yet. `assertRiotOk` runs
+ *  before the caller sees the payload, so an error answer throws `RiotError`
+ *  instead of being parsed as a result. No retry: a write is not idempotent. */
+export async function riotPostValidated(
+  host: string,
+  path: string
+): Promise<Validated<unknown>> {
+  const j = await riotPost(host, path);
+  assertRiotOk(j, 'write');
+  return validated(j as unknown);
+}
+
 /* ------------------------------------------------------------------ *
  * Step-2 readers: the live-probe and MMR sites that had no typed reader.
  * Additive on purpose — nothing calls them until ts-client swaps.

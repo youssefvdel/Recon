@@ -1,5 +1,6 @@
 import { isTauri } from './ipc';
-import { glzHostFor, riotPost, gameData, resolveMapName } from './tracker';
+import { glzHostFor, gameData, resolveMapName } from './tracker';
+import { riotPostValidated } from '../sources/riot';
 
 const PREPICK_CONFIG_KEY = 'recon_prepick_config_v2';
 
@@ -143,6 +144,10 @@ export function setPrepickConfig(config: PrepickConfig): void {
 
 let lastPrepickedMatchId = '';
 
+/** Riot match and agent ids are UUIDs and both are interpolated into the request
+ *  path, so the shape is checked before it can reach the transport. */
+const RIOT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Execute agent pre-pick in the pre-game lobby: hover only, never locks.
  * Resolves map -> checks map-specific agent -> falls back to default agent.
@@ -169,6 +174,7 @@ export async function trySafePrepick(
     : (config.defaultAgentId ? { agentId: config.defaultAgentId, agentName: config.defaultAgentName } : null);
 
   if (!chosen || !chosen.agentId) return false;
+  if (!RIOT_ID_RE.test(matchId) || !RIOT_ID_RE.test(String(chosen.agentId))) return false;
 
   // Mark claimed immediately so repeat polls don't re-hover.
   lastPrepickedMatchId = matchId;
@@ -178,7 +184,11 @@ export async function trySafePrepick(
   // so repeat polls during the wait can't schedule a second hover.
   await new Promise((r) => setTimeout(r, 2000));
   // This is the last (and only) Riot call: we never lock the agent in.
-  riotPost(glz, `/pregame/v1/matches/${matchId}/select/${chosen.agentId}`).catch(() => {});
+  // Validated transport; the catch stays because a failed hover is silent by
+  // design — it is not a user-facing action and must never surface an error.
+  riotPostValidated(glz, `/pregame/v1/matches/${matchId}/select/${chosen.agentId}`).catch(
+    () => {}
+  );
   return true;
 }
 
