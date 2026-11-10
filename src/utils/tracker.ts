@@ -925,7 +925,7 @@ export type { PersistedRank } from '../cache/namespace';
 // external importers; a re-export does not bring the name into this scope).
 import { evictOldest, pruneSupersededCaches, persistLiveRank, readPersistedRank } from '../cache/namespace';
 import { inCurrentLobby, setCurrentLobbyPuuids } from '../live/lobbyScope';
-import { riotGet, getEntitlements, clearEntitlements, assertRiotOk, readMmr } from '../sources/riot';
+import { riotGet, getEntitlements, clearEntitlements, assertRiotOk, readMmr, readMatchHistoryPage } from '../sources/riot';
 export { riotPut, riotPost, getEntitlements, clearEntitlements } from '../sources/riot';
 import {
   enqueueTrnSpread,
@@ -2124,12 +2124,12 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
         return;
       }
       try {
-        const j = await riotGet(
-          shardFor(region),
-          `/match-history/v1/history/${rp.puuid}?startIndex=0&endIndex=5`
-        );
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rows = (Array.isArray(j?.History) ? j.History : []).map((h: any) => String(h?.MatchID ?? '').toLowerCase()).filter(Boolean);
+        // Validated reader (docs/riotget-conversion.md #13): only ids are used
+        // here. A Riot error now throws RiotError into the existing catch — the
+        // party clustering still degrades silently rather than failing a lobby.
+        const rows = (await readMatchHistoryPage(rp.puuid, shardFor(region), 0, 5))
+          .map((r) => r.id.toLowerCase())
+          .filter(Boolean);
         livePlayerRecentMatchesCache.set(pU, { matches: rows, fetchedAt: Date.now() });
         evictOldest(
           livePlayerRecentMatchesCache,

@@ -7,7 +7,7 @@
  *
  * HONEST SCOPE, and the number is checked, not trusted:
  * this module now holds the ONE Riot transport, but `utils/tracker.ts` still
- * makes 12 raw `riotGet` calls (mmr profile, competitive updates, match details,
+ * makes 11 raw `riotGet` calls (mmr profile, competitive updates, match details,
  * core-game and pregame lookups, loadouts, match history) until step 2 of
  * docs/architecture/next-session.md converts them to validated readers.
  * `riotGet` is therefore exported with a named expiry — a devqa assertion fails

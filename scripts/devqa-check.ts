@@ -1226,6 +1226,13 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
     true
   );
 
+  // Site #13: party clustering reads through the validated reader.
+  check(
+    'party clustering uses the validated reader',
+    /readMatchHistoryPage\(rp\.puuid, shardFor\(region\), 0, 5\)/.test(trackerSrc2),
+    true
+  );
+
   // Site #12 of docs/riotget-conversion.md: the batch rank swap must use the
   // shared parser through the reader, never a local guard.
   check(
