@@ -317,7 +317,7 @@ const MatchRow: React.FC<{
               <div className="text-micro font-mono text-m3-outline">ACS {r.acs}</div>
             </>
           ) : (
-            <StatValue reason="Match detail not fetched yet" className="text-[13px]" />
+            <StatValue reason="Not cached — open this match to fetch its detail" className="text-[13px]" />
           )}
         </div>
 
@@ -733,7 +733,7 @@ export const MatchHistory: React.FC = () => {
 
         {rows.some((r) => !r.detail) && (
           <p className="px-1 text-micro text-m3-outline">
-            — = match detail not fetched yet · open that match to load its scoreboard
+            not cached = no match detail on disk yet · open that match to load its scoreboard
           </p>
         )}
 

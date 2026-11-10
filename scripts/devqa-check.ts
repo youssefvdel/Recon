@@ -1424,6 +1424,14 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('readSnapshot no longer discards a stale snapshot', /return null;\s*\}\s*\n\}/.test(parseBody) && !/SNAPSHOT_TTL/.test(parseBody), true);
 }
 
+// --- one vocabulary for one fact: no 'not fetched yet' anywhere ------------
+{
+  const { readFileSync } = await import('node:fs');
+  const mhSrc3 = readFileSync(new URL('../src/components/MatchHistory.tsx', import.meta.url), 'utf8');
+  check('the legend uses the same words as the row', /not cached = /.test(mhSrc3), true);
+  check('no stale "not fetched yet" copy survives', /not fetched yet/.test(mhSrc3), false);
+}
+
 // --- notices are a toast, never a layout banner ----------------------------
 {
   const { readFileSync } = await import('node:fs');
