@@ -45,8 +45,11 @@ function fmtArg(a: unknown): string {
 
 function pushLine(level: string, args: LogArgs): void {
   try {
-    logBuffer.push(`[${new Date().toISOString()}] ${level} ${args.map(fmtArg).join(' ')}`);
+    const formatted = `[${new Date().toISOString()}] ${level} ${args.map(fmtArg).join(' ')}`;
+    logBuffer.push(formatted);
     if (logBuffer.length > LOG_BUFFER_MAX) logBuffer.splice(0, logBuffer.length - LOG_BUFFER_MAX);
+    // warn+ also reaches Recon.log through the Rust sink; info/debug stay here.
+    queueForFile(level, formatted);
   } catch {}
 }
 
@@ -56,6 +59,49 @@ export function getRecentLogs(n = 200): string[] {
 }
 
 /** Drop buffered log lines. */
+/* ------------------------------------------------------------------ *
+ * File sink
+ *
+ * The ring buffer reaches the Settings → Download logs bundle, but Recon.log
+ * only ever carried Rust lines — so the `[riot]`/`[tracker]` diagnostics added
+ * for the signed-out bug were invisible in the file we actually read. warn and
+ * error are batched to the Rust `ui_log` command, which writes through the same
+ * log_line sink as the `[window]` lines. Info/debug stay in the ring: the file
+ * is for failures, and batching keeps the IPC cost at one call per flush.
+ * ------------------------------------------------------------------ */
+const UI_LOG_BATCH = 20;
+const UI_LOG_FLUSH_MS = 400;
+const uiLogQueue: { level: string; message: string }[] = [];
+let uiLogTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushUiLog(): void {
+  uiLogTimer = null;
+  if (uiLogQueue.length === 0) return;
+  const batch = uiLogQueue.splice(0, UI_LOG_BATCH);
+  if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
+  void import('@tauri-apps/api/core')
+    .then(({ invoke }) =>
+      Promise.all(
+        batch.map((e) => invoke('ui_log', { level: e.level, message: e.message }).catch(() => {}))
+      )
+    )
+    .catch(() => {});
+  if (uiLogQueue.length > 0 && uiLogTimer === null) {
+    uiLogTimer = setTimeout(flushUiLog, UI_LOG_FLUSH_MS);
+  }
+}
+
+function queueForFile(level: string, line: string): void {
+  try {
+    if (level !== 'warn' && level !== 'error') return;
+    if (uiLogQueue.length >= 200) return; // hard cap: logging must never grow memory
+    uiLogQueue.push({ level, message: line });
+    if (uiLogTimer === null) uiLogTimer = setTimeout(flushUiLog, UI_LOG_FLUSH_MS);
+  } catch {
+    /* never throw from a diagnostic */
+  }
+}
+
 export const logger = {
   log: (...args: LogArgs): void => {
     pushLine('log', args);

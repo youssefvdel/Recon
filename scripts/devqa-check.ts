@@ -1402,6 +1402,65 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('the riotGet export does not outlive its reason', rawSites > 0 ? stillExported : !stillExported, true);
 }
 
+// --- A23-2: JS warn/error must reach the same sink the Rust lines use ------
+{
+  const { readFileSync } = await import('node:fs');
+  const logSrc = readFileSync(new URL('../src/utils/logger.ts', import.meta.url), 'utf8');
+  const libSrc = readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
+  check(
+    'the logger has a file sink for warn and error',
+    /function queueForFile\(level: string, line: string\)/.test(logSrc) && /invoke\('ui_log'/.test(logSrc),
+    true
+  );
+  check(
+    'only warn and error reach the file',
+    /if \(level !== 'warn' && level !== 'error'\) return;/.test(logSrc),
+    true
+  );
+  check('the sink is batched, not one call per line', /UI_LOG_BATCH = 20/.test(logSrc), true);
+  check(
+    'Rust exposes ui_log through log_line',
+    /#\[tauri::command\]\s*\nfn ui_log\(level: String, message: String\)/.test(libSrc) &&
+      /log_line\("ui", lvl, &message\)/.test(libSrc) &&
+      /\n            ui_log,/.test(libSrc),
+    true
+  );
+}
+
+// --- A23-1: cached details must not wait behind unreachable ids ------------
+{
+  const { cachedDetailsFor } = await import('../src/hooks/useTrackerData.ts');
+  const ids = Array.from({ length: 11 }, (_, i) => `m-${i}`);
+  const disk = new Map(ids.map((id) => [`recon_match_v7_${id}`, JSON.stringify({ players: [] })]));
+  disk.set('recon_match_v7_corrupt', '{not json');
+  const read = (k: string) => disk.get(k) ?? null;
+
+  // The eleven on disk are available synchronously — no network, no await.
+  check('cached details are readable without the network', Object.keys(cachedDetailsFor(ids, read)).length, 11);
+  // One unreadable entry must not cost the others.
+  check(
+    'an unreadable cached entry is skipped, not fatal',
+    Object.keys(cachedDetailsFor([...ids, 'corrupt'], read)).length,
+    11
+  );
+  check('no cache means no details, not an invented one', Object.keys(cachedDetailsFor(ids, () => null)).length, 0);
+
+  const { readFileSync } = await import('node:fs');
+  const hookSrc3 = readFileSync(new URL('../src/hooks/useTrackerData.ts', import.meta.url), 'utf8');
+  // Both detail writes merge; neither replaces what is already on screen.
+  check(
+    'a second refresh cannot erase merged details',
+    (hookSrc3.match(/detailsById: \{ \.\.\.ensureStore\(\)\.detailsById/g) ?? []).length,
+    3
+  );
+  check(
+    'the merge logs its result, not only its failures',
+    /logCachedMerge\(ready === 0 \? 'merged-nothing' : 'merged'/.test(hookSrc3) &&
+      /logCachedMerge\('from-cache'/.test(hookSrc3),
+    true
+  );
+}
+
 // --- A23-1 root cause: a cached detail without duels must not kill the merge --
 {
   const { deriveHeroics } = await import('../src/utils/tracker.ts');
@@ -1468,7 +1527,7 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   const hookSrc = readFileSync(new URL('../src/hooks/useTrackerData.ts', import.meta.url), 'utf8');
   check(
     'a failed refresh renders the cached snapshot',
-    /cachedSnap\?\.profile[\s\S]{0,900}hasCached: true/.test(hookSrc),
+    /cachedSnap\?\.profile[\s\S]{0,2500}hasCached: true/.test(hookSrc),
     true
   );
   check(
