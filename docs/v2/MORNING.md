@@ -108,6 +108,22 @@ Replaced with the four-way definition, with the number change called out in the
 commit body — a silently corrected stat is worse than the wrong one, because
 screenshots get compared across versions.
 
+## The rebuild: three surfaces done, measured
+
+```
+=== v2 pass ===
+PASS now      900/900px  0 container(s)  (tall: the feed is the page)
+PASS matches  900/900px  0 container(s)   ← was 1825px / 21 containers
+PASS prep     900/900px  0 container(s)
+```
+
+**Matches went 1825 px → 900 px and 21 containers → 0.** The measurement showed
+why: 20 rows at ~90 px inside 21 rounded bordered boxes. The page was never
+scrolled because it was full — it was full because every row was a card.
+
+Remaining: the Tools sheet (store / crosshair / prep-picker / resolution / chat /
+accounts) and Settings, then the `?v2` flip and the old shell deleted in one commit.
+
 ## The rebuild has a pass/fail command now
 
 `bun run uicheck` drives every route in headless Chromium and asserts: no error
