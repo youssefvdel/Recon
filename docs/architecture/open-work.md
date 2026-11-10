@@ -13,6 +13,21 @@ state that no longer exists; this one is the live picture.
 - `alpha31` — published, never verified or mirrored; superseded.
 - Notes: `/home/youssefvdel/tmp/recon-alpha32-notes.md`.
 
+## Migration progress (Direction B)
+
+| Step | State |
+| --- | --- |
+| 0 foundations | done — primitives + colour contract |
+| 1 Overview | done — judged PASS, 815 → 373 lines, zero card tokens |
+| 2 Matches (2a/2b/2c) | done — judged PASS; modal deleted, in-place expansion, one Escape owner |
+| 3 Play / live | done — judged PASS; `LiveMatchView` (1000 lines) and the `live` tab deleted, `LiveSection` at the top of the feed |
+| 4 Prep | done — judged PASS; Agents + Maps into one route, one shared act selector |
+| 5 Tools | **specced as 5a (plumbing) + 5b (re-homing)**; 5a building |
+| 6–8 shell / settings / cleanup | pending |
+| 9 HUD | brief written (`hud-b-spec.md`), untouched until the window is stable |
+
+`alpha33` is the rollback checkpoint before the shell changes.
+
 ## In flight — Matches (migration step 2)
 
 2b and 2c are implemented in worktree `Recon-live` (`refactor/live-stats`,
