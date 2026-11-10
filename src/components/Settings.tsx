@@ -8,6 +8,7 @@ import {
 import type { DisplayInfo, DisplayMode } from '../types';
 import { CustomResolution } from './CustomResolution';
 import { logger } from '../utils/logger';
+import { displayUnread } from '../utils/displayFacts';
 import {
   fetchPreferredStretchedRes,
   savePreferredStretchedRes,
@@ -25,8 +26,9 @@ export const Settings: React.FC<SettingsProps> = ({
   onStretchResChanged,
   onRefreshDisplayInfo,
 }) => {
-  const nativeW = displayInfo?.native_width || 2560;
-  const nativeH = displayInfo?.native_height || 1440;
+  const nativeW = displayInfo?.native_width ?? 0;
+  const nativeH = displayInfo?.native_height ?? 0;
+  const displayUnverified = displayUnread(displayInfo);
 
   // Stretched resolution target state
   const [stretchedW, setStretchedW] = useState<number>(2088);
@@ -129,7 +131,7 @@ export const Settings: React.FC<SettingsProps> = ({
     for (const m of supportedModes) {
       if (m.width > nativeW || m.height > nativeH) continue;
       const key = `${m.width}x${m.height}`;
-      const isNativeMatch = m.width === nativeW && m.height === nativeH;
+      const isNativeMatch = !displayUnverified && m.width === nativeW && m.height === nativeH;
       if (!isNativeMatch && removedResolutions.includes(key)) continue;
 
       const prev = modeMap.get(key);
@@ -145,7 +147,7 @@ export const Settings: React.FC<SettingsProps> = ({
         modeMap.set(activeKey, {
           width: stretchedW,
           height: stretchedH,
-          maxHz: displayInfo?.current_hz || 260,
+          maxHz: displayInfo?.current_hz ?? 0,
         });
       }
     }
@@ -153,7 +155,7 @@ export const Settings: React.FC<SettingsProps> = ({
     // Filter to stretched aspect ratios (< 1.775) and common gaming resolutions
     const list = Array.from(modeMap.values()).filter((m) => {
       const r = m.width / m.height;
-      const isNativeMatch = m.width === nativeW && m.height === nativeH;
+      const isNativeMatch = !displayUnverified && m.width === nativeW && m.height === nativeH;
       return (r < 1.775 || isNativeMatch) && m.width >= 1024 && m.height >= 720;
     });
 
@@ -257,7 +259,7 @@ export const Settings: React.FC<SettingsProps> = ({
           <div className="grid grid-cols-2 gap-2 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1.5 pb-1 content-start">
             {availableModes.map((mode) => {
               const isCurrent = stretchedW === mode.width && stretchedH === mode.height;
-              const isNativeRes = mode.width === nativeW && mode.height === nativeH;
+              const isNativeRes = !displayUnverified && mode.width === nativeW && mode.height === nativeH;
               const badge = getAspectBadge(mode.width, mode.height);
               return (
                 <button

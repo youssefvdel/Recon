@@ -14,6 +14,7 @@ import {
 import type { DisplayInfo, ShortcutBinding, WindowInfo } from '../types';
 import { listen } from '@tauri-apps/api/event';
 import { logger } from '../utils/logger';
+import { displayUnread } from '../utils/displayFacts';
 import {
   formatShortcut,
   vkToName,
@@ -120,13 +121,14 @@ export const UnifiedStretch: React.FC<UnifiedStretchProps> = ({
   }, [isWindowDropdownOpen]);
 
   const isNative = displayInfo ? displayInfo.current_width === displayInfo.native_width : true;
-  const nativeW = displayInfo?.native_width || 2560;
-  const nativeH = displayInfo?.native_height || 1440;
+  const nativeW = displayInfo?.native_width ?? 0;
+  const nativeH = displayInfo?.native_height ?? 0;
   const stretchedW = preferredStretched
     ? preferredStretched[0]
     : Math.round((Math.round(nativeH * 1.45) + 4) / 8) * 8;
   const stretchedH = preferredStretched ? preferredStretched[1] : nativeH;
-  const currentHz = displayInfo?.current_hz || 260;
+  const currentHz = displayInfo?.current_hz ?? 0;
+  const displayUnverified = displayUnread(displayInfo);
 
   const ratio = stretchedW / stretchedH;
   let ratioTitle = 'True Stretch';
@@ -462,10 +464,10 @@ export const UnifiedStretch: React.FC<UnifiedStretchProps> = ({
             {!isNative && activePill}
           </div>
           <div className="font-display font-extrabold text-2xl text-m3-on-surface tabular-nums tracking-tight leading-tight truncate">
-            {isNative ? `${nativeW} × ${nativeH}` : `${stretchedW} × ${stretchedH}`}
+            {displayUnverified ? 'UNVERIFIED' : isNative ? `${nativeW} × ${nativeH}` : `${stretchedW} × ${stretchedH}`}
           </div>
           <div className="text-[11px] text-m3-outline truncate">
-            {currentHz} Hz • {isNative ? '1:1 pixels' : `${modelWiden.toFixed(3)}× wider models`}
+            {displayUnverified ? 'Display info not read — values below are targets' : `${currentHz} Hz • ${isNative ? '1:1 pixels' : `${modelWiden.toFixed(3)}× wider models`}`}
           </div>
         </div>
         <div className="flex flex-col items-stretch gap-1.5 shrink-0">
@@ -494,9 +496,9 @@ export const UnifiedStretch: React.FC<UnifiedStretchProps> = ({
           isNative,
           'Native Desktop',
           isNative ? activePill : idlePill('16:9 Baseline'),
-          `${nativeW} × ${nativeH}`,
+          displayUnverified ? '—' : `${nativeW} × ${nativeH}`,
           [
-            ['Refresh', <span key="hz">{currentHz} Hz</span>],
+            ['Refresh', <span key="hz">{displayUnverified ? '—' : `${currentHz} Hz`}</span>],
             ['Scaling', <span key="sc">1.00× (1:1)</span>],
           ],
           isNative ? activeBar : standbyBar,
@@ -521,7 +523,7 @@ export const UnifiedStretch: React.FC<UnifiedStretchProps> = ({
           ),
           `${stretchedW} × ${stretchedH}`,
           [
-            ['Refresh', <span key="hz2">{currentHz} Hz</span>],
+            ['Refresh', <span key="hz2">{displayUnverified ? '—' : `${currentHz} Hz`}</span>],
             ['Models', <span key="ws">{modelWiden.toFixed(3)}× wider</span>],
           ],
           !isNative

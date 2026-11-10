@@ -15,6 +15,7 @@ import { join } from 'node:path';
 
 import { perRound, safeRatio, pctOf } from '../src/utils/absent.ts';
 import { formatKd, formatPct } from '../src/utils/format.ts';
+import { displayUnread } from '../src/utils/displayFacts.ts';
 
 let failures = 0;
 function check<T>(name: string, actual: T, expected: T): void {
@@ -44,6 +45,12 @@ check('formatKd: null renders a dash', formatKd(null), '—');
 check('formatKd: NaN renders a dash', formatKd(Number.NaN), '—');
 check('formatPct: null renders a dash', formatPct(null), '—');
 
+/* ---- display facts: an unread display is not 1440p@260 ---- */
+check('displayUnread: null info is unread', displayUnread(null), true);
+check('displayUnread: empty info is unread', displayUnread({}), true);
+check('displayUnread: partial info is unread', displayUnread({ native_width: 2560 }), true);
+check('displayUnread: full info is read', displayUnread({ native_width: 2560, native_height: 1440, current_hz: 260 }), false);
+
 /* ---- source: the exact fallback expressions must not come back ---- */
 const ROOT = join(import.meta.dir, '..');
 const read = (rel: string): string => readFileSync(join(ROOT, rel), 'utf8');
@@ -52,6 +59,17 @@ function absent(rel: string, needle: string): void {
   check(`${rel} does not contain: ${needle}`, read(rel).includes(needle), false);
 }
 
+// 5. A failed display read must not name 2560x1440@260 as this monitor.
+for (const f of [
+  'src/components/Settings.tsx',
+  'src/components/UnifiedStretch.tsx',
+  'src/components/CustomResolution.tsx',
+  'src/components/ResolutionVisualizer.tsx',
+]) {
+  absent(f, '|| 2560');
+  absent(f, '|| 1440');
+  absent(f, '|| 260');
+}
 // 1b. The same Math.max(1, rounds) inflation in the Prep fallbacks.
 absent('src/components/prep/usePrepData.ts', 'Math.max(1, d.rounds)');
 absent('src/components/prep/usePrepData.ts', 'winPct: m > 0 ? (d.won / m) * 100 : 0');
