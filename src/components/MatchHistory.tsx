@@ -451,16 +451,10 @@ export const MatchHistory: React.FC<{
     return () => window.removeEventListener('recon:goto-match', onGoto);
   }, []);
 
-  /* Escape collapses the open row, and does nothing when none is open — one
-   * unambiguous meaning, no hidden "close everything" state. */
-  useEffect(() => {
-    if (!expandedId) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setExpandedId(null);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [expandedId]);
+  /* Escape is NOT owned here: an open row always mounts MatchDetailBody (a row
+   * only opens when it has a detail), and that body owns the single Escape
+   * handler — drawer first, then the row. A second listener here collapsed the
+   * row at the same moment the drawer closed. */
 
   /** Player profile opens in its own webview, never inside the ledger. */
   const openTrackerProfile = (name: string, tag: string): void => {

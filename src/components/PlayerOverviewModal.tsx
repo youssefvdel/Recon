@@ -111,21 +111,11 @@ export const PlayerOverviewModal: React.FC<Props> = ({
     };
   }, [puuid, name, tag, isMe]);
 
-  /* Modal a11y: labelled dialog, Esc closes, Tab is trapped, focus returns. */
+  /* A drawer, not a dialog: labelled region, no Tab trap, no focus return. */
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = React.useId();
-  /* Escape closes the drawer before it reaches the row. No Tab trap: a drawer
-   * that is not modal must not steal the keyboard. */
-  useEffect(() => {
-    if (!player) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [player, onClose]);
+  /* No Escape listener here: the hosting MatchDetailBody owns one handler and
+   * closes this drawer before the row, so a single keypress does one thing. */
 
 
   if (!player) return null;

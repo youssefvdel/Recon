@@ -1473,10 +1473,22 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('the old set-of-ids is gone', /openIds/.test(mh), false);
   check('and the separate modal selection is gone', /selectedMatch/.test(mh), false);
   check('opening another row collapses the previous', /setExpandedId\(\(prev\) => \(prev === id \? null : id\)\)/.test(mh), true);
-  check('Escape collapses the open row', /e\.key === 'Escape'[\s\S]{0,40}setExpandedId\(null\)/.test(mh), true);
+  /* Escape has exactly ONE owner: the body, which closes the player drawer
+   * first and the row second. A second listener in the ledger collapsed the row
+   * at the same instant the drawer closed (judge, 2b re-check). */
+  check('the ledger does not own Escape', /'Escape'/.test(mh), false);
   check('the body renders under its own row, not in a dialog', /<MatchDetailBody/.test(mh) && /open && r\.detail && \(/.test(mh), true);
   check('the ledger no longer mounts the modal', /<MatchDetailModal/.test(mh), false);
   check('the filters survive the collapse', /agentFilter/.test(mh) && /mapFilter/.test(mh), true);
+
+  const body = readFileSync(new URL('../src/components/matches/MatchDetailBody.tsx', import.meta.url), 'utf8');
+  const drawer = readFileSync(new URL('../src/components/PlayerOverviewModal.tsx', import.meta.url), 'utf8');
+  const listeners = (src: string) => (src.match(/addEventListener\('keydown'/g) ?? []).length;
+  check('the body owns the single Escape handler', listeners(body) === 1, true);
+  check('the drawer does not add its own', listeners(drawer) === 0, true);
+  check('Escape closes the drawer before the row', /if \(selectedPlayer\) setSelectedPlayer\(null\)[\s\S]{0,40}else onClose\(\)/.test(body), true);
+  check('the body is a region, never a dialog', /role="dialog"|aria-modal/.test(body), false);
+  check('the player panel is a drawer, not a dialog', /aria-modal=["'{]?true/.test(drawer), false);
 }
 
 // --- judge fixes: no dialog in a row, drawer not a modal, id survives ------
@@ -1543,7 +1555,7 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('the old set-of-ids is gone', /openIds/.test(mh), false);
   check('and the separate modal selection is gone', /selectedMatch/.test(mh), false);
   check('opening another row collapses the previous', /setExpandedId\(\(prev\) => \(prev === id \? null : id\)\)/.test(mh), true);
-  check('Escape collapses the open row', /e\.key === 'Escape'[\s\S]{0,40}setExpandedId\(null\)/.test(mh), true);
+  check('the ledger does not own Escape', /'Escape'/.test(mh), false);
   check('the body renders under its own row, not in a dialog', /<MatchDetailBody/.test(mh) && /open && r\.detail && \(/.test(mh), true);
   check('the ledger no longer mounts the modal', /<MatchDetailModal/.test(mh), false);
   check('the filters survive the collapse', /agentFilter/.test(mh) && /mapFilter/.test(mh), true);
