@@ -69,7 +69,7 @@ const TOOL_ROUTES: Route[] = [
 ].map((r) => ({ ...r, allowTall: 'the tools sheet is one page with six anchored sections' }));
 
 const V2_ROUTES: Route[] = [
-  { id: 'now', clicks: ['Now'], marker: /Recent matches|as of|Current Act/i, allowTall: 'the v2 feed is the page' },
+  { id: 'now', clicks: ['Now'], marker: /Recent matches|as of|Current Act|Rank points/i, allowTall: 'the v2 feed is the page' },
   { id: 'matches', clicks: ['Matches'], marker: /Matches|Surface not built yet/i },
   { id: 'prep', clicks: ['Prep'], marker: /Prep|Surface not built yet/i },
   ...TOOL_ROUTES,

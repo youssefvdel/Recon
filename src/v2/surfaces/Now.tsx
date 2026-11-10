@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTrackerData } from '../../hooks/useTrackerData';
 import { LiveSection } from '../../components/live/LiveSection';
+import { rrTrend } from '../now/rrTrend';
 import { nowFeed } from '../now/feed';
 
 /** Now: the live strip (reused, not rebuilt) plus the act record and the recent
@@ -15,6 +16,9 @@ export const Now: React.FC = () => {
    * renders of the same state can disagree) and the age would only change when
    * something else happened to re-render. One tick a minute is the resolution
    * the label shows. */
+  /* Rank-point movement over the same games the feed shows: the data is
+   * already in the store, so this costs nothing extra to render. */
+  const rr = useMemo(() => rrTrend(games, 20), [games]);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 60_000);
@@ -46,6 +50,49 @@ export const Now: React.FC = () => {
           )}
         </div>
       </section>
+
+      {rr && (
+        <section>
+          <h2 className="text-xs uppercase tracking-widest mb-1" style={{ color: 'var(--on-surface-muted)' }}>
+            Rank points · last {rr.entries.length}
+          </h2>
+          <div className="flex items-baseline gap-3">
+            <span
+              className="text-2xl font-black tabular-nums"
+              style={{
+                color:
+                  rr.net > 0 ? 'var(--positive)' : rr.net < 0 ? 'var(--negative)' : 'var(--on-surface)',
+              }}
+            >
+              {rr.net > 0 ? '+' : ''}
+              {rr.net} RR
+            </span>
+            <span className="text-xs tabular-nums" style={{ color: 'var(--on-surface-muted)' }}>
+              {rr.wins}W · {rr.losses}L
+              {rr.best !== null ? ` · best +${rr.best}` : ''}
+              {rr.worst !== null ? ` · worst ${rr.worst}` : ''}
+            </span>
+          </div>
+          {/* One chip per game, in order. No border, no fill: a chip that reads as
+              a card would be 20 cards on the busiest screen in the app. */}
+          <div className="flex flex-wrap gap-1 mt-2">
+            {rr.entries.map((e) => (
+              <span
+                key={e.matchId}
+                className="text-[11px] tabular-nums px-1"
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  color:
+                    e.change > 0 ? 'var(--positive)' : e.change < 0 ? 'var(--negative)' : 'var(--on-surface-muted)',
+                }}
+              >
+                {e.change > 0 ? '+' : ''}
+                {e.change}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section>
         <h2 className="text-xs uppercase tracking-widest mb-1" style={{ color: 'var(--on-surface-muted)' }}>
