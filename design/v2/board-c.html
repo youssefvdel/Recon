@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Recon v2 — Theme C · Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500&family=Inter:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --surface-0:#e9e1d2; --surface-1:#f7f1e5; --surface-2:#e2d7c4;
+  --on-surface:#1d1b17; --on-surface-muted:#6d6457; --outline:#c9bba6; --outline-strong:#9d8e78;
+  --accent:#b43b28; --on-accent:#fbf6ea; --positive:#2f6b4f; --negative:#9e3027; --attention:#97631c; --live:#a8322a; --focus:#b43b28;
+  --font-display:"Newsreader","Iowan Old Style",Georgia,serif;
+  --font-body:"Manrope","Segoe UI",system-ui,sans-serif;
+  --font-mono:"IBM Plex Mono","SFMono-Regular",Consolas,monospace;
+  --radius-card:2px; --radius-control:2px; --pad:48px; --gap:24px; --row:44px;
+}
+html{scrollbar-color:var(--outline) var(--surface-0);scrollbar-width:thin}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:var(--surface-0)}
+::-webkit-scrollbar-thumb{background:var(--outline);border:2px solid var(--surface-0);border-radius:8px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--surface-0);color:var(--on-surface);font-family:var(--font-body);font-size:14px;line-height:21px;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(900px 500px at 10% 0,rgba(255,255,255,.35),transparent 65%),repeating-linear-gradient(0deg,rgba(29,27,23,.025) 0 1px,transparent 1px 4px)}
+.board{max-width:1280px;margin:0 auto;min-height:100vh;position:relative;padding:0 8px}
+.appbar{height:68px;display:flex;align-items:center;gap:30px;padding:0 calc(var(--pad) - 8px);border-bottom:3px double var(--on-surface);position:relative;z-index:2}
+.brand{display:flex;align-items:baseline;gap:9px;color:inherit;text-decoration:none}
+.brand-mark{font-family:var(--font-display);font-size:24px;line-height:1;color:var(--on-surface)}
+.brand-name{font-family:var(--font-display);font-size:22px;letter-spacing:-.01em}
+.brand-ver{font-family:var(--font-mono);font-size:11px;color:var(--on-surface-muted);border-top:1px solid var(--outline-strong);padding-top:1px}
+.nav{display:flex;gap:22px;margin-left:12px;height:100%}
+.nav a{display:flex;align-items:center;color:var(--on-surface-muted);text-decoration:none;font-family:var(--font-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;border-bottom:2px solid transparent}
+.nav a.active{color:var(--on-surface);border-bottom-color:var(--accent)}
+.appbar-tools{margin-left:auto;display:flex;align-items:center;gap:12px}
+.live-chip{display:flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;color:var(--live)}
+.live-chip i,.live-state i{width:5px;height:5px;border-radius:50%;background:currentColor}
+.sync{font-family:var(--font-mono);font-size:11px;color:var(--on-surface-muted)}
+.cmd,.iconbtn{background:var(--surface-1);border:1px solid var(--outline-strong);border-radius:var(--radius-control);color:var(--on-surface-muted);height:29px;min-width:29px;padding:0 9px;cursor:pointer;font-family:var(--font-mono);font-size:11px}
+.cmd:hover,.iconbtn:hover{border-color:var(--accent);color:var(--accent)}
+.iconbtn{font-family:var(--font-body);font-size:15px}
+.window-dots{display:flex;gap:6px;margin-left:6px}
+.window-dots i{width:8px;height:8px;border-radius:50%;border:1px solid var(--outline-strong)}
+.live-strip{height:46px;display:flex;align-items:center;gap:16px;padding:0 calc(var(--pad) - 8px);border-bottom:1px solid var(--outline-strong);background:var(--surface-1);font-family:var(--font-mono);font-size:11px;position:sticky;top:0;z-index:3}
+.live-state{display:flex;align-items:center;gap:6px;color:var(--live);letter-spacing:.14em;font-weight:600}
+.live-map{font-family:var(--font-display);font-size:16px}
+.live-score{font-size:15px;color:var(--on-surface);font-variant-numeric:tabular-nums}
+.live-meta,.live-phase{color:var(--on-surface-muted)}
+.ghost{margin-left:auto;background:transparent;border-bottom:1px solid var(--on-surface);border-top:0;border-left:0;border-right:0;border-radius:0;color:var(--on-surface);font-family:var(--font-mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;padding:4px 0;cursor:pointer}
+.ghost:hover{color:var(--accent);border-color:var(--accent)}
+.page{padding:var(--pad) calc(var(--pad) - 8px) 52px}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;border-bottom:1px solid var(--on-surface);padding-bottom:18px}
+.eyebrow{font-family:var(--font-mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--on-surface-muted)}
+h1{font-family:var(--font-display);font-weight:400;font-size:28px;line-height:32px;margin:8px 0 0;letter-spacing:-.01em}
+.btn{background:var(--accent);color:var(--on-accent);border:1px solid var(--accent);border-radius:var(--radius-control);height:38px;padding:0 18px;font-family:var(--font-mono);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.1em;cursor:pointer}
+.btn:hover{background:#9e3027;border-color:#9e3027}
+.btn.wide{width:100%;margin-top:16px}
+.record{display:flex;align-items:flex-end;gap:26px;padding:32px 0 26px;border-bottom:1px solid var(--outline-strong)}
+.record-number{font-family:var(--font-display);font-size:64px;line-height:66px;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
+.record-side{display:flex;flex-direction:column;gap:6px;padding-bottom:5px}
+.pct{font-family:var(--font-mono);font-size:20px;color:var(--on-surface-muted)}
+.record-sub{font-family:var(--font-mono);font-size:11px;letter-spacing:.03em;color:var(--on-surface-muted)}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:var(--gap);margin-top:28px;align-items:start}
+.section-head{display:flex;align-items:baseline;justify-content:space-between;padding:16px 0 9px;border-bottom:1px solid var(--on-surface);font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--on-surface-muted)}
+.matches-head{margin-top:28px}
+.count{color:var(--on-surface-muted);letter-spacing:.06em}
+.table-wrap{border-bottom:1px solid var(--on-surface)}
+table.stats{width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:11px}
+.stats th{text-align:left;font-weight:500;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--on-surface-muted);padding:10px 8px 8px;border-bottom:1px solid var(--on-surface)}
+.stats td{padding:9px 8px;border-bottom:1px solid var(--outline);height:var(--row);font-variant-numeric:tabular-nums}
+.stats tr:last-child td{border-bottom:0}
+.stats .num{text-align:right}
+.stats .me td{background:rgba(180,59,40,.06)}
+.stats em{font-style:normal;color:var(--on-surface-muted)}
+.agent{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--outline-strong);margin-right:8px;vertical-align:1px}
+.match{display:grid;grid-template-columns:42px minmax(0,1fr) minmax(0,1.15fr) 148px 12px;align-items:center;gap:12px;height:44px;border-bottom:1px solid var(--outline);font-family:var(--font-mono);font-size:11px}
+.match:hover{background:rgba(180,59,40,.04);cursor:pointer}
+.age{color:var(--on-surface-muted)}
+.match-main{display:flex;align-items:baseline;gap:10px;min-width:0}
+.match-main strong{font-family:var(--font-display);font-size:17px;font-weight:500;color:var(--on-surface)}
+.verdict{font-size:11px;letter-spacing:.14em}
+.verdict.win{color:var(--positive)}
+.verdict.loss{color:var(--negative)}
+.score{color:var(--on-surface);font-size:13px;font-variant-numeric:tabular-nums}
+.match-sub{color:var(--on-surface-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.match-sub b{color:var(--on-surface);font-weight:500}
+.spark{display:flex;align-items:flex-end;gap:2px;height:14px}
+.spark i{display:block;width:3px;height:10px;background:var(--on-surface-muted);opacity:.45}
+.spark i.w{background:var(--positive);opacity:.9}
+.spark i.l{background:var(--negative);opacity:.6}
+.chev{color:var(--accent);font-family:var(--font-body);font-size:16px;text-align:right}
+.field{display:flex;align-items:center;gap:10px;margin-top:28px;border-bottom:1px solid var(--on-surface);padding-bottom:10px}
+.field-label{font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--on-surface-muted)}
+.field input{flex:1;background:transparent;border:0;outline:0;color:var(--on-surface);font-family:var(--font-body);font-size:13px;padding:2px 0}
+.field input::placeholder{color:var(--outline-strong)}
+.field kbd{font-family:var(--font-mono);font-size:11px;color:var(--on-surface-muted);border:1px solid var(--outline-strong);padding:1px 4px}
+.empty{display:flex;align-items:center;gap:16px;margin-top:26px;padding:18px 0;border-top:1px solid var(--outline);border-bottom:1px solid var(--outline)}
+.empty-mark{font-family:var(--font-display);font-size:28px;color:var(--outline-strong);width:30px;text-align:center}
+.empty-copy{flex:1;min-width:0}
+.empty-copy strong{display:block;font-family:var(--font-display);font-size:18px;font-weight:500}
+.empty-copy p{margin:3px 0 0;color:var(--on-surface-muted);font-size:12px}
+.empty .ghost{margin-left:0}
+.card{background:var(--surface-1);border:1px solid var(--on-surface);border-radius:var(--radius-card);padding:20px}
+.card-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:12px}
+.kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--on-surface-muted)}
+.timer{font-family:var(--font-mono);font-size:11px;color:var(--attention)}
+.bundle-art{height:128px;border-radius:calc(var(--radius-card) - 1px);background:linear-gradient(135deg,#d9cab2,#f1e7d6 52%,#cdbb9f);border:1px solid var(--outline-strong);position:relative;overflow:hidden}
+.blade{position:absolute;width:190px;height:8px;background:var(--accent);transform:rotate(-33deg);left:-26px;top:60px;opacity:.85}
+.blade.two{width:150px;left:120px;top:88px;opacity:.35}
+.stamp{position:absolute;right:10px;bottom:6px;font-family:var(--font-display);font-size:32px;color:rgba(29,27,23,.18);letter-spacing:-.05em}
+.card h2{font-family:var(--font-display);font-size:21px;font-weight:500;margin:12px 0 2px}
+.meta{font-family:var(--font-mono);font-size:11px;color:var(--on-surface-muted);margin:0}
+.rail-note{margin-top:18px;padding-top:14px;border-top:1px solid var(--outline-strong)}
+.rail-note p{margin:5px 0 0;color:var(--on-surface-muted);font-size:11px;line-height:17px}
+.board-foot{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:16px calc(var(--pad) - 8px);border-top:3px double var(--on-surface);font-family:var(--font-mono);font-size:11px;color:var(--on-surface-muted)}
+.theme-name{color:var(--accent);letter-spacing:.1em;text-transform:uppercase}
+.theme-desc{letter-spacing:.01em}
+.swatches{display:flex;gap:5px;margin-left:auto}
+.swatches i{width:11px;height:11px;border-radius:50%;background:var(--s);border:1px solid rgba(29,27,23,.2)}
+@media (max-width:900px){
+  :root{--pad:22px;--gap:16px}
+  .appbar{height:58px;gap:14px}
+  .brand-ver,.sync,.window-dots{display:none}
+  .nav{gap:14px;margin-left:0}
+  .nav a{font-size:11px}
+  .appbar-tools{gap:7px}
+  .live-chip{display:none}
+  .live-strip{gap:10px;height:40px;font-size:11px}
+  .live-meta,.live-phase{display:none}
+  .page-head{display:block}
+  .page-head .btn{margin-top:16px}
+  h1{font-size:24px;line-height:28px}
+  .record-number{font-size:48px;line-height:50px}
+  .record{display:block}
+  .record-side{margin-top:10px}
+  .layout{grid-template-columns:1fr}
+  .match{grid-template-columns:34px minmax(0,1fr) 12px;height:auto;padding:10px 0;gap:8px}
+  .match-sub,.spark{display:none}
+  .stats th:nth-child(2),.stats td:nth-child(2){display:none}
+  .empty{flex-wrap:wrap}
+  .empty .ghost{margin-left:34px}
+  .board-foot{align-items:flex-start}
+  .swatches{margin-left:0}
+}
+</style>
+</head>
+<body>
+
+  <div class="board">
+    <header class="appbar">
+      <a class="brand" href="#" aria-label="Recon">
+        <span class="brand-mark">R</span>
+        <span class="brand-name">Recon</span>
+        <span class="brand-ver">v2</span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a class="active" href="#">Now</a>
+        <a href="#">Matches</a>
+        <a href="#">Prep</a>
+      </nav>
+      <div class="appbar-tools">
+        <span class="live-chip"><i aria-hidden="true"></i>LIVE</span>
+        <span class="sync">synced 2m</span>
+        <button class="cmd" type="button"><span>⌘K</span></button>
+        <button class="iconbtn" type="button" aria-label="Tools">⋯</button>
+        <span class="window-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+      </div>
+    </header>
+
+    <div class="live-strip" role="status" aria-label="Live match">
+      <span class="live-state"><i aria-hidden="true"></i>LIVE</span>
+      <span class="live-map">Ascent</span>
+      <span class="live-score">6–4</span>
+      <span class="live-meta">10 players</span>
+      <span class="live-phase">Live</span>
+      <button class="ghost" type="button">View lobby</button>
+    </div>
+
+    <main class="page">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Episode 9 · Act 3 · Competitive</div>
+          <h1>Now</h1>
+        </div>
+        <button class="btn" type="button">Open HUD</button>
+      </div>
+
+      <section class="record" aria-label="Act record">
+        <div class="record-number">34–29</div>
+        <div class="record-side">
+          <span class="pct">54%</span>
+          <span class="record-sub">Diamond 2 · 47 RR · 218 ACS · 1.24 K/D · 27% HS · 63 games</span>
+        </div>
+      </section>
+
+      <div class="layout">
+        <section class="main-col">
+          <div class="section-head"><span>Live lobby</span><span class="count">10 players</span></div>
+          <div class="table-wrap">
+            <table class="stats">
+              <thead><tr><th>Player</th><th>Rank</th><th class="num">ACS</th><th class="num">K/D</th><th class="num">HS</th></tr></thead>
+              <tbody>
+                <tr class="me"><td><span class="agent"></span>Youssef <em>#EGY</em></td><td>Diamond 2</td><td class="num">241</td><td class="num">1.24</td><td class="num">31%</td></tr>
+                <tr><td><span class="agent"></span>Shadow <em>#EUW</em></td><td>Diamond 1</td><td class="num">198</td><td class="num">1.06</td><td class="num">24%</td></tr>
+                <tr><td><span class="agent"></span>ViperX <em>#NA1</em></td><td>Platinum 3</td><td class="num">176</td><td class="num">0.94</td><td class="num">22%</td></tr>
+                <tr><td><span class="agent"></span>Clutch <em>#EUW</em></td><td>Ascendant 1</td><td class="num">164</td><td class="num">0.88</td><td class="num">19%</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="section-head matches-head"><span>Matches</span><span class="count">63</span></div>
+          <div class="match" role="button" tabindex="0">
+            <span class="age">2h</span>
+            <span class="match-main"><strong>Ascent</strong><span class="verdict win">WIN</span><span class="score">13–9</span></span>
+            <span class="match-sub">Jett <b>24/14/6</b> · 241 ACS</span>
+            <span class="spark" aria-hidden="true"><i class="w"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="w"></i><i class="l"></i><i class="l"></i><i class="l"></i><i class="w"></i></span>
+            <span class="chev" aria-hidden="true">›</span>
+          </div>
+          <div class="match" role="button" tabindex="0">
+            <span class="age">1d</span>
+            <span class="match-main"><strong>Haven</strong><span class="verdict loss">LOSS</span><span class="score">11–13</span></span>
+            <span class="match-sub">Omen <b>18/17/9</b> · 196 ACS</span>
+            <span class="spark" aria-hidden="true"><i class="w"></i><i class="l"></i><i class="l"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="l"></i><i class="l"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="l"></i><i class="w"></i><i class="l"></i><i class="l"></i><i class="w"></i><i class="l"></i><i class="w"></i></span>
+            <span class="chev" aria-hidden="true">›</span>
+          </div>
+
+          <label class="field">
+            <span class="field-label">Search</span>
+            <input type="text" placeholder="Match, map, or player" />
+            <kbd>⌘K</kbd>
+          </label>
+
+          <div class="empty">
+            <span class="empty-mark" aria-hidden="true">∅</span>
+            <div class="empty-copy">
+              <strong>No cached details yet</strong>
+              <p>Open Riot Client, then refresh. Nothing is guessed while it is closed.</p>
+            </div>
+            <button class="ghost" type="button">Retry</button>
+          </div>
+        </section>
+
+        <aside class="rail">
+          <article class="card" aria-label="Featured store bundle">
+            <div class="card-top"><span class="kicker">Featured bundle</span><span class="timer">2d 14h</span></div>
+            <div class="bundle-art" aria-hidden="true"><span class="blade"></span><span class="blade two"></span><span class="stamp">P//2</span></div>
+            <h2>Prime//2.0</h2>
+            <p class="meta">12 items · 5,900 VP</p>
+            <button class="btn wide" type="button">View bundle</button>
+          </article>
+
+          <div class="rail-note">
+            <span class="kicker">Card test</span>
+            <p>One object, one decision. Delete this border and the bundle still reads as one thing — the border marks the decision, it does not decorate a list.</p>
+          </div>
+        </aside>
+      </div>
+    </main>
+
+    <footer class="board-foot">
+      <span class="theme-name">C — Ledger</span>
+      <span class="theme-desc">warm paper · newsreader · vermilion action · print rules</span>
+      <span class="swatches" aria-label="Palette"><i style="--s:var(--surface-0)"></i><i style="--s:var(--surface-1)"></i><i style="--s:var(--accent)"></i><i style="--s:var(--positive)"></i><i style="--s:var(--negative)"></i><i style="--s:var(--attention)"></i></span>
+    </footer>
+  </div>
+</body>
+</html>
