@@ -14,7 +14,8 @@
     "preview": "vite preview",
     "bump": "node scripts/bump-version.js",
     "test:loadout": "bun scripts/loadout-check.ts",
-    "test:overlay-boundary": "bun scripts/overlay-boundary-check.ts"
+    "test:overlay-boundary": "bun scripts/overlay-boundary-check.ts",
+    "dev:linux": "vite --host 0.0.0.0 --port 5173 --strictPort"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
