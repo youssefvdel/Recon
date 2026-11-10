@@ -37,6 +37,12 @@ jobs:
         shell: bash
         run: bun install --frozen-lockfile || bun install
 
+      - name: Fetch WebView2 fixed runtime
+        # Required even for tests and --no-bundle: tauri-build validates
+        # bundle.resources at compile time and fails when webview2-runtime/
+        # is missing ("resource path `webview2-runtime` doesn't exist").
+        run: bun scripts/fetch-webview2.mjs
+
       - name: Build frontend
         # Fail fast on tsc/vite errors before the long Rust compile.
         run: bun run build:ui

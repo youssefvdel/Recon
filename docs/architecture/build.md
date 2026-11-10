@@ -9,7 +9,7 @@ Evidence: the workflows, `tauri.conf.json`, `updater.rs`, `fetch-webview2.mjs`,
 | Workflow | Trigger | Produces |
 | --- | --- | --- |
 | `release.yml` | push tag `v*`; `workflow_dispatch` on a tag ref | Release: setup.exe + `.sig` + `latest.json` |
-| `build-windows.yml` | push `fix/**`; `workflow_dispatch` | exe artifact + `cargo test --lib`; no runtime, no zip |
+| `build-windows.yml` | push `fix/**`; `workflow_dispatch` | exe artifact + tests; fetches the runtime, no zip |
 | `deploy-website.yml` | push `main` under `website/**` | marketing site only — not in the app chain |
 
 Release steps (alpha17 ~13 min total; alpha9 ~15 min):
@@ -23,9 +23,10 @@ Release steps (alpha17 ~13 min total; alpha9 ~15 min):
 | refresh updater `.sig` | 1 s | 1 s | re-minisign after Authenticode changed the bytes |
 | latest.json + publish | 17 s | 15 s | `gh release create --latest` |
 
-`build-windows.yml` stops at the bare exe: frontend, `cargo test --lib`, the
-`--no-bundle` build, Authenticode, one artifact (`recon-windows-x64`, 7 days). It
-fetches no runtime — branch CI cannot test the bundled installer anyway.
+`build-windows.yml` stops at the bare exe. It fetches the runtime first, because
+tauri-build validates `bundle.resources` even for tests and `--no-bundle`, then
+runs frontend, `cargo test --lib`, the build, Authenticode, and uploads one
+artifact (`recon-windows-x64`, 7 days). No portable zip.
 
 ## 2. Artifacts
 
