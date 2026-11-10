@@ -53,6 +53,21 @@ decision I did not want to make for you at 3am.
   backwards).
 - **Three theme boards**, rendered and served.
 
+## Also landed overnight
+
+- **A real 13.09 match payload** captured read-only, sanitized, committed
+  (`src/dev/fixtures/matches/real-13.09.json`, 693 KB) with a shape doc
+  (`docs/v2/payload-13.09.md`). The advanced-scoreboard tests now run against real
+  Riot data instead of numbers I typed.
+- **A token contract** (`src/v2/tokens.css`) — Graphite is the root set, Nocturne
+  is `[data-theme='nocturne']`, and raw hex is legal nowhere else. Switching theme
+  is one attribute, which is why choosing in the morning is cheap.
+- **A shell spec** (`docs/v2/shell-b-spec.md`) with the IA: three destinations
+  (Now / Matches / Prep), no sidebar, `⌘K` palette, `⋯` for tools.
+- **`bun test tests/` — 16 tests** on the write path (payload builder, deflate
+  round-trip and canonical compare, storefront gate, write response contract).
+  Those are the functions where a bug writes garbage into your config.
+
 ## A real bug found in the shipped app
 
 **The KAST column has been wrong.** `MatchDetailBody.tsx:174` computed
