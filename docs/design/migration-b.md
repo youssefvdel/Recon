@@ -91,3 +91,22 @@ defect as the chevron we just hid. Implementation: a small cross-tab event
 `expandedId` and switches the tab — `App` already listens for `recon:goto-live`, so
 the pattern exists. Estimated five lines on the Overview side plus the listener.
 Do **not** silently drop the affordance, and do not point it at the outgoing modal.
+
+### Step 2 — closed 2026-11-10 09:09 (`d7a99ef`)
+
+2a, 2b and 2c are all on main and the design judge passed **all five rules**:
+
+| Rule | Evidence |
+| --- | --- |
+| One expansion | single `expandedId`, toggle id-or-null, one body under its own row |
+| Escape scoped | listener counts — ledger 0, drawer 0, body **1**; body closes the drawer first |
+| No dialog semantics | body root is `role="region"`; `role="dialog"`/`aria-modal` count 0 |
+| Drawer, not modal | right-side fixed region, no backdrop, no Tab trap |
+| Feed → ledger hand-off | the id survives the tab switch and is consumed once on mount |
+
+**The rule this step earned:** *one keydown owner per surface.* Three handlers were
+live at once — the ledger collapsed the row, the body closed drawer-or-row, and the
+drawer closed itself — so one Escape did two things. The body now owns the only
+handler and devqa asserts the counts, so the collision cannot come back silently.
+
+`MatchDetailModal` is deleted; `MatchDetailBody` is the sole host. Step 3 (live) is next.
