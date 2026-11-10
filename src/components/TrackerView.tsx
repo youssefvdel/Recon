@@ -22,10 +22,13 @@ const TABS: SubTabItem[] = [
   { id: 'live', label: 'Live Match' },
 ];
 
-export const TrackerView: React.FC<{ initialSubTab?: TrackerSubTab; liveRequest?: number }> = ({
-  initialSubTab = 'overview',
-  liveRequest = 0,
-}) => {
+export const TrackerView: React.FC<{
+  initialSubTab?: TrackerSubTab;
+  liveRequest?: number;
+  /** A match the previous surface asked to expand, carried across the tab switch. */
+  initialMatchId?: string | null;
+  onMatchConsumed?: () => void;
+}> = ({ initialSubTab = 'overview', liveRequest = 0, initialMatchId = null, onMatchConsumed }) => {
   const liveActive = useLiveMatchActive();
   const [subTab, setSubTab] = useState<TrackerSubTab>(() => {
     try {
@@ -127,7 +130,7 @@ export const TrackerView: React.FC<{ initialSubTab?: TrackerSubTab; liveRequest?
 
           {subTab === 'matches' && (
             <motion.div key="matches" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
-              <MatchHistory />
+              <MatchHistory initialExpandedId={initialMatchId} onConsumed={onMatchConsumed} />
             </motion.div>
           )}
 

@@ -9,6 +9,7 @@ import { buildTips } from '../utils/trackerTips';
 import { HistorySkeletons } from './TrackerSkeletons';
 import { CustomDropdown } from './ValorantConfig';
 import { MatchDetailBody } from './matches/MatchDetailBody';
+import { nextExpandedId } from '../utils/expansion';
 import { ScoreBadge, scoreTier } from './ScoreBadge';
 import { StatValue } from './StatValue';
 import { formatKd, formatPct } from '../utils/format';
@@ -413,7 +414,11 @@ const MatchRow: React.FC<{
   );
 };
 
-export const MatchHistory: React.FC = () => {
+export const MatchHistory: React.FC<{
+  /** Set when another surface asked for a specific match before this mounted. */
+  initialExpandedId?: string | null;
+  onConsumed?: () => void;
+}> = ({ initialExpandedId = null, onConsumed }) => {
   const { profile, games, queueById, mapById, detailsById, agentInfo, tierIcons, trnMatchTrs, isLoading } =
     useTrackerData();
   const [agentFilter, setAgentFilter] = useState('All');
@@ -424,12 +429,23 @@ export const MatchHistory: React.FC = () => {
    * rail is a single controlled selection, so a second expansion would need
    * per-row selection state, which is the duplication we keep deleting. */
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  /* The Overview feed asks for a specific match: expand it here rather than
-   * opening a dialog there. */
+  /* The Overview feed asks for a specific match. If the ledger was already
+   * mounted the event is enough; if it mounts AFTER the request (the usual
+   * case — the tab switch happens first), the id arrives as a prop. */
+  useEffect(() => {
+    if (!initialExpandedId) return;
+    /* Adopting the id is the point of this effect: the ledger mounted after the
+     * request, so this is how the request becomes state. */
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setExpandedId((prev) => nextExpandedId(prev, initialExpandedId));
+    onConsumed?.();
+  }, [initialExpandedId, onConsumed]);
+
+  /* Same request while the ledger is already on screen. */
   useEffect(() => {
     const onGoto = (e: Event) => {
       const id = (e as CustomEvent<{ matchId?: string }>).detail?.matchId;
-      if (id) setExpandedId(id);
+      if (id) setExpandedId((prev) => nextExpandedId(prev, id));
     };
     window.addEventListener('recon:goto-match', onGoto);
     return () => window.removeEventListener('recon:goto-match', onGoto);

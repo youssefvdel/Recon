@@ -1482,6 +1482,38 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('the filters survive the collapse', /agentFilter/.test(mh) && /mapFilter/.test(mh), true);
 }
 
+// --- judge fixes: no dialog in a row, drawer not a modal, id survives ------
+{
+  const { readFileSync } = await import('node:fs');
+  const { nextExpandedId } = await import('../src/utils/expansion.ts');
+  const body = readFileSync(new URL('../src/components/matches/MatchDetailBody.tsx', import.meta.url), 'utf8');
+  const player = readFileSync(new URL('../src/components/PlayerOverviewModal.tsx', import.meta.url), 'utf8');
+  const mh = readFileSync(new URL('../src/components/MatchHistory.tsx', import.meta.url), 'utf8');
+  const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const tv = readFileSync(new URL('../src/components/TrackerView.tsx', import.meta.url), 'utf8');
+
+  // FAIL 1 — the body is inline content, not a dialog.
+  check('the body declares no dialog', /aria-modal="true"/.test(body), false);
+  check('and no dialog role', /role="dialog"/.test(body), false);
+  check('it does not steal or restore focus', /restoreFocusRef|closeRef/.test(body), false);
+  check('it has no close affordance of its own', /Close match details/.test(body), false);
+  check('the tablist is still a tablist', /role="tablist"/.test(body), true);
+
+  // FAIL 2 — the player panel is a drawer.
+  check('the player panel is not a modal', /aria-modal="true"/.test(player), false);
+  check('and draws no backdrop', /bg-black\/80/.test(player), false);
+  check('it is a right-side drawer with its own scroll', /fixed inset-y-0 right-0/.test(player) && /overflow-y-auto/.test(player), true);
+  check('it does not trap Tab', /e\.key !== 'Tab'|e\.key === 'Tab'/.test(player), false);
+
+  // FAIL 3 — a request made BEFORE the ledger mounts still expands that row.
+  check('an incoming request wins', nextExpandedId(null, 'm-1'), 'm-1');
+  check('the mount-later case works', nextExpandedId('old', 'm-2'), 'm-2');
+  check('no request changes nothing', nextExpandedId('keep', null), 'keep');
+  check('App keeps the id across the tab switch', /setPendingMatchId\(id\)/.test(app) && /initialMatchId=\{pendingMatchId\}/.test(app), true);
+  check('TrackerView threads it to the ledger', /initialMatchId/.test(tv) && /initialExpandedId=\{initialMatchId\}/.test(tv), true);
+  check('the ledger adopts it on mount', /nextExpandedId\(prev, initialExpandedId\)/.test(mh), true);
+}
+
 // --- 2c: the dialog is gone, the body is the only host --------------------
 {
   const { existsSync, readFileSync } = await import('node:fs');

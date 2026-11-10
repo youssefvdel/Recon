@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { X, Swords, Clock, Copy, Check } from 'lucide-react';
+import {Swords, Clock, Copy, Check} from 'lucide-react';
 import { matchVerdict } from '../../utils/matchVerdict';
 import type { TrackerMatchDetail, TrackerMmrPoint } from '../../types';
 import { tierName, resolvePlayerNames, gameData } from '../../utils/tracker';
@@ -88,20 +88,7 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
   const [trnTrsMap, setTrnTrsMap] = useState<Record<string, number>>({});
   const [copiedPuuid, setCopiedPuuid] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const closeRef = useRef<HTMLButtonElement | null>(null);
-  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
-  // Dialog behaviour: move focus in on open, restore it on close. Without
-  // this, Tab walks the page behind the overlay (docs/audit/ui.md #4).
-  useEffect(() => {
-    if (!isOpen) return;
-    restoreFocusRef.current = document.activeElement as HTMLElement | null;
-    const t = window.setTimeout(() => closeRef.current?.focus(), 0);
-    return () => {
-      window.clearTimeout(t);
-      restoreFocusRef.current?.focus?.();
-    };
-  }, [isOpen]);
 
   const copyPlayerRiotId = (e: React.MouseEvent, p: { displayName: string; displayTag?: string; puuid: string }) => {
     e.stopPropagation();
@@ -123,45 +110,18 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
     fetchTrnMatchDetails(currentMatchId).then(setTrnTrsMap).catch(() => {});
   }, [isOpen, currentMatchId]);
 
-  // Escape closes; Tab is trapped inside the panel while no nested player
-  // modal is open (that modal owns focus itself).
+  /* Escape closes the player drawer first, then the row. No focus trap: this is
+   * inline content in a ledger, not a dialog. */
   useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (selectedPlayer) {
-          setSelectedPlayer(null);
-        } else {
-          onClose();
-        }
-        return;
-      }
-      if (e.key !== 'Tab' || selectedPlayer) return;
-      const panel = panelRef.current;
-      if (!panel) return;
-      const focusables = Array.from(
-        panel.querySelectorAll<HTMLElement>(
-          'button:not([disabled]):not([tabindex="-1"]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        )
-      );
-      if (focusables.length === 0) return;
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      const active = document.activeElement as HTMLElement | null;
-      if (!active || !panel.contains(active)) {
-        e.preventDefault();
-        (e.shiftKey ? last : first).focus();
-      } else if (e.shiftKey && active === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
+      if (e.key !== 'Escape') return;
+      if (selectedPlayer) setSelectedPlayer(null);
+      else onClose();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isOpen, onClose, selectedPlayer]);
+  }, [isOpen, selectedPlayer, onClose]);
 
   // Resolve player real names on mount/detail change
   useEffect(() => {
@@ -478,15 +438,13 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
         : '';
 
   return (
-    /* The body only: chrome (backdrop, card, focus trap) belongs to whatever
-     * hosts it. Step 2a moves it here unchanged so the modal renders the same
-     * thing from a new file; the ledger will host it in place in 2b. */
+    /* Inline content, not a dialog: this renders inside a ledger row, so it has
+     * no dialog role, no focus trap and no close affordance of its own. */
     <div
       ref={panelRef}
-      role="dialog"
-      aria-modal="true"
+      role="region"
       aria-labelledby="mdm-title"
-      className="w-full h-full flex flex-col min-w-0 min-h-0 overflow-hidden text-m3-on-surface">
+      className="w-full flex flex-col min-w-0 text-m3-on-surface">
         {/* Header — the verdict is the largest thing in the modal.
             Honesty: the word WIN/LOSS/DRAW needs BOTH a score and a known side;
             with either missing the verdict is omitted, never guessed. */}
@@ -528,19 +486,9 @@ export const MatchDetailBody: React.FC<MatchDetailBodyProps> = ({
             </div>
           </div>
 
-          <button
-            ref={closeRef}
-            type="button"
-            onClick={onClose}
-            data-tip="Close"
-            aria-label="Close match details"
-            className="w-8 h-8 rounded-xl bg-m3-surface-container-high hover:bg-rose-600 hover:text-white text-m3-outline flex items-center justify-center transition-colors cursor-pointer shrink-0 border border-m3-outline-subtle shadow-xs"
-          >
-            <X className="w-4 h-4" />
-          </button>
         </div>
 
-        {/* Modal Navigation Tabs */}
+        {/* Section tabs */}
         <div
           role="tablist"
           aria-label="Match detail sections"
