@@ -1488,6 +1488,10 @@ const isLastActiveFresh = (s: LiveMatchState | null): s is LiveMatchState =>
   !!s && Date.now() - (s.updatedAt ?? 0) < LAST_ACTIVE_TTL_MS;
 let lastLiveMatchFetchTime = 0;
 let lastLiveMatchResult: LiveMatchState | null = null;
+/** How long a FAILED probe may keep the last board on screen. Long enough to
+ *  ride out a client restart, short enough that a client that never comes back
+ *  does not strand a stale match forever. */
+const LIVE_MATCH_FAILED_PROBE_KEEP_MS = 10 * 60 * 1000;
 let lastActiveMatchState: LiveMatchState | null = null;
 /** Shared by concurrent pollers so overlapping polls run one fetch, not three. */
 let liveMatchInflight: Promise<LiveMatchState> | null = null;
@@ -1730,6 +1734,9 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
     const liveQueue = await fetchLiveQueueId();
 
     let phase: 'idle' | 'pregame' | 'coregame' = 'idle';
+    /** True when a probe THREW. That is "we could not ask", which is a
+     *  different fact from "Riot answered: no match" (a 404 body). */
+    let probeFailed = false;
     let matchId = '';
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let matchData: any = null;
@@ -1748,7 +1755,9 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
           phase = 'coregame';
         }
       }
-    } catch {}
+    } catch {
+      probeFailed = true;
+    }
 
     // 2. Check Pregame (agent select) if not in coregame
     if (phase === 'idle') {
@@ -1765,11 +1774,26 @@ async function fetchLiveMatchStateInner(regionOverride?: string, forceRefresh = 
               .catch(() => {});
           }
         }
-      } catch {}
+      } catch {
+        probeFailed = true;
+      }
     }
 
     if (phase === 'idle' || !matchData) {
       import('./prepick').then((m) => m.resetPrepickLatch()).catch(() => {});
+      // A FAILED probe is not an empty menu. When the client could not be
+      // asked at all, keep the last known board rather than blanking it: a
+      // crashed or restarting Riot client must not look like "you are in the
+      // menu". Bounded by LIVE_MATCH_FAILED_PROBE_KEEP_MS so a client that
+      // never returns does not strand a stale match on screen.
+      if (
+        probeFailed &&
+        lastLiveMatchResult &&
+        lastLiveMatchResult.phase !== 'idle' &&
+        Date.now() - lastLiveMatchFetchTime < LIVE_MATCH_FAILED_PROBE_KEEP_MS
+      ) {
+        return lastLiveMatchResult;
+      }
       // If we were previously in a live match or agent select, verify local presence before declaring idle.
       // This prevents mid-game session loss caused by transient Riot cloud gateway blips or token re-auth.
       if (lastLiveMatchResult && lastLiveMatchResult.phase !== 'idle') {

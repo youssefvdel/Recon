@@ -1226,6 +1226,21 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
     true
   );
 
+  // Sites #6-#9, caller half: a FAILED probe is not an empty menu.
+  const failedProbeMarks = (trackerSrc2.match(/probeFailed = true;/g) ?? []).length;
+  check('both live probes mark a failure', failedProbeMarks, 2);
+  check(
+    'a failed probe keeps the last board instead of declaring the menu',
+    /probeFailed &&[\s\S]{0,200}lastLiveMatchResult\.phase !== 'idle'[\s\S]{0,200}return lastLiveMatchResult;/.test(
+      trackerSrc2
+    ),
+    true
+  );
+  const keepBound = Number(
+    (trackerSrc2.match(/LIVE_MATCH_FAILED_PROBE_KEEP_MS = (\d+) \* 60 \* 1000/) ?? [])[1] ?? -1
+  );
+  check('the keep window is bounded and short', keepBound > 0 && keepBound <= 15, true);
+
   // Sites #10/#11: the presence-driven retry uses the validated transport and
   // KEEPS its .catch — a failed probe preserves last-live-match state.
   check(
