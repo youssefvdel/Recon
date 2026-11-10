@@ -106,15 +106,21 @@ fn app_log_dir(identifier: &str) -> std::path::PathBuf {
         .join("logs")
 }
 
+/// Pre-attach log cap. One generation is enough to hold several launches; a
+/// file that only grows is a file nobody keeps. 256 KB ≈ thousands of lines.
+const STARTUP_LOG_MAX_BYTES: u64 = 256 * 1024;
+
 /// Append one line to `recon-startup.log`. Pre-logger paths only; never panics,
 /// never blocks startup, silently gives up if the disk is unwritable.
 fn append_startup_log(identifier: &str, level: log::Level, msg: &str) {
     let dir = app_log_dir(identifier);
     let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("recon-startup.log");
+    rotate_startup_log(&path);
     let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(dir.join("recon-startup.log"))
+        .open(&path)
     else {
         return;
     };
@@ -126,10 +132,25 @@ fn append_startup_log(identifier: &str, level: log::Level, msg: &str) {
     let _ = writeln!(file, "[{ms}] {level} {msg}");
 }
 
-/// Through the plugin when it is attached, straight to the file when it is not.
-/// `tauri-plugin-log` is now registered, but its setup runs late: the guard and
-/// a failed `Builder::run` both execute before it, and those are exactly the
-/// lines worth having.
+/// Rotate the pre-attach log at `STARTUP_LOG_MAX_BYTES`, keeping one previous
+/// generation as `recon-startup.log.1`. Size-based, not per-launch: a crash
+/// loop must not erase the evidence of the crash before it.
+fn rotate_startup_log(path: &std::path::Path) {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return;
+    };
+    if meta.len() <= STARTUP_LOG_MAX_BYTES {
+        return;
+    }
+    let prev = path.with_extension("log.1");
+    let _ = std::fs::remove_file(&prev);
+    let _ = std::fs::rename(path, &prev);
+}
+
+/// Markers written before the log plugin attaches. Replayed into `Recon.log`
+/// by `replay_boot_markers`, so the timeline reads in one file.
+static BOOT_MARKERS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
 /// Startup breadcrumb. Written through `log_line`, so it lands in
 /// `Recon.log` once the plugin is attached and in `recon-startup.log` before
 /// that — which is the only window where a hang is currently invisible.
@@ -140,11 +161,28 @@ fn append_startup_log(identifier: &str, level: log::Level, msg: &str) {
 /// WebView2 controller, not our setup — today that state is indistinguishable
 /// from a dead app because nothing has been written yet.
 fn boot_marker(identifier: &str, msg: &str) {
-    log_line(
-        identifier,
-        log::Level::Info,
-        &format!("[boot] {msg}"),
-    );
+    let line = format!("[boot] {msg}");
+    // Buffer only while the logger is still off — after the replay these lines
+    // are already in Recon.log and must not be replayed twice.
+    if log::max_level() == log::LevelFilter::Off {
+        if let Ok(mut buf) = BOOT_MARKERS.lock() {
+            buf.push(line.clone());
+        }
+    }
+    log_line(identifier, log::Level::Info, &line);
+}
+
+/// Replay the pre-attach markers through the attached logger, once, so the four
+/// boot lines are contiguous and in order in the file a person opens first.
+/// `recon-startup.log` stays as the fallback for a run that never gets here.
+fn replay_boot_markers() {
+    let lines: Vec<String> = match BOOT_MARKERS.lock() {
+        Ok(mut buf) => buf.drain(..).collect(),
+        Err(poisoned) => poisoned.into_inner().drain(..).collect(),
+    };
+    for line in lines {
+        log::log!(log::Level::Info, "{line}");
+    }
 }
 
 /// JS `logger.warn`/`error` → the same sink the Rust lines use, so `[riot]` and
@@ -161,6 +199,10 @@ fn ui_log(level: String, message: String) {
     log_line("ui", lvl, &message);
 }
 
+/// Through the plugin when it is attached, straight to the file when it is not.
+/// `tauri-plugin-log` is now registered, but its setup runs late: the guard and
+/// a failed `Builder::run` both execute before it, and those are exactly the
+/// lines worth having.
 pub(crate) fn log_line(identifier: &str, level: log::Level, msg: &str) {
     if log::max_level() == log::LevelFilter::Off {
         append_startup_log(identifier, level, msg);
@@ -364,6 +406,9 @@ pub fn run() {
     let run_result = builder
         .manage(app_state)
         .setup(move |app| {
+            // The plugin is attached by now: replay the pre-attach markers so
+            // the whole boot timeline is in Recon.log, in order, in one file.
+            replay_boot_markers();
             boot_marker(&setup_log_id, "setup reached - config windows exist");
 
             // Boot-to-tray: the Run entry passes --minimized at login, so the
