@@ -36,6 +36,22 @@ throws instead of parsing them as empty data. Rank for lobby players is always
 
 ## 2. Tracker Network — secondary, legacy
 
+### Transport: direct Rust first, hidden WebView2 second
+
+The primary TRN transport is Rust-side: `trn_http_get` → `src-tauri/src/trn_http.rs`
+(reqwest/rustls) sets the Overwolf-compatible UA **in Rust** and calls
+`api.tracker.network` directly — no key, no cookies, no login. Only
+`/api/v2/valorant/standard/` paths qualify.
+
+The hidden WebView2 proxy (`trn_proxy_fetch`, `src-tauri/src/trn_proxy.rs`) is the
+fallback: direct disabled, path outside the allowlist, or a direct attempt failed.
+It is also the route that can meet the Warden captcha.
+
+**User opt-out:** `recon_trn_http_enabled_v1` in localStorage. Absent (default) or
+anything but `'0'` → direct ON; `'0'` → direct OFF and every request takes the proxy
+path (`TRN_HTTP_DISABLED`). The transport is unofficial, so the switch is
+user-visible, not a hidden feature flag.
+
 | Route | Params / notes |
 | --- | --- |
 | `GET api.tracker.network/api/v2/valorant/standard/profile/{platform}/{name}%23{tag}` | **`?source=overwolf-2`** (app) vs `source=web` (site); segments + metadata |
@@ -45,16 +61,20 @@ throws instead of parsing them as empty data. Rank for lobby players is always
 
 Semantics (from the shipped app + our probes):
 - **`metadata.privacy`** ∈ `public`, `ranked`; anything else means private — the app
-  returns `{isPrivate:true}` and stops rendering stats.
+  returns `{isPrivate:true}` and stops rendering stats. The payload's own value is
+  recorded verbatim (`noteTrnPrivacy`, `src/utils/trn.ts:1379`) and **outranks** the
+  451 inference: `trnPlayerState` (`src/utils/trn.ts:504`) trusts a payload that said
+  what it is before the negative registry, and a non-`public` value becomes terminal.
 - **404 vs 451**: `404` = no tracker page / never indexed → terminal *missing* (neutral);
   `451` = profile private → terminal *private*. Recon maps both into a negative registry
-  (7 d private, 24 h missing) and never retries them (`src/utils/trn.ts:164-168, 455-520`).
+  (7 d private, 24 h missing) and never retries them (`src/utils/trn.ts:414-460, 504-516`).
 - **`TRN-API-Key` is decorative; the UA is the gate.** The key is hardcoded in TRN's
   shipped package and requests are accepted based on the Overwolf client fingerprint
   (UA/origin), not the key. Never use or ship that key.
-- Browser traffic hits a **Warden captcha** (`429 {"code":"Warden::Challenge"}`); it does
-  not clear with backoff and needs a human — never put it on a retry loop
-  (`docs/tracker-gg-postmortem.md`).
+- The **WebView2/proxy route** can meet a **Warden captcha**
+  (`429 {"code":"Warden::Challenge"}`); it does not clear with backoff and needs a
+  human — never put it on a retry loop (`docs/tracker-gg-postmortem.md`). The direct
+  Rust transport does not see it on the standard paths.
 
 ## 3. Capability matrix — what the rewrite can show
 
