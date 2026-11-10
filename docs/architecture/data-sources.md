@@ -2,7 +2,7 @@
 
 What Recon can read, what each source is good for, and what to build on.
 Evidence: `docs/trn-re/` (TRN app RE), `docs/overwolf/webview2-runtime.md`,
-`docs/upstream/` (TRN wall + data-source probes), code refs in `src/utils/tracker.ts`.
+`docs/upstream/` (TRN wall + data-source probes), code refs in `src/sources/riot.ts` (readers/transport) and `src/utils/tracker.ts` (orchestration).
 
 ## 1. Riot local client — authoritative
 
@@ -17,7 +17,9 @@ Auth: `Riot Client\Config\lockfile` (port/password) for the loopback API;
 | `GET /entitlements/v1/token` | accessToken, entitlements JWT, subject | self (auth) | ✅ |
 | `POST /player-account/lookup/v2/namesets-for-puuids` | Riot IDs for arbitrary PUUIDs, batched 25 | any | ✅ |
 | `GET /chat/v4/presences` | presences; base64 `private` = live map, score, queue, `sessionLoopState`; partyId | all friends/party | ✅ **live score source** |
-| `GET /chat/v1/session`, `/chat/v6|v7/*`, `/social/v1|v2/*` | region, conversations, social graph | self/all | ✅ |
+| `GET /chat/v4/{presences,friends,friendrequests,blocked}`, `/chat/v5/participants`, `/chat/v6/{conversations,conversations/read,friendrequests/full,messages}` | region, conversations, social graph | self/all | ✅ |
+| `GET /name-service/v2/players` (POST batch) | Riot ID for arbitrary PUUIDs — `riot_resolve_names` | any | ✅ |
+| `POST pd.{shard}/store/v3/storefront/{puuid}` | shop (read-shaped POST) — `readStorefront` | self | ✅ |
 | `GET pd.{shard}/mmr/v1/players/{puuid}` | tier, RR, peak + per-season `SeasonalInfoBySeasonID`, `LatestCompetitiveUpdate` | **any puuid** (verified) | ✅ |
 | `GET pd.{shard}/mmr/v1/players/{puuid}/competitiveupdates` | last ~20 RR deltas | any | ✅ |
 | `GET pd.{shard}/match-history/v1/history/{puuid}` | match list (`~95` window; excludes the live match) | any | ✅ |
@@ -50,7 +52,7 @@ for the opt-out below.
 
 **User opt-out:** `recon_trn_http_enabled_v1` in localStorage. Absent (default) or
 anything but `'0'` → direct ON; `'0'` → **no TRN traffic at all**. `trnGet` throws
-`TRN_HTTP_DISABLED` at `src/utils/trn.ts:1007` before any transport is chosen, and
+`TRN_HTTP_DISABLED` at `src/utils/trn.ts:1011` before any transport is chosen, and
 `httpGet` throws at `src/utils/trn.ts:303`; the proxy is never reached, because the
 opt-out is a decision about TRN as a whole, not about one route. The transport is
 unofficial, so the switch is user-visible, not a hidden feature flag.
@@ -77,9 +79,9 @@ Semantics (from the shipped app + our probes):
   never in a worktree; it holds `installer/` and `opk/` package captures (WebView2
   and the Overwolf `.opk`), **not** TRN API responses. A future search for a TRN
   payload has to capture one; it will not be found there. The payload's own value is
-  recorded verbatim (`noteTrnPrivacy`, `src/utils/trn.ts:1379`) and **outranks** the
-  451 inference: `trnPlayerState` (`src/utils/trn.ts:504`) trusts a payload that said
-  what it is before the negative registry, and a non-`public` value becomes terminal.
+  recorded verbatim (`noteTrnPrivacy`, `src/utils/trn.ts:1383`) and **outranks** the
+  451 inference: `trnPlayerState` (`src/utils/trn.ts:514`) trusts a payload that said
+  what it is before the negative registry, and only a value outside the readable pair (`public`, `ranked`) becomes terminal.
 - **404 vs 451**: `404` = no tracker page / never indexed → terminal *missing* (neutral);
   `451` = profile private → terminal *private*. Recon maps both into a negative registry
   (7 d private, 24 h missing) and never retries them (`src/utils/trn.ts:414-460, 504-516`).
@@ -148,3 +150,21 @@ flowchart LR
   N --> F5[Live score · phase]
   X[❌ hidden MMR · ❌ GEP<br/>❌ TRN key/routes] -.->|never| F1
 ```
+
+## Corrections applied 2026-11-10
+
+Verified against HEAD by upstream-api, then fixed here:
+
+- **The chat row was wrong.** No code calls `/chat/v1/session`, `/chat/v7/*` or
+  `/social/*`; the surface is `/chat/v4/*`, `/chat/v5/participants` and `/chat/v6/*`
+  (`src/utils/riotChat.ts:10-21`), with presences over `local_presences`.
+- **Two endpoints were missing:** `/name-service/v2/players` (name resolution for
+  arbitrary PUUIDs) and the storefront POST.
+- **`/coregame/` (no hyphen) is not a route.** The readers used to retry it after a
+  404; every call came back 404 or a transport failure, and it logged an error on
+  every poll. Removed from the live-player, live-match and loadout readers — Riot
+  serves `/core-game/` and `/pregame/` only.
+- **"a non-`public` value becomes terminal" was false** — `ranked` is non-public and
+  still resolves `ready`. Reworded to "outside the readable pair".
+- Three line references had drifted (`trn.ts` throw, `noteTrnPrivacy`,
+  `trnPlayerState`).
