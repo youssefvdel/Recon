@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import '../v2/tokens.css';
 import { CommandLayer, type Overlay } from './CommandLayer';
 import { Now } from './surfaces/Now';
+import { Matches } from './surfaces/Matches';
 
 type Dest = 'now' | 'matches' | 'prep';
 const DESTS: { id: Dest; label: string }[] = [
@@ -85,6 +86,8 @@ export const Shell: React.FC = () => {
       <main className="mx-auto px-6 py-8" style={{ maxWidth: '1280px' }}>
         {dest === 'now' ? (
           <Now />
+        ) : dest === 'matches' ? (
+          <Matches />
         ) : (
           <>
             <h1 className="text-lg font-semibold mb-2">{DESTS.find((d) => d.id === dest)?.label}</h1>
