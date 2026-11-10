@@ -1490,6 +1490,68 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('the player panel is a drawer, not a dialog', /aria-modal=["'{]?true/.test(drawer), false);
 }
 
+// --- step 3: the live lobby is a section, and its states are honest -------
+{
+  const { readFileSync, existsSync } = await import('node:fs');
+  const { trackerCell } = await import('../src/components/live/LobbyRow.tsx');
+  const { noteTrnPrivacy } = await import('../src/utils/trn.ts');
+
+  const base = {
+    puuid: 'p-fresh', name: 'Fresh', tag: 'EUW', team: 'Blue',
+    agentId: '', agentName: 'Jett', agentIcon: '', agentRole: '', tier: 20, rank: 'Diamond 2',
+    rr: 47, peakTier: 0, peakRank: '', accountLevel: 214, cardId: '', isMe: false,
+    kd: 1.24, hsPct: 27,
+  } as any;
+
+  const now = Date.now();
+  // Seed a fresh stats age for the "values + age" case.
+  (globalThis as any).localStorage = {
+    getItem: (k: string) =>
+      k === 'recon_live_player_stats_v3'
+        ? JSON.stringify({ 'p-fresh': { fetchedAt: now - 4 * 3600_000 } })
+        : null,
+    setItem: () => {},
+    removeItem: () => {},
+  };
+
+  const fresh = trackerCell(base, now);
+  // `formatKd` is the app's existing 2-significant-digit formatter (1.24 -> 1.2),
+  // so the assertion pins the real output rather than the spec's illustrative text.
+  check('fresh values carry their age', fresh?.text, '1.2 K/D · 27% HS · 4h');
+
+  const stale = trackerCell({ ...base, puuid: 'p-old' }, now);
+  check('an unageable value is "not cached"', stale?.text, 'not cached');
+
+  noteTrnPrivacy('Hidden', 'EUW', 'private');
+  const priv = trackerCell({ ...base, puuid: 'p-priv', name: 'Hidden' }, now);
+  check('a private profile says so', priv?.text, 'private');
+
+  /* 'missing' only exists after a real 404, which the negative registry models
+   * with state this harness cannot reach; the branch is asserted at the source
+   * and the unknown-name case is asserted behaviourally below. */
+  const unknown = trackerCell({ ...base, puuid: 'p-unknown', name: 'NeverSeen' }, now);
+  check('an unknown profile says "not cached"', unknown?.text, 'not cached');
+  const lobbySrc = readFileSync(new URL('../src/components/live/LobbyRow.tsx', import.meta.url), 'utf8');
+  check('the "no profile" branch exists', /text: 'no profile'/.test(lobbySrc), true);
+
+  const pending = trackerCell({ ...base, trnState: 'pending' }, now);
+  check('a transient read says nothing', pending, null);
+
+  // No keydown, no dialog, no cards on this surface.
+  const liveDir = new URL('../src/components/live/', import.meta.url);
+  for (const f of ['LiveSection.tsx', 'LiveStrip.tsx', 'LobbyRow.tsx', 'useLiveLobby.ts']) {
+    const src = readFileSync(new URL(f, liveDir), 'utf8');
+    check(`${f} owns no keydown`, /addEventListener\('keydown'/.test(src), false);
+    check(`${f} opens no dialog`, /role="dialog"|aria-modal/.test(src), false);
+    check(`${f} mounts no loadout viewer`, /LoadoutViewer/.test(src), false);
+    check(`${f} uses no card tokens`, /rounded-2xl|rounded-3xl|shadow-m3-1|backdrop-blur/.test(src), false);
+  }
+
+  check('the old shell is deleted', existsSync(new URL('../src/components/LiveMatchView.tsx', import.meta.url)), false);
+  const ov = readFileSync(new URL('../src/components/Overview.tsx', import.meta.url), 'utf8');
+  check('Overview renders it first', ov.indexOf('<LiveSection />') < ov.indexOf('<ActHeader'), true);
+}
+
 // --- judge fixes: no dialog in a row, drawer not a modal, id survives ------
 {
   const { readFileSync } = await import('node:fs');

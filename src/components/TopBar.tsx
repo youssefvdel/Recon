@@ -188,7 +188,7 @@ export const TopBar: React.FC<TopBarProps> = ({
       if (typeof document !== 'undefined' && document.hidden) return;
       try {
         const v = isTrackerEnabled();
-        // Equality guard (LiveMatchView/OverlayView pattern): identical
+        // Equality guard (live lobby / OverlayView pattern): identical
         // values never re-render.
         setTrackerOn((prev) => (prev === v ? prev : v));
       } catch {}
@@ -399,7 +399,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             type="button"
             onClick={handleGotoLive}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/15 border border-red-400/50 text-red-300 text-micro font-mono font-bold cursor-pointer hover:bg-red-500/25 active:scale-95 transition-all"
-            data-tip="Live match in progress — jump to Live Match tab"
+            data-tip="Live match in progress — jump to the live lobby"
           >
             <span className="inline-flex rounded-full h-1.5 w-1.5 bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.9)]" />
             <span>LIVE</span>

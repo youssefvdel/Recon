@@ -3,11 +3,9 @@ import { Overview } from './Overview';
 import { MatchHistory } from './MatchHistory';
 import { TrackerMaps } from './TrackerMaps';
 import { TrackerAgents } from './TrackerAgents';
-import { LiveMatchView } from './LiveMatchView';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useLiveMatchActive } from '../hooks/useLiveMatchActive';
 
-export type TrackerSubTab = 'overview' | 'live' | 'matches' | 'agents' | 'maps';
+export type TrackerSubTab = 'overview' | 'matches' | 'agents' | 'maps';
 
 interface SubTabItem {
   id: TrackerSubTab;
@@ -19,21 +17,18 @@ const TABS: SubTabItem[] = [
   { id: 'matches', label: 'Matches' },
   { id: 'agents', label: 'Agents' },
   { id: 'maps', label: 'Maps' },
-  { id: 'live', label: 'Live Match' },
 ];
 
 export const TrackerView: React.FC<{
   initialSubTab?: TrackerSubTab;
-  liveRequest?: number;
   /** A match the previous surface asked to expand, carried across the tab switch. */
   initialMatchId?: string | null;
   onMatchConsumed?: () => void;
-}> = ({ initialSubTab = 'overview', liveRequest = 0, initialMatchId = null, onMatchConsumed }) => {
-  const liveActive = useLiveMatchActive();
+}> = ({ initialSubTab = 'overview', initialMatchId = null, onMatchConsumed }) => {
   const [subTab, setSubTab] = useState<TrackerSubTab>(() => {
     try {
       const saved = localStorage.getItem('recon_active_subtab') as TrackerSubTab;
-      if (saved && ['overview', 'live', 'matches', 'agents', 'maps'].includes(saved)) {
+      if (saved && ['overview', 'matches', 'agents', 'maps'].includes(saved)) {
         return saved;
       }
     } catch {}
@@ -45,11 +40,6 @@ export const TrackerView: React.FC<{
       setSubTab(initialSubTab);
     }
   }, [initialSubTab]);
-
-  // Jump requests from the TopBar LIVE pill: land straight on Live Match.
-  useEffect(() => {
-    if (liveRequest > 0) setSubTab('live');
-  }, [liveRequest]);
 
   useEffect(() => {
     try {
@@ -90,12 +80,6 @@ export const TrackerView: React.FC<{
             >
               <span className="flex items-center gap-1.5">
                 <span>{t.label}</span>
-                {t.id === 'live' && liveActive && (
-                  <span
-                    className="inline-flex rounded-full h-2 w-2 bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.9)]"
-                    aria-hidden="true"
-                  />
-                )}
               </span>
               <span
                 className={`absolute -bottom-px left-2 right-2 h-[2.5px] rounded-full transition-all duration-150 pointer-events-none ${
@@ -119,12 +103,6 @@ export const TrackerView: React.FC<{
           {subTab === 'overview' && (
             <motion.div key="overview" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
               <Overview />
-            </motion.div>
-          )}
-
-          {subTab === 'live' && (
-            <motion.div key="live" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
-              <LiveMatchView />
             </motion.div>
           )}
 

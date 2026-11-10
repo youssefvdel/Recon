@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { LiveSection } from './live/LiveSection';
 import { useTrackerData } from '../hooks/useTrackerData';
 import { fetchTrnActStats, type TrnActStats } from '../utils/trn';
 import type { TrackerMatchDetail } from '../types';
@@ -247,6 +248,11 @@ export const Overview: React.FC = () => {
 
   return (
     <div className="max-w-[940px] mx-auto w-full px-6 pt-6 pb-10 flex flex-col">
+      {/* The live lobby is the top of this feed, not a destination: it renders
+          nothing when there is no match, so an idle client sees the page as
+          it always was. */}
+      <LiveSection />
+
       <div className="flex items-start justify-between gap-4">
         <ActHeader
           eyebrow={[
