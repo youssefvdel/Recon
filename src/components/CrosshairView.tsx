@@ -647,7 +647,7 @@ export const CrosshairView: React.FC = () => {
             <div className="h-10 rounded-xl bg-m3-surface-container-high animate-pulse" />
           </div>
         ) : !state ? (
-          <div className="mx-1 mb-2 px-3 py-2.5 rounded-xl bg-m3-surface-container-high/60 border border-m3-outline-subtle/60 flex items-center gap-2">
+          <div className="mx-1 mb-2 pl-3 py-1 border-l-2 border-m3-outline-subtle/60 flex items-center gap-2">
             <CrosshairIcon className="w-4 h-4 text-m3-outline shrink-0" />
             <span className="text-[10.5px] text-m3-outline leading-snug">
               {error ?? 'Crosshair unavailable right now.'}
