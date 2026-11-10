@@ -29,6 +29,12 @@ env.PATH = [env.PATH, join(homedir(), ".cargo/bin"), "/usr/local/cargo/bin"]
   .filter(Boolean)
   .join(":");
 
+// Windows CreateProcess does not apply PATHEXT: spawning "bun"/"cargo" fails
+// when only bun.exe/cargo.exe exist. Use the running Bun binary and resolve
+// cargo to a real path up front.
+const BUN = process.execPath;
+const CARGO = Bun.which("cargo") ?? "cargo";
+
 interface StageResult {
   name: string;
   ok: boolean;
@@ -105,7 +111,7 @@ async function checksStage(): Promise<StageResult> {
   let ran = 0;
   for (const script of scripts) {
     ran += 1;
-    const r = await run(script, ["bun", script], "", ROOT);
+    const r = await run(script, [BUN, script], "", ROOT);
     if (!r.ok) {
       return {
         name: "check scripts",
@@ -127,13 +133,13 @@ async function checksStage(): Promise<StageResult> {
 async function main(): Promise<void> {
   const started = performance.now();
   const stages: Array<() => Promise<StageResult>> = [
-    () => run("build:ui", ["bun", "run", "build:ui"], "tsc -b + vite"),
-    () => run("lint", ["bun", "run", "lint"], "oxlint"),
+    () => run("build:ui", [BUN, "run", "build:ui"], "tsc -b + vite"),
+    () => run("lint", [BUN, "run", "lint"], "oxlint"),
     checksStage,
-    () => run("pure rust", ["cargo", "test", "--manifest-path", "src-tauri/pure/Cargo.toml"], "recon-pure"),
+    () => run("pure rust", [CARGO, "test", "--manifest-path", "src-tauri/pure/Cargo.toml"], "recon-pure"),
   ];
   if (hasBunTests()) {
-    stages.push(() => run("bun tests", ["bun", "run", "test"], "bun test"));
+    stages.push(() => run("bun tests", [BUN, "run", "test"], "bun test"));
   } else {
     console.log("[skip] bun tests                —        no \"test\" script yet");
   }
