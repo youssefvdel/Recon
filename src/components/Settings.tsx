@@ -86,7 +86,11 @@ export const Settings: React.FC<SettingsProps> = ({
       setStretchedH(res[1]);
       setCustomInputW(res[0].toString());
       setCustomInputH(res[1].toString());
-      setSupportedModes(modes);
+      /* An IPC reply that is not an array used to reach the state as-is and then
+       * throw `supportedModes is not iterable` inside the render, which took the
+       * whole Stretch Setup tab to the error boundary. A bad reply is no modes,
+       * not a crashed page. */
+      setSupportedModes(Array.isArray(modes) ? modes : []);
     } catch (e) {
       if (import.meta.env.DEV) logger.error('Failed to load settings data', e);
     }
