@@ -1,7 +1,7 @@
 {
   "name": "recon",
   "private": true,
-  "version": "0.5.0-alpha31",
+  "version": "0.5.0-alpha32",
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
