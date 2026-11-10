@@ -123,3 +123,36 @@ Cold-start artifacts: bundled runtime dir dated 2026-11-08 22:50; `settings.json
 ## 9. Gaps (not measured — would need a relaunch or a live match)
 
 Warm-start timing · 9223 protocol · `recon.exe` parent · live match board behaviour · window titles.
+
+## 10. alpha28 cold launch (2026-11-10 06:25:16) — logging baseline
+
+Build `0.5.0-alpha28`, exe mtime 06:17:10, 38,477,312 B. Process PID 6984, session 1, session-1
+console; WS 12.1 MB. Installer wrote the exe at 06:17:10 and did **not** relaunch the app; the
+launch came at 06:25:16. `MainWindowHandle 0`, empty title — no visible main window (settings
+`start_minimized: true`).
+
+- WebView2 (all ours): browser 16764 (39.7 MB), renderer 20352 (55.1), renderer 13216 (31.0),
+  gpu 15488 (35.1), utility 8556 (7.8), utility 10488 (0). Host exe
+  `%LOCALAPPDATA%\Recon\webview2-runtime\msedgewebview2.exe` v157.0.4341.42, `--webview-exe-name=recon.exe`,
+  `--user-data-dir=%LOCALAPPDATA%\com.recon.utility\EBWebView`. `127.0.0.1:9223` LISTENING, owner 6984.
+- `Recon.log`: 219 lines total (cumulative across builds). This launch added 12 lines, first
+  `[2026-11-10][06:25:19][INFO][app_lib] [boot] setup reached - config windows exist`, then
+  `[window] main frame delta 16x9 px @ 1x -> min size 1226x809 logical`.
+- Boot markers: **observed split on alpha28, fixed after it.** On alpha28 the file pair was
+  `recon-startup.log` for 3 of 4 (`run() entered v0.5.0-alpha28` → `webview2 preflight passed` →
+  `builder ready; entering run()`, 06:25:16.905–16.976, epoch-ms only) and `Recon.log` for only
+  `[boot] setup reached` — order correct, timeline split.
+  **Shipped behaviour from `600fcf4` (current HEAD):** `boot_marker` buffers the pre-attach lines and
+  `replay_boot_markers()` drains them through the attached logger once, so all four land in
+  `Recon.log` contiguous and in order; `recon-startup.log` stays only as the fallback for a run that
+  dies before attach. **Designed, not yet observed** — no build containing the fix has run on the PC
+  (machine was off-limits when this was corrected).
+- `[tracker]` 30 lines, `[riot]` 126 lines in the file; **every one is emitted twice** ~150 ms
+  apart (same text) — double sink, visible in this launch too (`cached merge` ×2, `riot read
+  failed` ×2).
+- `[riot] read failed {"host":"pd.eu.a.pvp.net","path":"/match-details/v1/matches/:uuid","status":0,"kind":"transport"}`
+  repeats at every launch and in this one (2× at 06:25:26).
+- `recon-startup.log` was cumulative at alpha28 (21 lines, alpha25→alpha28, no rotation).
+  From `600fcf4` it is capped at **256 KB, size-based, keeping one generation**
+  (`recon-startup.log.1`) — a crash loop must not erase the evidence of the crash before it.
+  Unverified on hardware for the same reason as above.
