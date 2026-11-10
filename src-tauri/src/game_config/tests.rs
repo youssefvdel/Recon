@@ -1,8 +1,9 @@
 //! Unit tests for the config editor.
 
 use super::*;
+use std::fs;
 
-    use super::*;
+use super::discover::parse_config;
 
     fn polluted_tmp(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join("aspect_ini_test");
