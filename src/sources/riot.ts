@@ -80,11 +80,36 @@ interface DirectEnt {
 
 let entCache: { at: number; ent: DirectEnt } | null = null;
 
+/** Bounded: one line per minute while the entitlement read keeps failing. */
+const ENT_FAIL_LOG_WINDOW_MS = 60_000;
+let entFailLoggedAt = 0;
+function logEntitlementsFailure(kind: string): void {
+  try {
+    const now = Date.now();
+    if (now - entFailLoggedAt < ENT_FAIL_LOG_WINDOW_MS) return;
+    entFailLoggedAt = now;
+    logger.warn('[riot] entitlements failed', { kind });
+  } catch {
+    /* never throw from a diagnostic */
+  }
+}
+
 export async function getEntitlements(): Promise<DirectEnt> {
   if (entCache && Date.now() - entCache.at < 5 * 60 * 1000) return entCache.ent;
   if (!isTauri()) throw new Error('Tracker needs the desktop app.');
-  const ent = await invoke<DirectEnt>('local_entitlements');
-  if (!ent.access_token) throw new Error('No active session — log into the Riot Client first.');
+  let ent: DirectEnt;
+  try {
+    ent = await invoke<DirectEnt>('local_entitlements');
+  } catch (e) {
+    // Every refresh hits this while the client is signed out or closed, so it
+    // is bounded exactly like the read-failure lines.
+    logEntitlementsFailure(String(e instanceof Error ? e.message : e).slice(0, 160));
+    throw e;
+  }
+  if (!ent.access_token) {
+    logEntitlementsFailure('no-access-token');
+    throw new Error('No active session — log into the Riot Client first.');
+  }
   entCache = { at: Date.now(), ent };
   return ent;
 }

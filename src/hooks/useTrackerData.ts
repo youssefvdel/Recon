@@ -20,6 +20,7 @@ import {
   type AggStats,
 } from '../utils/tracker';
 import { isTauri } from '../utils/ipc';
+import { logger } from '../utils/logger';
 import {
   fetchTrnActStats,
   fetchTrnAgents,
@@ -669,14 +670,26 @@ async function runRefresh(): Promise<void> {
       // caught error each.
       const cachedIds = (cachedSnap.games ?? []).map((g) => g.matchId).filter(Boolean);
       const cachedPuuid = cachedSnap.profile.puuid;
-      if (cachedPuuid && cachedIds.length > 0) {
+      if (!cachedPuuid) {
+        logCachedMerge('no-puuid', { ids: cachedIds.length });
+      } else if (cachedIds.length === 0) {
+        logCachedMerge('no-ids', { hasGames: (cachedSnap.games ?? []).length });
+      } else {
         void detectRegion()
           .catch(() => 'eu')
           .then((region) => aggregateDetails(region, cachedIds, cachedPuuid))
           .then(({ agg: a, byId }) => {
-            updateStore({ agg: a, detailsById: byId, detailsReady: Object.keys(byId).length });
+            const ready = Object.keys(byId).length;
+            // A merge that produced nothing is a failure, not a quiet no-op.
+            if (ready === 0) logCachedMerge('merged-nothing', { ids: cachedIds.length });
+            updateStore({ agg: a, detailsById: byId, detailsReady: ready });
           })
-          .catch(() => {});
+          .catch((err) => {
+            logCachedMerge('threw', {
+              ids: cachedIds.length,
+              error: String(err instanceof Error ? err.message : err).slice(0, 160),
+            });
+          });
       }
     } else {
       updateStore({
@@ -685,6 +698,26 @@ async function runRefresh(): Promise<void> {
     }
   } finally {
     updateStore({ isLoading: false });
+  }
+}
+
+/* Bounded diagnostic for the cached-board path. The first version swallowed
+ * its failure with `.catch(() => {})`, which is the exact bug this fix exists
+ * to remove — a failure wearing the costume of an empty result. One line per
+ * distinct reason per minute, so a stub run names the branch without flooding
+ * the log. */
+const CACHED_MERGE_LOG_WINDOW_MS = 60_000;
+const cachedMergeLoggedAt = new Map<string, number>();
+
+function logCachedMerge(reason: string, detail: Record<string, unknown> = {}): void {
+  try {
+    const now = Date.now();
+    const last = cachedMergeLoggedAt.get(reason);
+    if (last !== undefined && now - last < CACHED_MERGE_LOG_WINDOW_MS) return;
+    cachedMergeLoggedAt.set(reason, now);
+    logger.warn('[tracker] cached merge', { reason, ...detail });
+  } catch {
+    /* never throw from a diagnostic */
   }
 }
 

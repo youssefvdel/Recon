@@ -1377,6 +1377,40 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('the riotGet export does not outlive its reason', rawSites > 0 ? stillExported : !stillExported, true);
 }
 
+// --- A23-1 root cause: a cached detail without duels must not kill the merge --
+{
+  const { deriveHeroics } = await import('../src/utils/tracker.ts');
+  // A detail cached before `kills` existed, or a match Riot answered without
+  // duels. This used to throw here and take the whole aggregate down with it.
+  const bare = { players: [{ puuid: 'me', team: 'Blue', agent: 'Jett' }] } as unknown as Parameters<
+    typeof deriveHeroics
+  >[0];
+  let threw = false;
+  let out: ReturnType<typeof deriveHeroics> | null = null;
+  try {
+    out = deriveHeroics(bare, 'me');
+  } catch {
+    threw = true;
+  }
+  check('a detail without duels does not throw', threw, false);
+  check('and reports no heroics rather than inventing them', out?.flawless, 0);
+  check('and keeps the agent we do know', out?.agent, 'Jett');
+
+  const { readFileSync } = await import('node:fs');
+  const hookSrc2 = readFileSync(new URL('../src/hooks/useTrackerData.ts', import.meta.url), 'utf8');
+  check(
+    'the cached merge logs its failure instead of swallowing it',
+    /logCachedMerge\('threw'/.test(hookSrc2) && !/\}\)\s*\n\s*\.catch\(\(\) => \{\}\);/.test(hookSrc2),
+    true
+  );
+  const riotSrc3 = readFileSync(new URL('../src/sources/riot.ts', import.meta.url), 'utf8');
+  check(
+    'the entitlement failure is logged once per window',
+    /\[riot\] entitlements failed/.test(riotSrc3) && /ENT_FAIL_LOG_WINDOW_MS = 60_000/.test(riotSrc3),
+    true
+  );
+}
+
 // --- the reader boundary logs its failures, bounded ------------------------
 {
   const { readFileSync } = await import('node:fs');

@@ -637,10 +637,14 @@ export function deriveHeroics(
   detail: TrackerMatchDetail,
   puuid: string
 ): { flawless: number; clutch: boolean; ace: boolean; firstKill: boolean; firstDeath: boolean; agent: string; playtimeMs: number } {
-  const me = detail.players.find((p) => p.puuid === puuid);
+  const me = (detail.players ?? []).find((p) => p.puuid === puuid);
   const myTeam = me?.team ?? '';
   const byRound = new Map<number, TrackerDuel[]>();
-  for (const k of detail.kills) {
+  // A cached detail written before `kills` existed (or a match Riot answered
+  // without duels) used to kill the WHOLE aggregate: one missing field threw
+  // here, aggregateDetails rejected, and the caller rendered placeholders over
+  // data that was sitting on disk. A detail without duels simply has none.
+  for (const k of detail.kills ?? []) {
     const l = byRound.get(k.round) ?? [];
     l.push(k);
     byRound.set(k.round, l);
@@ -660,7 +664,7 @@ export function deriveHeroics(
     if (won && !iDied && myKills > 0 && mateDeaths >= 3) clutch = true;
     if (myKills >= 5) ace = true;
   }
-  const flat = [...detail.kills].sort((a, b) => a.round - b.round || a.timeInRound - b.timeInRound);
+  const flat = [...(detail.kills ?? [])].sort((a, b) => a.round - b.round || a.timeInRound - b.timeInRound);
   return {
     flawless,
     clutch,
@@ -687,7 +691,7 @@ export interface MatchCard {
 /** Per-match Blitz-style card: multikills, KAST, damage delta, clutch flags, weapons. */
 export function matchCard(detail: TrackerMatchDetail, puuid: string): MatchCard {
   const byRound = new Map<number, TrackerDuel[]>();
-  for (const k of detail.kills) {
+  for (const k of detail.kills ?? []) {
     const l = byRound.get(k.round) ?? [];
     l.push(k);
     byRound.set(k.round, l);
