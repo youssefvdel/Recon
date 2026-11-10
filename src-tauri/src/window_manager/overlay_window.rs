@@ -1,3 +1,10 @@
+//! The HUD window itself: styles, subclass, placement, edit mode, click-through.
+//!
+//! Style and placement stay in one file on purpose: `setup_overlay_window`,
+//! `set_overlay_editable` and `toggle_overlay_clickthrough` each set styles AND
+//! reposition in the same pass, so splitting them by "style vs policy" would cut
+//! through single functions.
+
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MonitorFromWindow, RedrawWindow, HRGN, MONITORINFO, MONITOR_DEFAULTTONEAREST,
