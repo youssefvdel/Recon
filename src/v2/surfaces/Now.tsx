@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTrackerData } from '../../hooks/useTrackerData';
 import { LiveSection } from '../../components/live/LiveSection';
+import { nowFeed } from '../now/feed';
 
 /** Now: the live strip (reused, not rebuilt) plus the act record and the recent
  *  match feed. Same hooks, same data path — only the presentation is v2. */
@@ -21,23 +22,10 @@ export const Now: React.FC = () => {
   }, []);
   const age = trnFetchedAt ? Math.round((now - trnFetchedAt) / 3_600_000) : undefined;
 
-  const feed = useMemo(() => {
-    const list = [...(games ?? [])].sort((a, b) => (b.when ?? 0) - (a.when ?? 0)).slice(0, 5);
-    return list.map((g) => {
-      const d = detailsById?.[g.matchId];
-      const me = d?.players?.find((p) => p.puuid?.toLowerCase() === profile?.puuid?.toLowerCase());
-      const team = me?.team;
-      const mine = team ? d?.teamScore?.[team] : undefined;
-      const theirs = team ? d?.teamScore?.[team === 'Blue' ? 'Red' : 'Blue'] : undefined;
-      return {
-        id: g.matchId,
-        map: mapById?.[g.matchId] ?? '',
-        score: mine !== undefined && theirs !== undefined ? `${mine}–${theirs}` : '',
-        result: mine !== undefined && theirs !== undefined ? (mine > theirs ? 'W' : mine < theirs ? 'L' : 'D') : '',
-        agent: me?.agent ?? '',
-      };
-    });
-  }, [games, detailsById, mapById, profile?.puuid]);
+  const feed = useMemo(
+    () => nowFeed(games, mapById, detailsById, profile?.puuid, 5),
+    [games, detailsById, mapById, profile?.puuid]
+  );
 
   return (
     <div className="flex flex-col gap-6">
