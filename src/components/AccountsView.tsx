@@ -239,9 +239,12 @@ export const AccountsView: React.FC<{
     }
   };
 
+  /* The backend contract is `Option<String>`; a view must not crash if a build
+   * hands it something else (the dev harness did, and the whole page died on
+   * `liveId.toLowerCase is not a function`). Wrong shape = "no live account". */
+  const liveKey = typeof liveId === 'string' ? liveId.toLowerCase() : null;
   const isLive = (m: AccountMeta): boolean =>
-    liveId !== null &&
-    `${m.game_name}#${m.tag_line}`.toLowerCase() === liveId.toLowerCase();
+    liveKey !== null && `${m.game_name}#${m.tag_line}`.toLowerCase() === liveKey;
 
   const liveAccount = accounts.find((m) => isLive(m)) ?? null;
   const savedAccounts = accounts.filter((m) => !isLive(m));
