@@ -74,8 +74,16 @@ Until then the live rows have no Skins/Loadouts affordance.
 
 ## Known gaps, deliberately not fixed
 
-- `riotPut`/`riotPost`: prepick converted; **storefront in progress** (rust-proxy);
-  `crosshair.ts` remains raw (real write, needs read-back — its own session).
+- **Write path: CLOSED.** Zero raw `riotPut`/`riotPost` call sites remain. prepick
+  (fire-and-forget), storefront (validated read-shaped POST), and crosshair (typed
+  payload → validated PUT → **read back and compare**) all go through
+  `sources/riot.ts`, and devqa's expected list is now empty — a new raw write fails
+  the check. Honest limit: the crosshair read-back is type-checked only; proving
+  GET-after-PUT matches needs a signed-in client on Windows.
+- **Fabricated defaults removed** (`a8aef32`): `bestKills || 30`,
+  `defusesPerMatch || 0.58`, `plantsPerMatch || 2.09`, `defenseKd || kd` /
+  `attackKd || kd`, `kast: 72`, `formatTime(0) → "0m"`. Absent is now absent, and
+  devqa greps for every literal so they cannot come back.
 - Agent portraits blank ~1–2 s on cold load while `media.valorant-api.com`
   resolves. Cosmetic.
 - `detailsById` is excluded from the account snapshot (quota), so a match never
