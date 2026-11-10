@@ -1,60 +1,80 @@
-# Open work — 2026-11-10 06:09
+# Open work — 2026-11-10 08:46
 
-Written immediately before a planned reboot (06:14) that completes the `/tmp`
-RAM→SSD switch. Everything here survived the reboot: it is committed, pushed,
-and written down rather than remembered.
+Rewritten after the UI direction was chosen (**B — Season Stream**) and the first
+two migration steps landed. The previous version of this file (06:09) described a
+state that no longer exists; this one is the live picture.
 
 ## Shipping state
 
-- `v0.5.0-alpha28` (tag `903f4b2`) — toast notices, PreRoundPanel, one
-  `not cached` vocabulary, window floor 1360×850.
-- `alpha27` — snapshot TTL no longer deletes (age shown instead), act names
-  cached, single `Not cached` row.
-- Main is clean and pushed. Worktree `Recon-live` is clean at `5bfa4fb`.
+- `v0.5.0-alpha31` (tag on `0aee253`) — Tab show-path fix (`d0f221d`), Retry fix,
+  2a (match body extracted). **Published, not mirrored, recorded as superseded.**
+- `v0.5.0-alpha30` — last build on the LAN mirror.
+- `alpha32` is **cut-ready but blocked** on the 2b/2c rework below, not on CI.
+  Notes are finalised at `/home/youssefvdel/tmp/recon-alpha32-notes.md`.
 
-## In flight (design phase, not code)
+## In flight — Matches (migration step 2)
 
-**Full UI refactor — three independent directions.**
-`ui-audit` is producing **A** and **B**, `overlay-audit` **C**, each as a
-rendered board (`design/board-*.html`) showing Overview · Matches · Match
-detail, plus type scale, colour-role table, card policy, nav/tab model and
-build cost. The user picks from screenshots. Do not start implementing a
-direction before one is picked.
+2b and 2c are implemented in worktree `Recon-live` (`refactor/live-stats`,
+rebased onto main: `46983dd` one-expansion, `4855d5a` modal deleted) and the
+design judge **failed two of four rules**:
 
-The match-detail audit that prompted it stands on its own and should be read
-first: one scroll does three jobs, two round navigations, flat hierarchy
-(the map name is the largest thing, the result is a small chip), 14 cramped
-columns, and mint/coral carrying four meanings (team, win/loss, K/D sign,
-ATK/DEF).
+1. **Dialog semantics survived the move.** `MatchDetailBody` still carries
+   `role="dialog" aria-modal="true"`, a focus move into a close X, and a close
+   button. In a ledger row that is a modal docked in a list, not an expansion.
+2. **Nested dialog.** It still mounts `PlayerOverviewModal` as a dialog;
+   migration step 2 says drawer.
+3. **The feed→ledger hand-off is lost.** `Overview` dispatches
+   `recon:goto-match` before `App` switches tab, `App` keeps no id, and
+   `MatchHistory` only registers its listener on mount — so the click lands on
+   Matches with **nothing expanded**.
 
-## Next units of work, in order
+Fix owner: ts-client. Judge: ui-audit. Merge, then cut alpha32.
 
-1. **Four direction-independent modal fixes** (ui-audit's list, one commit):
-   delete the header mini-strip, verdict hero `WIN 11–13`, sticky scoreboard
-   header, single sticky round rail hoisted out of `RoundTimeline`.
-2. **Design direction pick** → implement across surfaces.
-3. **PreRoundPanel in-match verification** — the widget exists and is wired
-   (`showPreRound`, `positions.preRound`), but nobody has seen it in a real
-   agent select. Score renders only when both sides are numeric; round number
-   is absent by design (the payload has no such field).
-4. **The live board during a real match — still the only unverified claim in
-   the project.** Everything upstream is measured.
+**Rule worth keeping from this:** a green build is not a UX verdict — the CI was
+green while the behaviour was wrong.
+
+## Done and verified (do not re-open)
+
+- **UI direction chosen: B (Season Stream).** Boards A/B/C are on disk as
+  rendered HTML (`design/board-{a,b,c}.html`) with screenshots in
+  `docs/design/shots/`. B is the one being built.
+- **Overview rebuilt** — 815 → 373 lines, 27 card tokens → 0, eight cards and
+  five local components deleted. Judged PASS twice; Retry proven by request
+  count (`actFetchKey` + nonce), not by reading code.
+- **Unrated playlist restored** after a redesign commit had quietly deleted it.
+- **Colour contract** — mint/coral mean a resolved outcome only; the HUD, the
+  board and `primitives/colors.ts` all obey it.
+- **Overlay Tab-lag fix** (`d0f221d`) — style pass and cursor-events only on
+  change, duplicate `set_shadow` gone, occlusion flags added, visibility-return
+  fetch deferred 300 ms. Logs `[perf] overlay show Nms` above 5 ms.
+- **Data layer** — single validated transport in `sources/riot.ts`; tracker has
+  zero raw call sites; `ranked` privacy is `ready`.
+- `docs/design/{audit,migration-b,overview-b-spec}.md` hold the full reasoning.
+
+## Next after Matches
+
+Migration steps 3–9 from `docs/design/migration-b.md`: live strip → Prep (Agents +
+Maps fold) → Tools as anchored sections → shell (act scrubber, ⌘K, sidebar
+removal) → Settings dialog → cleanup → **HUD last**.
+
+## Still unverified — the only item needing him
+
+**The live board during a real match, and the Pre-Round panel during agent
+select.** Both are built and wired; nobody has seen either in a live game on a
+current build. Everything else has been measured.
 
 ## Known gaps, deliberately not fixed
 
-- `riotPut`/`riotPost` are still exported and used raw by `crosshair.ts`,
-  `prepick.ts`, `store.ts`. GET is fully validated; PUT/POST is not.
+- `riotPut`/`riotPost`: prepick converted; **storefront in progress** (rust-proxy);
+  `crosshair.ts` remains raw (real write, needs read-back — its own session).
 - Agent portraits blank ~1–2 s on cold load while `media.valorant-api.com`
-  resolves. Cosmetic, logged as such — do not treat as a regression.
-- `detailsById` is deliberately excluded from the account snapshot (928 kB vs
-  quota), so a match never opened before stays `not cached` while Riot is
-  closed. That is intended behaviour.
+  resolves. Cosmetic.
+- `detailsById` is excluded from the account snapshot (quota), so a match never
+  opened stays `not cached` while Riot is closed. Intended.
 
-## Environment fact worth remembering
+## Environment
 
-`/tmp` was a 12 GB **RAM** disk that filled twice and pushed the box into
-6.6 GB of swap; filling it kills every shell tool with `EDQUOT (-122)`.
-`tmp.mount` is now masked, `/etc/tmpfiles.d/tmp.conf` deletes files older than
-2 days, and the harness runs with `TMPDIR=/home/youssefvdel/tmp`. Bulk temp
-belongs on `/home` or `/mnt/data`, never `/tmp`. Post-boot verification is
-written to `/var/log/postboot-check.log` by `postboot-check.service`.
+`/tmp` is disk-backed since the 06:14 reboot (`tmp.mount` masked, 2-day cleanup,
+`TMPDIR=/home/youssefvdel/tmp`). RAM went from 5.8 GB used to 1.2 GB. Bulk temp
+belongs on `/home` or `/mnt/data`, never `/tmp` — a full `/tmp` kills every shell
+tool with `EDQUOT (-122)`.
