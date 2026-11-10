@@ -1467,6 +1467,24 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('readSnapshot no longer discards a stale snapshot', /return null;\s*\}\s*\n\}/.test(parseBody) && !/SNAPSHOT_TTL/.test(parseBody), true);
 }
 
+// --- 2a: the body moved out, the dialog stayed a thin wrapper -------------
+{
+  const { existsSync, readFileSync } = await import('node:fs');
+  const bodyPath = new URL('../src/components/matches/MatchDetailBody.tsx', import.meta.url);
+  const modalPath = new URL('../src/components/MatchDetailModal.tsx', import.meta.url);
+  check('the body lives in matches/', existsSync(bodyPath), true);
+
+  const modal = readFileSync(modalPath, 'utf8');
+  check('the modal is a thin wrapper', modal.split('\n').length < 30, true);
+  check('and it renders the moved body', /<MatchDetailBody \{\.\.\.props\} \/>/.test(modal), true);
+  check('the chrome lives in the wrapper, not the body', /bg-black\/80/.test(modal), true);
+
+  const body = readFileSync(bodyPath, 'utf8');
+  check('the body no longer draws a full-screen backdrop', /absolute inset-0 bg-black\/80/.test(body), false);
+  check('and still owns its own open/close contract', /if \(!isOpen \|\| !detail\) return null;/.test(body), true);
+  check('nothing the modal showed was dropped', /RoundTimeline/.test(body) && /RoundRail/.test(body) && /role="tablist"/.test(body), true);
+}
+
 // --- Retry after a failed fetch issues a SECOND request -------------------
 {
   const { actFetchKey } = await import('../src/utils/actFetchKey.ts');
@@ -1633,7 +1651,8 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   const { readFileSync } = await import('node:fs');
   const rail = readFileSync(new URL('../src/components/primitives/RoundRail.tsx', import.meta.url), 'utf8');
   const tl = readFileSync(new URL('../src/components/RoundTimeline.tsx', import.meta.url), 'utf8');
-  const mdm2 = readFileSync(new URL('../src/components/MatchDetailModal.tsx', import.meta.url), 'utf8');
+  // The modal's content lives in matches/MatchDetailBody since 2a.
+  const mdm2 = readFileSync(new URL('../src/components/matches/MatchDetailBody.tsx', import.meta.url), 'utf8');
 
   // One selector: the rail. RoundTimeline must not render a second tablist.
   check('RoundTimeline no longer renders a round tablist', /role="tablist"/.test(tl), false);
@@ -1656,7 +1675,7 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
 {
   const { readFileSync } = await import('node:fs');
   const { matchVerdict } = await import('../src/utils/matchVerdict.ts');
-  const mdm = readFileSync(new URL('../src/components/MatchDetailModal.tsx', import.meta.url), 'utf8');
+  const mdm = readFileSync(new URL('../src/components/matches/MatchDetailBody.tsx', import.meta.url), 'utf8');
 
   // The honesty rule: no side or no score means no verdict word.
   check('a win is a win', matchVerdict(13, 11), 'WIN');
