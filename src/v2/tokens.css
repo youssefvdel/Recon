@@ -28,7 +28,9 @@
   --negative: #ff6658;
   --attention: #e7b84d;
   --live: #ff7a45;
-  --focus: #c9f25c;
+  --focus-ring: #ffffff;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
 
   /* Families: roles choose from these; no component picks a new face */
   --font-display: 'Space Grotesk', 'Arial Narrow', Arial, sans-serif;
@@ -118,7 +120,9 @@
   --negative: #ff9d90;
   --attention: #e5bd6b;
   --live: #ff7a86;
-  --focus: #c9b8ff;
+  --focus-ring: #ffffff;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
 
   --font-display: 'Fraunces', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
   --font-body: 'Inter', 'Segoe UI', system-ui, sans-serif;
@@ -139,4 +143,13 @@
     --motion-slow: 0ms;
     --motion-large: 0ms;
   }
+}
+
+/* One focus shape for the whole app. Components must not re-declare it.
+ * :focus-visible only: keyboard gets a 2px white ring at 2px offset; mouse gets none.
+ * White clears 16.9:1 or better against every dark surface (see theme-contrast.md). */
+:where(:focus:not(:focus-visible)) { outline: none; }
+:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }

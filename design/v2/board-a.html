@@ -11,7 +11,7 @@
 :root{
   --surface-0:#0b0811; --surface-1:#151020; --surface-2:#1e172b;
   --on-surface:#f4eefb; --on-surface-muted:#a99bb9; --outline:#352b45; --outline-strong:#544468;
-  --accent:#c9b8ff; --on-accent:#1b1030; --positive:#a8e8c5; --negative:#ff9d90; --attention:#e5bd6b; --live:#ff7a86; --focus:#c9b8ff;
+  --accent:#c9b8ff; --on-accent:#1b1030; --positive:#a8e8c5; --negative:#ff9d90; --attention:#e5bd6b; --focus-ring:#ffffff; --focus-ring-width:2px; --focus-ring-offset:2px; --live:#ff7a86;
   --font-display:"Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
   --font-body:"Inter", "Segoe UI", system-ui, sans-serif;
   --font-mono:"JetBrains Mono", "SFMono-Regular", Consolas, monospace;
@@ -118,6 +118,9 @@ table.stats{width:100%;border-collapse:collapse;font-family:var(--font-mono);fon
 .theme-desc{letter-spacing:.01em}
 .swatches{display:flex;gap:5px;margin-left:auto}
 .swatches i{width:12px;height:12px;border-radius:3px;background:var(--s);border:1px solid rgba(255,255,255,.16)}
+/* Keyboard-only focus: one owner, no component-specific ring. */
+:focus:not(:focus-visible){outline:none}
+:focus-visible{outline:var(--focus-ring-width) solid var(--focus-ring);outline-offset:var(--focus-ring-offset)}
 @media (max-width:900px){
   :root{--pad:20px;--gap:14px}
   .appbar{height:56px;gap:14px}
