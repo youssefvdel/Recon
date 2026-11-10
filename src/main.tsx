@@ -1,7 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
-import App from './App.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary.tsx'
 
 // Desktop-app hygiene: no browser context menus anywhere (main + overlay).
@@ -35,11 +34,25 @@ if (!rootEl) {
     document.body.appendChild(message);
   }
 } else {
-  createRoot(rootEl).render(
-    <StrictMode>
-      <ErrorBoundary>
-        <App />
-      </ErrorBoundary>
-    </StrictMode>,
-  )
+  /* Boot is async only for the Linux dev harness: in DEV the mock has to be in
+   * place before the first effect calls `invoke`. In a production build
+   * `import.meta.env.DEV` is false, the branch disappears, and the harness
+   * module is never in the graph — `build:ui` output is unchanged. */
+  void (async () => {
+    if (import.meta.env.DEV) {
+      const { installDevHarness } = await import('./dev/mock/harness');
+      installDevHarness();
+    }
+    /* App is imported AFTER the harness: its module graph (the tracker store
+     * included) reads localStorage at import time, so seeding has to happen
+     * first or the store hydrates from an empty cache. */
+    const { default: App } = await import('./App.tsx');
+    createRoot(rootEl).render(
+      <StrictMode>
+        <ErrorBoundary>
+          <App />
+        </ErrorBoundary>
+      </StrictMode>,
+    );
+  })();
 }
