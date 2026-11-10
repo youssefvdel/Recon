@@ -100,6 +100,27 @@ Replaced with the four-way definition, with the number change called out in the
 commit body — a silently corrected stat is worse than the wrong one, because
 screenshots get compared across versions.
 
+## The honesty sweep found 18 more, and 8 of them you would believe
+
+125 files, 38,261 lines (`docs/v2/honesty-audit.md`). The worst three:
+
+1. **`Math.max(1, …)` as a round denominator** — when the round count was missing,
+   ACS and ADR were divided by 1 and inflated **10–30×**. A plausible number is
+   worse than a blank one, because nothing looks wrong.
+2. **`userTier || 22`** — an unknown rank became tier 22, so the overlay **named a
+   rank the player did not have**.
+3. **`kd: deaths > 0 ? k/d : k`** — with zero deaths, K/D silently became the raw
+   kill count.
+
+Plus a fabricated match duration (`rounds × 105s`), display panels claiming
+`2560×1440@260` after a failed read, `accountLevel || 1`, and 0% win shown as
+"you never win". All being fixed tonight, each with an assertion.
+
+**And the harness earned its keep immediately**: it crashed Prep — a missing stat
+called `.toFixed` on `undefined`, the error boundary replaced the whole view, and
+a literal `NaN` was printed in one column. Both fixed, verified in the DOM (0 NaN
+cells), asserted.
+
 ## Decisions I made overnight (all reversible)
 
 1. **Engine stays, presentation is rebuilt.** `src/sources/`, `src/live/`,
