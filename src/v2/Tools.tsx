@@ -170,7 +170,7 @@ export const Tools: React.FC<ToolsProps> = ({ anchor, onAnchorApplied }) => {
       </Section>
 
       <Section id="prepick" label={TOOL_SECTIONS[2].label} force={anchor === 'prepick'} armed={armed}>
-        <PrepickView embedded />
+        <PrepickView />
       </Section>
 
       <Section id="resolution" label={TOOL_SECTIONS[3].label} force={anchor === 'resolution'} armed={armed}>

@@ -121,7 +121,7 @@ export const HardwareScaling: React.FC<HardwareScalingProps> = ({ gpuInfo }) => 
   return (
     <div className="space-y-3 max-w-6xl mx-auto">
       {/* Top GPU Header (M3 Expressive Surface) */}
-      <section className="border-b border-m3-outline-subtle p-3.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+      <section className="bg-m3-surface-container border border-m3-outline-subtle rounded-2xl p-3.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-m3-1">
         <div className="flex items-center space-x-3">
           <div className="w-10 h-10 rounded-xl bg-m3-primary-container border border-m3-primary/30 flex items-center justify-center text-m3-primary shadow-xs shrink-0">
             <Cpu className="w-5 h-5" />
@@ -175,7 +175,7 @@ export const HardwareScaling: React.FC<HardwareScalingProps> = ({ gpuInfo }) => 
       {/* Real GPU Settings Toggles */}
       <div className="grid grid-cols-1 gap-3 items-start">
         {/* Full-width toggle list */}
-        <div className="border-b border-m3-outline-subtle p-3.5 space-y-2.5">
+        <div className="bg-m3-surface-container border border-m3-outline-subtle rounded-2xl p-3.5 space-y-2.5 shadow-m3-1">
           <div className="flex items-center justify-between border-b border-m3-outline-subtle pb-2">
             <div>
               <h3 className="font-display font-bold text-xs text-m3-on-surface">

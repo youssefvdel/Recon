@@ -345,7 +345,7 @@ export const CustomResolution: React.FC<CustomResolutionProps> = ({
       : [260, 240, 165, 144, 120, 60];
 
   return (
-    <div className="flex flex-col gap-2.5 p-3.5 select-none text-m3-on-surface relative border-b border-m3-outline-subtle">
+    <div className="flex flex-col gap-2.5 p-3.5 select-none bg-m3-surface-container text-m3-on-surface relative rounded-2xl border border-m3-outline-subtle shadow-m3-1">
       {/* SAFE TEST COUNTDOWN OVERLAY MODAL */}
       {isTesting && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 animate-in fade-in duration-150">
@@ -452,7 +452,7 @@ export const CustomResolution: React.FC<CustomResolutionProps> = ({
             <span>Width (Horizontal)</span>
             <span className="text-[10px] font-mono text-m3-outline">even px</span>
           </label>
-          <div className="relative flex items-center border-b border-m3-outline-subtle focus-within:border-m3-primary transition-colors">
+          <div className="relative flex items-center rounded-xl bg-m3-surface-container-lowest border border-m3-outline-subtle/90 hover:border-m3-outline focus-within:border-m3-primary focus-within:ring-2 focus-within:ring-m3-primary/30 transition-all shadow-inner">
             <input
               type="number"
               step="2"
@@ -475,7 +475,7 @@ export const CustomResolution: React.FC<CustomResolutionProps> = ({
             <span>Height (Vertical)</span>
             <span className="text-[10px] font-mono text-m3-outline">even px</span>
           </label>
-          <div className="relative flex items-center border-b border-m3-outline-subtle focus-within:border-m3-primary transition-colors">
+          <div className="relative flex items-center rounded-xl bg-m3-surface-container-lowest border border-m3-outline-subtle/90 hover:border-m3-outline focus-within:border-m3-primary focus-within:ring-2 focus-within:ring-m3-primary/30 transition-all shadow-inner">
             <input
               type="number"
               step="2"
@@ -522,7 +522,7 @@ export const CustomResolution: React.FC<CustomResolutionProps> = ({
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -4, scale: 0.98 }}
                   transition={{ duration: 0.12 }}
-                  className="absolute left-0 right-0 top-full mt-1.5 z-50 border-t border-m3-outline-subtle shadow-2xl p-1.5 custom-scrollbar max-h-48 overflow-y-auto"
+                  className="absolute left-0 right-0 top-full mt-1.5 z-50 rounded-xl bg-m3-surface-container border border-m3-outline-subtle shadow-2xl p-1.5 custom-scrollbar max-h-48 overflow-y-auto"
                 >
                   {supportedRates.map((r) => {
                     const isSelected = r === hz;
