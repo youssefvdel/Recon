@@ -6,5 +6,16 @@
   },
   "bundle": {
     "resources": []
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "decorations": false,
+        "width": 1210,
+        "height": 800,
+        "title": "Recon (dev)"
+      }
+    ]
   }
 }
