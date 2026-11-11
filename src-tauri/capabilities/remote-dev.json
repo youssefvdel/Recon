@@ -1,0 +1,32 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "remote-dev",
+  "description": "Lets the UI served from the LAN dev server (this box) use IPC while developing on the Windows PC. Development only: the shipping app loads bundled assets, not this origin.",
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://192.168.100.2:5173"
+    ]
+  },
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-destroy",
+    "core:window:allow-is-maximized",
+    "core:window:allow-unminimize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "mcp-bridge:default",
+    "updater:default",
+    "process:allow-restart"
+  ]
+}
