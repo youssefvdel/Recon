@@ -7,6 +7,11 @@ REM and is not on PATH. vcvars64.bat puts it there, then the app starts.
 setlocal
 cd /d "%~dp0"
 
+echo [recon] pulling latest from origin
+git pull --ff-only
+if errorlevel 1 echo [recon] WARNING: git pull failed - running the local checkout as-is
+echo.
+
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
 set "VCVARS="
 if exist "%VSWHERE%" (
@@ -26,3 +31,9 @@ if exist "%VCVARS%" (
 where link >nul 2>&1 && echo [recon] linker ready
 echo [recon] starting tauri dev (local UI)
 bun run dev
+
+if errorlevel 1 (
+  echo.
+  echo [recon] the build failed - the error is above. Press any key to close.
+  pause >nul
+)
