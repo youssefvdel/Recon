@@ -5,11 +5,6 @@
     "beforeDevCommand": null
   },
   "bundle": {
-    "resources": [],
-    "windows": {
-      "webviewInstallMode": {
-        "type": "downloadBootstrapper"
-      }
-    }
+    "resources": []
   }
 }
