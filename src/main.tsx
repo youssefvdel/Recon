@@ -57,15 +57,19 @@ if (!rootEl) {
     const hash = window.location.hash;
     const label = (window as unknown as { __TAURI_INTERNALS__?: { metadata?: { currentWindow?: { label?: string } } } })
       .__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
-    const legacy =
-      q.has('legacy') ||
-      hash.includes('overlay') || q.has('overlay') ||
-      label === 'overlay' || label === 'dev';
+
+    /* The shipping app is App. The rebuilt shell is opt-in with ?v2=1 while we
+     * work on it together — it is not deleted, just not the default. The overlay
+     * (HUD) and dev windows always take App: their trees are not the shell's. */
+    const specialWindow =
+      hash.includes('overlay') || q.has('overlay') || label === 'overlay' || label === 'dev';
+    const useV2 = q.has('v2') && !specialWindow;
+
     const { default: App } = await import('./App.tsx');
     const { Shell } = await import('./v2/Shell');
     createRoot(rootEl).render(
       <StrictMode>
-        <ErrorBoundary>{legacy ? <App /> : <Shell />}</ErrorBoundary>
+        <ErrorBoundary>{useV2 ? <Shell /> : <App />}</ErrorBoundary>
       </StrictMode>,
     );
   })();
