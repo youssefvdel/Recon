@@ -174,8 +174,9 @@ jobs:
             echo "Release v${VERSION} already exists; replacing its assets (retry after a failed run)."
             gh release upload "v${VERSION}" "${ASSETS[@]}" --clobber
           else
+            if [[ "$VERSION" == *-* ]]; then PRERELEASE_FLAGS="--prerelease --latest=false"; else PRERELEASE_FLAGS="--latest"; fi
             gh release create "v${VERSION}" "${ASSETS[@]}" \
               --title "Recon v${VERSION}" \
               --notes-file release-notes.md \
-              --latest
+              $PRERELEASE_FLAGS
           fi
