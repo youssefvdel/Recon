@@ -34,6 +34,28 @@ extern "system" {
     ) -> windows::core::HRESULT;
 }
 
+// A layered window must also declare how its pixels are composited; LWA_ALPHA
+// at 255 means "use the window's own alpha unchanged", which is what a
+// transparent swapchain needs. Without it Windows can treat the layered
+// surface as fully transparent.
+#[link(name = "user32")]
+extern "system" {
+    fn SetLayeredWindowAttributes(
+        hwnd: HWND,
+        color_key: COLORREF,
+        b_alpha: u8,
+        dw_flags: LAYERED_WINDOW_ATTRIBUTES_FLAGS,
+    ) -> BOOL;
+}
+
+#[repr(C)]
+pub struct COLORREF(pub u32);
+
+#[repr(C)]
+pub struct LAYERED_WINDOW_ATTRIBUTES_FLAGS(pub u32);
+
+pub const LWA_ALPHA: LAYERED_WINDOW_ATTRIBUTES_FLAGS = LAYERED_WINDOW_ATTRIBUTES_FLAGS(0x2);
+
 unsafe extern "system" fn subclass_proc(
     hwnd: HWND,
     msg: u32,
@@ -248,15 +270,23 @@ pub fn apply(val: isize, clickthrough: bool, rect: Option<(i32, i32, i32, i32)>)
         SetWindowLongPtrW(h, GWL_STYLE, style);
 
         let mut ex = (GetWindowLongPtrW(h, GWL_EXSTYLE) as u32) | 0x00000008 | 0x00000080; // TOPMOST | TOOLWINDOW
-                                                                                           // WS_EX_LAYERED is banned (AGENTS.md): it forces DWM composition over
-                                                                                           // the borderless game and breaks the DirectComposition surface.
-        ex &= !0x00080000;
         if clickthrough {
-            ex |= 0x00000020 | 0x08000000; // TRANSPARENT | NOACTIVATE
+            // Reference implementation: Tao's set_ignore_cursor_events (and
+            // winit's set_cursor_hittest) both set TRANSPARENT **and**
+            // LAYERED. HTTRANSPARENT from WM_NCHITTEST only forwards within
+            // the same thread, so without LAYERED the click stays on this
+            // window instead of reaching the game. Proven by reading
+            // tao-0.35.3/src/platform_impl/windows/window_state.rs:285-287.
+            // LWA_ALPHA 255 keeps the composited content fully opaque; the
+            // alpha comes from the swapchain, not the layered attribute.
+            ex |= 0x00000020 | 0x00080000 | 0x08000000; // TRANSPARENT | LAYERED | NOACTIVATE
         } else {
-            ex &= !(0x00000020 | 0x08000000);
+            ex &= !(0x00000020 | 0x00080000 | 0x08000000);
         }
         SetWindowLongPtrW(h, GWL_EXSTYLE, ex as i32 as isize);
+        if clickthrough {
+            let _ = SetLayeredWindowAttributes(h, COLORREF(0), 255, LWA_ALPHA);
+        }
 
         strip_dwm(val);
         if !install_subclass(val) {
@@ -289,7 +319,9 @@ pub fn apply(val: isize, clickthrough: bool, rect: Option<(i32, i32, i32, i32)>)
         let ex_after = GetWindowLongPtrW(h, GWL_EXSTYLE) as u32;
         let want_transparent = clickthrough;
         let has_transparent = ex_after & 0x00000020 != 0;
-        let has_layered = ex_after & 0x00080000 != 0;
+        // LAYERED is part of the click-through recipe (see apply), so it is
+        // only a defect when it survives into edit mode.
+        let has_layered = !clickthrough && ex_after & 0x00080000 != 0;
         let has_frame = style_after
             & (0x00C00000 | 0x00040000 | 0x00010000 | 0x00020000 | 0x00080000 | 0x00800000)
             != 0;

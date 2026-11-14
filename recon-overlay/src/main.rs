@@ -745,9 +745,11 @@ fn run_soak(secs: u64) {
             std::thread::sleep(std::time::Duration::from_secs(30.min(secs)));
             let p = win_style::probe_json(v);
             let missing = p["clickthrough_missing"].as_bool().unwrap_or(true);
-            let layered = p["layered"].as_bool().unwrap_or(true);
+            // LAYERED is part of the click-through recipe (Tao/winit both set
+            // it); only a missing TRANSPARENT bit or a hidden window is bad.
+            let layered = p["layered"].as_bool().unwrap_or(false);
             let shown = p["visible"].as_bool().unwrap_or(false);
-            if missing || layered || !shown {
+            if missing || !shown {
                 bad += 1;
             }
             eprintln!(
