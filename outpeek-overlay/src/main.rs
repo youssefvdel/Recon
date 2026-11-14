@@ -3,152 +3,26 @@
 // user's screen at every spawn — the twin lesson). Stdin/stdout pipes are
 // inherited handles and keep working without a console.
 
-//! Outpeek overlay sidecar: a native Slint HUD window driven by the main app.
+//! Outpeek overlay sidecar binary: a thin entry point over `outpeek_overlay`.
 //!
-//! The main app owns every fact; this process only renders. Facts arrive as
-//! NDJSON objects on stdin (partial updates, `seq` for ordering); UI events
-//! (edit-chrome callbacks) go back out as NDJSON on stdout. stderr is logs.
+//! Two consumers share the library: this standalone binary (the headless gate
+//! harness — `--probe`/`--health`/`--show-test`/`--soak`/`--mcp-port` — plus
+//! the stdin-NDJSON HUD the Tauri app can spawn) and `outpeek-app`, which
+//! creates the same HUD window inside its own process and drives the same
+//! `Facts` globals directly.
 //!
-//! Window contract: winit backend + FemtoVG renderer (forced via
-//! `SLINT_BACKEND=winit-femtovg`; the software renderer is not compiled in,
-//! so transparency can never silently fall back to an opaque surface). The
-//! fullscreen click-through recipe (no `WS_EX_LAYERED`, HTTRANSPARENT
-//! subclass, DWM strip) is mirrored from the main app's `overlay_window.rs`
-//! in `win_style` — `.slint` only declares no-frame/always-on-top/transparent.
-//!
-//! Modes: default (stdin-driven HUD), `--probe` (one-shot style/readback
-//! dump), `--health` (windowless construct-and-report for the main app's
-//! renderer gate), `--show-test <secs>` (timed visible pass for screenshots),
-//! `--soak <secs>` (hidden style-predicate watch). `--parent-pid <pid>`
-//! exits with the main app so a stray fullscreen topmost window is impossible.
-
-mod image_cache;
-#[cfg(windows)]
-mod win_style;
+//! Facts arrive as NDJSON objects on stdin (partial updates, `seq` for
+//! ordering); UI events (edit-chrome callbacks) go back out as NDJSON on
+//! stdout. stderr is logs.
 
 use std::io::{BufRead, Write};
-use std::sync::atomic::{AtomicU8, Ordering};
 
-slint::include_modules!();
+use outpeek_overlay::hud::{apply_facts, sync_visibility, FactsMsg, RectMsg};
+use outpeek_overlay::ui::OverlayWindow;
+use slint::ComponentHandle as _;
 
-/// 0 = clicks pass through to the game/desktop, 1 = edit mode captures.
-/// Read by the Win32 subclass proc (`win_style`) on WM_NCHITTEST.
-static EDIT_MODE: AtomicU8 = AtomicU8::new(0);
-
-/// Whether the HUD has content worth a fullscreen alpha layer right now
-/// (mirrors the main app's OVERLAY_PRESENT; the Tab-peek gate owns the fast
-/// path there, the window here).
-static PRESENT: AtomicU8 = AtomicU8::new(1);
-
-/// Partial facts update from the main app. Every field is optional: only the
-/// keys present in the object are applied.
-///
-/// There is deliberately NO fabrication here: the main app sends only what it
-/// owns — window state (rect, edit, visibility, tab, lite) plus the live fact
-/// set from the Rust live service (phase, map, mode, scores). Rosters need the
-/// core-game payload and stay at their empty `.slint` defaults until then.
-#[derive(Debug, Default, Clone, serde::Deserialize)]
-#[allow(dead_code)]
-struct FactsMsg {
-    #[serde(default)]
-    seq: u64,
-    #[serde(default)]
-    present: Option<bool>,
-    #[serde(default)]
-    edit: Option<bool>,
-    #[serde(default)]
-    lite: Option<bool>,
-    #[serde(default)]
-    phase: Option<String>,
-    #[serde(default)]
-    tab_held: Option<bool>,
-    #[serde(default)]
-    map: Option<String>,
-    #[serde(default)]
-    mode: Option<String>,
-    #[serde(default)]
-    phase_label: Option<String>,
-    #[serde(default)]
-    live: Option<bool>,
-    #[serde(default)]
-    side: Option<String>,
-    #[serde(default)]
-    server: Option<String>,
-    #[serde(default)]
-    blue: Option<i32>,
-    #[serde(default)]
-    red: Option<i32>,
-    #[serde(default)]
-    rect: Option<RectMsg>,
-    #[serde(default)]
-    your_five: Option<Vec<RosterEntry>>,
-    #[serde(default)]
-    enemy_five: Option<Vec<RosterEntry>>,
-    #[serde(default)]
-    hint: Option<HintMsg>,
-    #[serde(default)]
-    whisper: Option<WhisperMsg>,
-    #[serde(default)]
-    cluster: Option<ClusterMsg>,
-    #[serde(default)]
-    scale: Option<f32>,
-    #[serde(default)]
-    display_key: Option<String>,
-}
-
-#[derive(Debug, Default, Clone, Copy, serde::Deserialize)]
-struct RectMsg {
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-}
-
-#[derive(Debug, Default, Clone, serde::Deserialize)]
-struct RosterEntry {
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    agent: String,
-    #[serde(default)]
-    icon: String,
-    #[serde(default)]
-    crest: String,
-    #[serde(default)]
-    locked: bool,
-    #[serde(default)]
-    isme: bool,
-    #[serde(default)]
-    party: i32,
-    #[serde(default)]
-    rr: i32,
-}
-
-#[derive(Debug, Default, Clone, serde::Deserialize)]
-struct HintMsg {
-    #[serde(default)]
-    line: String,
-    #[serde(default)]
-    source: String,
-    #[serde(default)]
-    win01: f32,
-    #[serde(default)]
-    games: i32,
-}
-
-#[derive(Debug, Default, Clone, serde::Deserialize)]
-struct WhisperMsg {
-    #[serde(default)]
-    text: String,
-    #[serde(default)]
-    tone: String,
-}
-
-#[derive(Debug, Default, Clone, Copy, serde::Deserialize)]
-struct ClusterMsg {
-    x: f32,
-    y: f32,
-}
+#[cfg(windows)]
+use outpeek_overlay::win_style;
 
 fn emit_event(v: serde_json::Value) {
     let mut out = std::io::stdout().lock();
@@ -160,189 +34,6 @@ fn log_line(msg: &str) {
     let mut err = std::io::stderr().lock();
     let _ = writeln!(err, "[outpeek-overlay] {msg}");
     let _ = err.flush();
-}
-
-fn roster_to_facts(entries: Vec<RosterEntry>) -> Vec<PlayerFact> {
-    entries
-        .into_iter()
-        .map(|e| PlayerFact {
-            name: e.name.into(),
-            agent: e.agent.into(),
-            icon: image_cache::load(&e.icon),
-            crest: image_cache::load(&e.crest),
-            locked: e.locked,
-            isme: e.isme,
-            party: e.party,
-            rr: e.rr,
-        })
-        .collect()
-}
-
-fn apply_facts(win: &OverlayWindow, msg: FactsMsg) {
-    let facts = win.global::<Facts>();
-    if let Some(v) = msg.present {
-        PRESENT.store(u8::from(v), Ordering::Relaxed);
-    }
-    if let Some(v) = msg.edit {
-        EDIT_MODE.store(u8::from(v), Ordering::Relaxed);
-        facts.set_edit_mode(v);
-    }
-    if let Some(v) = msg.lite {
-        facts.set_lite(v);
-    }
-    if let Some(v) = msg.phase {
-        facts.set_phase(v.into());
-    }
-    if let Some(v) = msg.tab_held {
-        facts.set_tab_held(v);
-    }
-    if let Some(v) = msg.map {
-        facts.set_map_name(v.into());
-    }
-    if let Some(v) = msg.mode {
-        facts.set_mode(v.into());
-    }
-    if let Some(v) = msg.phase_label {
-        facts.set_phase_label(v.into());
-    }
-    if let Some(v) = msg.live {
-        facts.set_live(v);
-    }
-    if let Some(v) = msg.side {
-        facts.set_side(v.into());
-    }
-    if let Some(v) = msg.server {
-        facts.set_server(v.into());
-    }
-    if let Some(v) = msg.blue {
-        facts.set_blue_score(v);
-    }
-    if let Some(v) = msg.red {
-        facts.set_red_score(v);
-    }
-    if let Some(list) = msg.your_five {
-        let model = std::rc::Rc::new(slint::VecModel::from(roster_to_facts(list)));
-        facts.set_your_five(model.into());
-    }
-    if let Some(list) = msg.enemy_five {
-        let model = std::rc::Rc::new(slint::VecModel::from(roster_to_facts(list)));
-        facts.set_enemy_five(model.into());
-    }
-    if let Some(h) = msg.hint {
-        facts.set_hint_line(h.line.into());
-        facts.set_hint_source(h.source.into());
-        facts.set_hint_win01(h.win01);
-        facts.set_hint_games(h.games);
-    }
-    if let Some(w) = msg.whisper {
-        facts.set_whisper(w.text.into());
-        facts.set_whisper_tone(w.tone.into());
-    }
-    if let Some(c) = msg.cluster {
-        facts.set_cluster_x(c.x);
-        facts.set_cluster_y(c.y);
-    }
-    if let Some(s) = msg.scale {
-        facts.set_ui_scale(s.clamp(0.5, 2.0));
-    }
-    if let Some(k) = msg.display_key {
-        facts.set_display_key(k.into());
-    }
-}
-
-/// Window-level visibility: shown while editing or while the main app says the
-/// HUD has content. The `.slint` phase gates (`selecting`/`peeking`) decide
-/// what paints inside; this only owns the fullscreen alpha layer itself.
-fn sync_visibility(win: &OverlayWindow, rect: Option<RectMsg>) {
-    let edit = EDIT_MODE.load(Ordering::Relaxed) == 1;
-    let present = PRESENT.load(Ordering::Relaxed) == 1;
-    let want_visible = edit || present;
-    log_line(&format!(
-        "sync_visibility want={want_visible} edit={edit} present={present}"
-    ));
-    if want_visible {
-        // Snapshot focus BEFORE show: activation (if any) happens inside it,
-        // so anything sampled later is already us.
-        #[cfg(windows)]
-        let prev_fg = win_style::foreground();
-        // Driver rect wins when the facts carry one; otherwise discover the
-        // live game window (same source the TS overlay aligns to).
-        #[cfg(windows)]
-        let auto_rect = win_style::discover_game_rect();
-        #[cfg(not(windows))]
-        let auto_rect: Option<(i32, i32, i32, i32)> = None;
-        let r = rect.map(|r| (r.x, r.y, r.w, r.h)).or(auto_rect);
-        if r.is_none() {
-            log_line("sync_visibility: no rect from facts or discovery");
-        } else {
-            log_line(&format!(
-                "sync_visibility rect from {}",
-                if rect.is_some() { "facts" } else { "discovery" }
-            ));
-        }
-        if let Some((x, y, w, h)) = r {
-            win.window()
-                .set_position(slint::PhysicalPosition::new(x, y));
-            win.window().set_size(slint::PhysicalSize::new(
-                w.max(100) as u32,
-                h.max(100) as u32,
-            ));
-        }
-        let show_r = win.show();
-        log_line(&format!(
-            "show result: {}",
-            show_r.as_ref().map(|_| "ok").unwrap_or("ERR")
-        ));
-        #[cfg(windows)]
-        {
-            use raw_window_handle::HasWindowHandle as _;
-            let handle = win.window().window_handle();
-            if let Ok(raw) = handle.window_handle() {
-                if let raw_window_handle::RawWindowHandle::Win32(h) = raw.as_raw() {
-                    let val = h.hwnd.get() as isize;
-                    win_style::apply(val, !edit, r);
-                    log_line(&format!("hwnd={val} visible={}", win_style::visible(val)));
-                    win_style::refocus_if_stolen(val, prev_fg);
-                }
-            }
-        }
-    } else {
-        let _ = win.hide();
-    }
-}
-
-/// Register bundled OFL fonts when present (`<exe>/fonts/*.ttf|*.otf`).
-/// Nothing is committed to the repo: without files this is a no-op and the
-/// UI falls back to system fonts (see `fonts/README.md`).
-fn register_fonts() {
-    use slint::fontique_011::fontique;
-    let mut registered = 0usize;
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent().map(|p| p.join("fonts")) {
-            if let Ok(entries) = std::fs::read_dir(&dir) {
-                for e in entries.filter_map(|e| e.ok()) {
-                    let p = e.path();
-                    let is_font = p
-                        .extension()
-                        .and_then(|x| x.to_str())
-                        .map(|x| x.eq_ignore_ascii_case("ttf") || x.eq_ignore_ascii_case("otf"))
-                        .unwrap_or(false);
-                    if !is_font {
-                        continue;
-                    }
-                    match std::fs::read(&p) {
-                        Ok(bytes) => {
-                            let blob = fontique::Blob::new(std::sync::Arc::new(bytes));
-                            let mut collection = slint::fontique_011::shared_collection();
-                            registered += collection.register_fonts(blob, None).len();
-                        }
-                        Err(e) => log_line(&format!("font {}: {e}", p.display())),
-                    }
-                }
-            }
-        }
-    }
-    log_line(&format!("fonts registered from sidecar dir: {registered}"));
 }
 
 fn wire_edit_callbacks(win: &OverlayWindow) {
@@ -363,20 +54,6 @@ fn wire_edit_callbacks(win: &OverlayWindow) {
     });
 }
 
-fn force_femtovg() {
-    // FemtoVG-over-wgpu (DX12 on Windows): no WGL anywhere in this process.
-    // The software renderer is not compiled in, so a broken GPU path fails
-    // closed instead of silently going opaque.
-    if std::env::var_os("SLINT_BACKEND").is_none() {
-        // SAFETY: single-threaded at startup, before any backend exists.
-        unsafe { std::env::set_var("SLINT_BACKEND", "winit-femtovg-wgpu") };
-    }
-    log_line(&format!(
-        "SLINT_BACKEND={}",
-        std::env::var("SLINT_BACKEND").unwrap_or_default()
-    ));
-}
-
 #[cfg(windows)]
 fn current_hwnd(win: &OverlayWindow) -> Option<isize> {
     use raw_window_handle::HasWindowHandle as _;
@@ -395,8 +72,8 @@ fn usage() -> &'static str {
 }
 
 fn main() {
-    force_femtovg();
-    image_cache::evict_lru(image_cache::CACHE_BUDGET_BYTES);
+    outpeek_overlay::force_femtovg();
+    outpeek_overlay::image_cache::evict_lru(outpeek_overlay::image_cache::CACHE_BUDGET_BYTES);
 
     let args: Vec<String> = std::env::args().collect();
     let mut parent_pid: Option<u32> = None;
@@ -453,7 +130,10 @@ fn main() {
     #[cfg(not(windows))]
     let _ = parent_pid;
 
-    register_fonts();
+    log_line(&format!(
+        "fonts registered from sidecar dir: {}",
+        outpeek_overlay::register_fonts()
+    ));
 
     match mode {
         "probe" => return run_probe(),
@@ -665,7 +345,6 @@ fn run_show_test(secs: u64) {
         std::thread::sleep(std::time::Duration::from_millis(50));
         let _ = slint::invoke_from_event_loop({
             let weak = weak.clone();
-            let t0 = t0;
             move || {
                 if let Some(w) = weak.upgrade() {
                     if let Some(v) = await_hwnd(&w, 1000) {

@@ -1,0 +1,298 @@
+// Tracker panels. Every panel has loading / empty / error / value states —
+// never a dash rendered as a value, never an invented rank.
+
+import { Theme, TypeScale, Space, Shape } from "tokens.slint";
+import { Tracker } from "../state.slint";
+import { Plate } from "components/plate.slint";
+import { Chip, LinkButton, Divider } from "widgets.slint";
+
+component PanelTitle inherits Text {
+    text: "";
+    font-family: Theme.font-mono;
+    font-size: TypeScale.micro;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    color: Theme.ink-faint;
+}
+
+component Caption inherits Text {
+    text: "";
+    font-family: Theme.font-body;
+    font-size: TypeScale.caption;
+    color: Theme.ink-faint;
+    wrap: word-wrap;
+}
+
+export component LiveCard inherits Plate {
+    VerticalLayout {
+        padding: Space.lg;
+        spacing: Space.md;
+
+        HorizontalLayout {
+            spacing: Space.sm;
+            PanelTitle { text: "LIVE MATCH"; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            Chip {
+                text: Tracker.phase-chip;
+                tone: Tracker.live-state == "live" ? "live" : (Tracker.live-state == "error" ? "error" : "neutral");
+            }
+        }
+
+        if Tracker.live-state == "live": VerticalLayout {
+            spacing: Space.sm;
+
+            Text {
+                text: Tracker.map-name == "" ? "Map not reported" : Tracker.map-name;
+                font-family: Theme.font-display;
+                font-size: 30px;
+                font-weight: 800;
+                color: Theme.ink;
+            }
+
+            HorizontalLayout {
+                spacing: Space.sm;
+                Text {
+                    text: Tracker.mode == "" ? "Mode not reported" : Tracker.mode;
+                    font-family: Theme.font-mono;
+                    font-size: TypeScale.caption;
+                    color: Theme.ink-dim;
+                }
+                Text {
+                    text: "·";
+                    font-family: Theme.font-mono;
+                    font-size: TypeScale.caption;
+                    color: Theme.ink-faint;
+                }
+                Text {
+                    text: Tracker.phase-title;
+                    font-family: Theme.font-mono;
+                    font-size: TypeScale.caption;
+                    color: Theme.ink-faint;
+                }
+            }
+
+            Rectangle { height: 2px; }
+
+            HorizontalLayout {
+                spacing: Space.xl;
+                alignment: start;
+
+                VerticalLayout {
+                    spacing: 0px;
+                    PanelTitle { text: "ALLIES"; }
+                    Text {
+                        text: Tracker.blue;
+                        font-family: Theme.font-display;
+                        font-size: 30px;
+                        font-weight: 800;
+                        color: Theme.mint;
+                    }
+                }
+                VerticalLayout {
+                    spacing: 0px;
+                    PanelTitle { text: "ENEMIES"; }
+                    Text {
+                        text: Tracker.red;
+                        font-family: Theme.font-display;
+                        font-size: 30px;
+                        font-weight: 800;
+                        color: Theme.coral;
+                    }
+                }
+            }
+        }
+
+        if Tracker.live-state == "loading": VerticalLayout {
+            spacing: Space.sm;
+            vertical-stretch: 0;
+            Caption { text: Tracker.live-message; }
+            Rectangle { height: 10px; width: 220px; border-radius: 5px; background: Theme.container-high; }
+            Rectangle { height: 10px; width: 150px; border-radius: 5px; background: Theme.container-high; }
+        }
+
+        if Tracker.live-state == "empty": VerticalLayout {
+            spacing: Space.sm;
+            Text {
+                text: Tracker.phase-title;
+                font-family: Theme.font-display;
+                font-size: TypeScale.big;
+                font-weight: 700;
+                color: Theme.ink-dim;
+            }
+            Caption { text: Tracker.live-message; }
+        }
+
+        if Tracker.live-state == "error": VerticalLayout {
+            spacing: Space.sm;
+            Text {
+                text: "Live data unavailable";
+                font-family: Theme.font-display;
+                font-size: TypeScale.big;
+                font-weight: 700;
+                color: Theme.error;
+            }
+            Caption { text: Tracker.live-message; }
+            Caption { text: "The poller retries on its own; no stale score is kept."; }
+        }
+
+        // Keep the state block at the top of the card when the row is taller.
+        Rectangle { vertical-stretch: 1; }
+    }
+}
+
+export component RankCard inherits Plate {
+    callback refresh();
+
+    VerticalLayout {
+        padding: Space.lg;
+        spacing: Space.md;
+
+        HorizontalLayout {
+            spacing: Space.sm;
+            PanelTitle { text: "YOUR RANK"; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            LinkButton {
+                text: "REFRESH";
+                enabled: Tracker.rank-state != "loading" && Tracker.rank-state != "waiting";
+                clicked => { root.refresh(); }
+            }
+        }
+
+        if Tracker.rank-state == "ok": VerticalLayout {
+            spacing: 4px;
+            Text {
+                text: Tracker.rank-label;
+                font-family: Theme.font-display;
+                font-size: 28px;
+                font-weight: 800;
+                color: Theme.primary;
+            }
+            Text {
+                text: Tracker.rank-rr + " RR";
+                font-family: Theme.font-mono;
+                font-size: TypeScale.body;
+                font-weight: 700;
+                color: Theme.ink-dim;
+            }
+            Rectangle {
+                height: 6px;
+                border-radius: 3px;
+                background: Theme.container-high;
+
+                Rectangle {
+                    width: parent.width * min(1.0, Tracker.rank-rr * 1.0 / 100.0);
+                    height: parent.height;
+                    border-radius: 3px;
+                    background: @linear-gradient(90deg, #7c5cff 0%, #d0bcff 100%);
+                }
+            }
+        }
+
+        if Tracker.rank-state == "unranked": VerticalLayout {
+            spacing: 4px;
+            Text {
+                text: Tracker.rank-label;
+                font-family: Theme.font-display;
+                font-size: 28px;
+                font-weight: 800;
+                color: Theme.ink-dim;
+            }
+            Caption { text: Tracker.rank-message; }
+        }
+
+        if Tracker.rank-state == "loading" || Tracker.rank-state == "waiting": VerticalLayout {
+            spacing: 4px;
+            Caption { text: Tracker.rank-message; }
+            Rectangle { height: 8px; width: 170px; border-radius: 4px; background: Theme.container-high; }
+        }
+
+        if Tracker.rank-state == "error": VerticalLayout {
+            spacing: 4px;
+            Text {
+                text: "Rank unavailable";
+                font-family: Theme.font-display;
+                font-size: TypeScale.big;
+                font-weight: 700;
+                color: Theme.error;
+            }
+            Caption { text: Tracker.rank-message; }
+        }
+
+        Rectangle { vertical-stretch: 1; }
+
+        Caption {
+            text: "Public rank + RR from the Riot shard. Riot does not expose raw MMR; this app never claims it.";
+        }
+    }
+}
+
+export component AccountCard inherits Plate {
+    VerticalLayout {
+        padding: Space.lg;
+        spacing: Space.sm;
+
+        PanelTitle { text: "SESSION"; }
+
+        Text {
+            text: Tracker.player-display == "" ? "No local account" : Tracker.player-display;
+            font-family: Theme.font-display;
+            font-size: TypeScale.big;
+            font-weight: 700;
+            color: Tracker.player-display == "" ? Theme.ink-faint : Theme.ink;
+        }
+
+        Divider {}
+
+        VerticalLayout {
+            spacing: 3px;
+            PanelTitle { text: "CLIENT"; }
+            Caption { text: Tracker.client-line; }
+        }
+
+        VerticalLayout {
+            spacing: 3px;
+            PanelTitle { text: "READ PATH"; }
+            Caption { text: "127.0.0.1 loopback · lockfile credentials · read-only"; }
+        }
+
+        if Tracker.platform-note != "": VerticalLayout {
+            spacing: 3px;
+            PanelTitle { text: "PLATFORM"; }
+            Caption { text: Tracker.platform-note; }
+        }
+
+        Rectangle { vertical-stretch: 1; }
+    }
+}
+
+export component MatchesCard inherits Plate {
+    VerticalLayout {
+        padding: Space.lg;
+        spacing: Space.md;
+
+        HorizontalLayout {
+            spacing: Space.sm;
+            PanelTitle { text: "RECENT MATCHES"; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            Chip { text: "NOT PORTED"; tone: "off"; }
+        }
+
+        Text {
+            text: "Match history is not wired in this build.";
+            font-family: Theme.font-display;
+            font-size: TypeScale.big;
+            font-weight: 700;
+            color: Theme.ink-dim;
+        }
+
+        Caption {
+            text: "It needs /match-history/v1 from the Riot shard for match ids, then one /match-details read per row. Nothing is cached, guessed, or rendered as a placeholder match.";
+        }
+
+        Rectangle { vertical-stretch: 1; }
+
+        Caption {
+            text: "Porting it is the next tracker slice — the list will fill from the same poller, not a second process.";
+        }
+    }
+}

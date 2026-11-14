@@ -1,0 +1,46 @@
+[package]
+name = "outpeek-app"
+version = "0.4.4"
+description = "Outpeek native app: tracker window + HUD overlay window in one Slint process"
+authors = ["Youssef Adel <contact@reconlab.app>"]
+license = "Proprietary"
+edition = "2021"
+rust-version = "1.85.0"
+publish = false
+
+[lib]
+name = "outpeek_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "outpeek-app"
+path = "src/main.rs"
+
+[build-dependencies]
+slint-build = "1.18"
+
+[dependencies]
+# The HUD surface, its facts contract and the proven Win32 window recipe.
+# One compiled UI, no copies: this crate imports the overlay's tokens through
+# build.rs include paths.
+outpeek-overlay = { path = "../outpeek-overlay" }
+slint = { version = "1.18", default-features = false, features = [
+    "backend-winit",
+    "renderer-femtovg-wgpu",
+    "compat-1-2",
+    "raw-window-handle-06",
+    # Embedded MCP server (Streamable HTTP) for UI introspection/driving.
+    # Inert unless SLINT_MCP_PORT / --mcp-port is set at runtime.
+    "mcp",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+# Loopback TLS: native-tls == Schannel on Windows, the same stack the Tauri
+# app uses. No second TLS implementation enters the build.
+native-tls = "0.2"
+# Included by path: `paths.rs` logs through this crate.
+log = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

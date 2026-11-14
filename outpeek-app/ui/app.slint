@@ -1,0 +1,56 @@
+// Outpeek app shell. One window; the HUD is a second Window from the
+// `outpeek-overlay` crate at runtime. Tokens and the plate component are
+// imported from that crate's UI through build.rs include paths — no copies.
+
+import { Theme, Space } from "tokens.slint";
+import { Tracker } from "state.slint";
+import { Sidebar } from "components/sidebar.slint";
+import { Header } from "components/header.slint";
+import { LiveCard, RankCard, AccountCard, MatchesCard } from "components/cards.slint";
+
+// Re-exported so the Rust side can address the same global (`app.global::<Tracker>()`).
+export { Tracker } from "state.slint";
+
+export component AppWindow inherits Window {
+    title: "Outpeek — Tracker";
+    preferred-width: 1180px;
+    preferred-height: 780px;
+    min-width: 980px;
+    min-height: 640px;
+    background: Theme.surface-dim;
+
+    callback toggle-hud();
+    callback refresh-rank();
+
+    HorizontalLayout {
+        Sidebar {
+            toggle-hud => { root.toggle-hud(); }
+        }
+
+        VerticalLayout {
+            Header {}
+
+            VerticalLayout {
+                padding: Space.xl;
+                spacing: Space.lg;
+
+                HorizontalLayout {
+                    spacing: Space.lg;
+                    vertical-stretch: 0;
+                    LiveCard { horizontal-stretch: 3; }
+                    RankCard {
+                        horizontal-stretch: 2;
+                        refresh => { root.refresh-rank(); }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: Space.lg;
+                    vertical-stretch: 1;
+                    AccountCard { horizontal-stretch: 2; }
+                    MatchesCard { horizontal-stretch: 3; }
+                }
+            }
+        }
+    }
+}

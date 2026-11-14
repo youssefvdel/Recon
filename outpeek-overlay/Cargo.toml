@@ -7,6 +7,10 @@ license = "Proprietary"
 edition = "2021"
 rust-version = "1.85.0"
 
+[lib]
+name = "outpeek_overlay"
+path = "src/lib.rs"
+
 [[bin]]
 name = "outpeek-overlay"
 path = "src/main.rs"

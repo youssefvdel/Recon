@@ -1,0 +1,39 @@
+// Outpeek app — the one data contract between Rust and the tracker window.
+// Rust owns every value; `.slint` renders and never formats a fact.
+// Unknown values are empty strings, never placeholders-as-data.
+
+export global Tracker {
+    // Riot Client / poll state.
+    in-out property <string> client-line: "Starting…";
+    in-out property <string> client-tone: "warn"; // "ok" | "warn" | "error"
+
+    // Local account.
+    in-out property <string> player-display: "";
+    in-out property <string> player-initial: "";
+
+    // Rank panel. state: waiting | loading | ok | unranked | error.
+    in-out property <string> rank-state: "waiting";
+    in-out property <string> rank-label: "";
+    in-out property <int> rank-rr: 0;
+    in-out property <string> rank-message: "Waiting for the Riot Client.";
+
+    // Live panel. state: loading | empty | live | error.
+    in-out property <string> live-state: "loading";
+    in-out property <string> live-message: "Reading the Riot Client…";
+    in-out property <string> phase-title: "Waiting";
+    in-out property <string> phase-chip: "…";
+    in-out property <string> map-name: "";
+    in-out property <string> mode: "";
+    in-out property <int> blue: 0;
+    in-out property <int> red: 0;
+
+    // HUD kill switch + status. tone: off | armed | live | unsupported.
+    in-out property <bool> hud-enabled: true;
+    in-out property <string> hud-status: "Armed — waiting for VALORANT";
+    in-out property <string> hud-tone: "armed";
+
+    // Honest platform note (e.g. "Windows only" on a Linux dev host).
+    in-out property <string> platform-note: "";
+
+    in-out property <string> version: "";
+}

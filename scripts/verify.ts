@@ -149,6 +149,7 @@ const VERSION_SOURCES: ReadonlyArray<{ label: string; read: () => string | null 
   { label: "package.json", read: () => readJsonVersion("package.json") },
   { label: "src-tauri/Cargo.toml", read: () => readCargoPackageVersion("src-tauri/Cargo.toml") },
   { label: "outpeek-overlay/Cargo.toml", read: () => readCargoPackageVersion("outpeek-overlay/Cargo.toml") },
+  { label: "outpeek-app/Cargo.toml", read: () => readCargoPackageVersion("outpeek-app/Cargo.toml") },
 ];
 
 function versionsStage(): StageResult {

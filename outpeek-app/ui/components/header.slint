@@ -1,0 +1,96 @@
+// Header: view title plus the signed-in player block.
+
+import { Theme, TypeScale, Space, Shape } from "tokens.slint";
+import { Tracker } from "../state.slint";
+import { StateDot } from "widgets.slint";
+
+export component Header inherits Rectangle {
+    height: 92px;
+    background: transparent;
+
+    Rectangle {
+        x: 0px;
+        y: parent.height - 1px;
+        width: parent.width;
+        height: 1px;
+        background: Theme.line-soft;
+    }
+
+    HorizontalLayout {
+        padding-left: 28px;
+        padding-right: 28px;
+        spacing: Space.md;
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: "Tracker";
+                font-family: Theme.font-display;
+                font-size: 26px;
+                font-weight: 800;
+                color: Theme.ink;
+            }
+            Text {
+                text: "Live from the Riot Client loopback — read-only";
+                font-family: Theme.font-body;
+                font-size: TypeScale.caption;
+                color: Theme.ink-faint;
+            }
+        }
+
+        Rectangle { horizontal-stretch: 1; }
+
+        HorizontalLayout {
+            spacing: Space.md;
+            alignment: end;
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 4px;
+
+                Text {
+                    text: Tracker.player-display == "" ? "Not signed in" : Tracker.player-display;
+                    font-family: Theme.font-body;
+                    font-size: TypeScale.title;
+                    font-weight: 700;
+                    color: Tracker.player-display == "" ? Theme.ink-faint : Theme.ink;
+                    horizontal-alignment: right;
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: end;
+                    StateDot {
+                        tone: Tracker.client-tone;
+                        y: (parent.height - self.height) / 2;
+                    }
+                    Text {
+                        text: Tracker.client-line;
+                        font-family: Theme.font-mono;
+                        font-size: TypeScale.micro;
+                        color: Theme.ink-faint;
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 40px;
+                height: 40px;
+                border-radius: 20px;
+                background: Theme.container-high;
+                border-width: 1px;
+                border-color: Theme.line;
+
+                Text {
+                    text: Tracker.player-initial;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    font-family: Theme.font-display;
+                    font-size: TypeScale.title;
+                    font-weight: 800;
+                    color: Theme.primary;
+                }
+            }
+        }
+    }
+}

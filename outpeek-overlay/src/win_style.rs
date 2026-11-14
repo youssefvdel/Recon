@@ -138,12 +138,10 @@ unsafe extern "system" fn enum_game_cb(hwnd: HWND, lparam: LPARAM) -> BOOL {
     BOOL(1)
 }
 
-/// Where the overlay belongs when the facts carry no rect: the live game
-/// window, else the primary screen. Mirrors the main app's
-/// `overlay_target_rect` (minus the pinned-monitor choice, which stays
-/// main-app-side). Runs on every facts frame, so res/monitor switches are
-/// followed at the daemon's cadence.
-pub fn discover_game_rect() -> Option<(i32, i32, i32, i32)> {
+/// The visible VALORANT game window, if one exists. Same predicate and
+/// visibility rule `discover_game_rect` uses; exposed for callers that need
+/// the HWND itself (foreground gating, probes).
+pub fn game_window() -> Option<isize> {
     unsafe {
         let mut wins: Vec<(isize, String, String)> = Vec::new();
         let _ = EnumWindows(Some(enum_game_cb), LPARAM(&mut wins as *mut _ as isize));
@@ -157,13 +155,68 @@ pub fn discover_game_rect() -> Option<(i32, i32, i32, i32)> {
             }
             let mut r = RECT::default();
             if GetWindowRect(hwnd, &mut r).is_ok() {
+                if r.right - r.left > 100 && r.bottom - r.top > 100 {
+                    return Some(*hwnd_val);
+                }
+            }
+        }
+        None
+    }
+}
+
+/// True when the focused window is the live VALORANT client.
+///
+/// This is the only fact the HUD visibility gate consumes: an overlay layer
+/// over the desktop or the tracker is a bug, not a feature. The predicate is
+/// mirrored from the main app's `window_manager::enumeration` so both skins
+/// agree on what "the game" is.
+pub fn is_game_foreground() -> bool {
+    let fg = foreground();
+    if fg == 0 {
+        return false;
+    }
+    unsafe {
+        let h = hwnd(fg);
+        let len = GetWindowTextLengthW(h);
+        if len == 0 {
+            return false;
+        }
+        let mut buf = vec![0u16; (len + 1) as usize];
+        let copied = GetWindowTextW(h, &mut buf);
+        if copied == 0 {
+            return false;
+        }
+        let title = String::from_utf16_lossy(&buf[..copied as usize]);
+        let mut cls = [0u16; 128];
+        let clen = GetClassNameW(h, &mut cls);
+        let class = if clen > 0 {
+            String::from_utf16_lossy(&cls[..clen as usize])
+        } else {
+            String::new()
+        };
+        is_valorant_window(title.trim(), &class)
+    }
+}
+
+/// Where the overlay belongs when the facts carry no rect: the live game
+/// window, else the primary screen. Mirrors the main app's
+/// `overlay_target_rect` (minus the pinned-monitor choice, which stays
+/// main-app-side). Runs on every facts frame, so res/monitor switches are
+/// followed at the daemon's cadence.
+pub fn discover_game_rect() -> Option<(i32, i32, i32, i32)> {
+    if let Some(val) = game_window() {
+        unsafe {
+            let mut r = RECT::default();
+            if GetWindowRect(hwnd(val), &mut r).is_ok() {
                 let (w, h) = (r.right - r.left, r.bottom - r.top);
                 if w > 100 && h > 100 {
                     return Some((r.left, r.top, w, h));
                 }
             }
         }
-        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+    }
+    use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+    unsafe {
         Some((
             0,
             0,

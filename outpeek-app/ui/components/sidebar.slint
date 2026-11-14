@@ -1,0 +1,119 @@
+// Left rail. Tracker is the only ported view; Overlay/Settings/Stretch are
+// explicitly marked SOON instead of being rendered as dead fake screens.
+
+import { Theme, TypeScale, Space, Shape } from "tokens.slint";
+import { Tracker } from "../state.slint";
+import { NavRow, HudToggle, StateDot, Divider } from "widgets.slint";
+
+export component Sidebar inherits Rectangle {
+    callback toggle-hud();
+
+    width: 224px;
+    background: Theme.container-low;
+
+    Rectangle {
+        x: parent.width - 1px;
+        y: 0px;
+        width: 1px;
+        height: parent.height;
+        background: Theme.line-soft;
+    }
+
+    VerticalLayout {
+        padding: Space.lg;
+        spacing: Space.sm;
+
+        HorizontalLayout {
+            spacing: Space.sm;
+            alignment: start;
+
+            Rectangle {
+                width: 10px;
+                height: 10px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 3px;
+                background: @linear-gradient(135deg, #d0bcff 0%, #7c5cff 100%);
+            }
+            Text {
+                text: "OUTPEEK";
+                font-family: Theme.font-display;
+                font-size: TypeScale.title;
+                font-weight: 800;
+                letter-spacing: 2px;
+                color: Theme.ink;
+            }
+        }
+
+        Text {
+            text: "COMPETITIVE TOOLKIT";
+            font-family: Theme.font-mono;
+            font-size: TypeScale.micro;
+            letter-spacing: 1.4px;
+            color: Theme.ink-faint;
+        }
+
+        Rectangle { height: 14px; }
+
+        NavRow { label: "Tracker"; active: true; }
+        NavRow { label: "Overlay"; soon: true; }
+        NavRow { label: "Settings"; soon: true; }
+        NavRow { label: "Stretch"; soon: true; }
+
+        Rectangle { vertical-stretch: 1; }
+
+        Divider {}
+
+        Rectangle { height: 4px; }
+
+        HorizontalLayout {
+            spacing: Space.sm;
+            Text {
+                text: "HUD OVERLAY";
+                font-family: Theme.font-mono;
+                font-size: TypeScale.micro;
+                letter-spacing: 1px;
+                color: Theme.ink-dim;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            HudToggle {
+                checked: Tracker.hud-enabled;
+                toggled => { root.toggle-hud(); }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: Space.sm;
+            alignment: start;
+            StateDot {
+                tone: Tracker.hud-tone;
+                y: 4px;
+            }
+            Text {
+                text: Tracker.hud-status;
+                font-family: Theme.font-body;
+                font-size: TypeScale.caption;
+                color: Tracker.hud-tone == "live" ? Theme.mint : Theme.ink-faint;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+            }
+        }
+
+        if Tracker.platform-note != "": Text {
+            text: Tracker.platform-note;
+            font-family: Theme.font-body;
+            font-size: TypeScale.micro;
+            color: Theme.ink-faint;
+            wrap: word-wrap;
+        }
+
+        Divider {}
+
+        Text {
+            text: "v" + Tracker.version;
+            font-family: Theme.font-mono;
+            font-size: TypeScale.micro;
+            color: Theme.ink-faint;
+        }
+    }
+}
