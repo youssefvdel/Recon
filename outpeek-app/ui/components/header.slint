@@ -5,6 +5,10 @@ import { Tracker } from "../state.slint";
 import { StateDot } from "widgets.slint";
 
 export component Header inherits Rectangle {
+    // Set by the shell so one header serves every view.
+    in property <string> title: "Tracker";
+    in property <string> subtitle: "";
+
     height: 92px;
     background: transparent;
 
@@ -25,14 +29,14 @@ export component Header inherits Rectangle {
             alignment: center;
             spacing: 2px;
             Text {
-                text: "Tracker";
+                text: root.title;
                 font-family: Theme.font-display;
                 font-size: 26px;
                 font-weight: 800;
                 color: Theme.ink;
             }
             Text {
-                text: "Live from the Riot Client loopback — read-only";
+                text: root.subtitle;
                 font-family: Theme.font-body;
                 font-size: TypeScale.caption;
                 color: Theme.ink-faint;

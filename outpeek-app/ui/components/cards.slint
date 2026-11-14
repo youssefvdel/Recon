@@ -4,24 +4,7 @@
 import { Theme, TypeScale, Space, Shape } from "tokens.slint";
 import { Tracker } from "../state.slint";
 import { Plate } from "components/plate.slint";
-import { Chip, LinkButton, Divider } from "widgets.slint";
-
-component PanelTitle inherits Text {
-    text: "";
-    font-family: Theme.font-mono;
-    font-size: TypeScale.micro;
-    font-weight: 700;
-    letter-spacing: 1.4px;
-    color: Theme.ink-faint;
-}
-
-component Caption inherits Text {
-    text: "";
-    font-family: Theme.font-body;
-    font-size: TypeScale.caption;
-    color: Theme.ink-faint;
-    wrap: word-wrap;
-}
+import { Caption, Chip, Divider, LinkButton, PanelTitle } from "widgets.slint";
 
 export component LiveCard inherits Plate {
     VerticalLayout {

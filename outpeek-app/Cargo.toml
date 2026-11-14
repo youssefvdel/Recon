@@ -44,3 +44,8 @@ log = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
+
+# The app window's native HWND, for the DWM corner/frame pass only. Same 0.6
+# version Slint's `raw-window-handle-06` feature and the overlay crate use.
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"

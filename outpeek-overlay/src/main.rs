@@ -54,19 +54,6 @@ fn wire_edit_callbacks(win: &OverlayWindow) {
     });
 }
 
-#[cfg(windows)]
-fn current_hwnd(win: &OverlayWindow) -> Option<isize> {
-    use raw_window_handle::HasWindowHandle as _;
-    win.window()
-        .window_handle()
-        .window_handle()
-        .ok()
-        .and_then(|h| match h.as_raw() {
-            raw_window_handle::RawWindowHandle::Win32(w) => Some(w.hwnd.get() as isize),
-            _ => None,
-        })
-}
-
 fn usage() -> &'static str {
     "usage: outpeek-overlay [--parent-pid N] [--probe] [--health] [--show-test SECS] [--soak SECS]"
 }
@@ -150,6 +137,10 @@ fn main() {
     wire_edit_callbacks(&win);
     // Boot hidden: the first facts frame decides visibility.
     let _ = win.hide();
+    // Recipe on the still-hidden window, before anything can show it: the
+    // first map must be a HUD, never winit's default decorated/topmost frame.
+    // Slint creates the HWND from the event loop, so this schedules the pass.
+    outpeek_overlay::hud::style_hidden(&win, outpeek_overlay::roles::WindowRole::Overlay);
 
     // Stdin NDJSON loop on a worker; Slint owns the main thread.
     let weak = win.as_weak();
@@ -221,13 +212,13 @@ fn main() {
 fn await_hwnd(win: &OverlayWindow, budget_ms: u64) -> Option<isize> {
     let mut waited = 0;
     while waited < budget_ms {
-        if let Some(v) = current_hwnd(win) {
+        if let Some(v) = outpeek_overlay::hud::win32_hwnd(win) {
             return Some(v);
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
         waited += 20;
     }
-    current_hwnd(win)
+    outpeek_overlay::hud::win32_hwnd(win)
 }
 
 /// Run `f` on the event-loop thread once the platform window exists.
@@ -363,7 +354,7 @@ fn run_show_test(secs: u64) {
         std::thread::sleep(std::time::Duration::from_secs(secs));
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(w) = weak.upgrade() {
-                if let Some(v) = current_hwnd(&w) {
+                if let Some(v) = outpeek_overlay::hud::win32_hwnd(&w) {
                     emit_event(win_style::probe_json(v));
                 }
                 let t1 = std::time::Instant::now();

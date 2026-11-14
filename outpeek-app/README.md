@@ -59,6 +59,34 @@ On the overlay HWND the recipe is the proven one: `WS_POPUP | WS_CLIPSIBLINGS`,
 DWM strip, HTTRANSPARENT subclass, `SWP_NOACTIVATE`. The app window keeps
 winit's decorated/resizable window.
 
+### App window frame: rounded corners, no pale bar
+
+The app window gets its own small DWM pass (`src/app_window.rs`); the HUD's
+recipe is never applied to it, and `corner_preference()` is tested to keep the
+two apart.
+
+| Attribute | App window | HUD overlay |
+| --- | --- | --- |
+| `DWMWA_WINDOW_CORNER_PREFERENCE` (33) | `DWMWCP_ROUND` (2) | `DWMWCP_DONOTROUND` (1) |
+| `DWMWA_BORDER_COLOR` (34) | `DWMWA_COLOR_NONE` | `DWMWA_COLOR_NONE` |
+| `DWMWA_CAPTION_COLOR` (35) | `Theme.surface-dim` (`#0e0813`, read from the token at startup) | none |
+| `DWMWA_USE_IMMERSIVE_DARK_MODE` (20) | `1` (light caption glyphs) | n/a |
+
+Move and resize stay intact: this only colours the frame and asks for corners.
+`DWMWA_NCRENDERING_POLICY` is deliberately never touched — in this repo that is
+what turned a composited surface into the pale bar. Each attribute logs its
+HRESULT once, so one Windows run proves what DWM accepted:
+
+```
+[Outpeek] app-window chrome: corner=ROUND hr=0x00000000 border=NONE hr=0x00000000 caption=#0E0813 hr=0x00000000 dark-mode hr=0x00000000
+[Outpeek] app window 1180x780 physical
+[Outpeek] nav -> settings        # debug builds only, one line per sidebar click
+```
+
+A refused attribute (negative HRESULT) adds a
+`a DWM attribute was refused; that part keeps the system frame` line and the app
+carries on. Off Windows the pass logs `skipped (non-Windows host)`.
+
 ## What the tracker shows (real data only)
 
 | Panel | Source | States |
@@ -116,6 +144,37 @@ The HUD toggle persists in `%APPDATA%\Outpeek\overlay_renderer.txt`
 app-local for now; the Tauri app's `settings.json` `overlay_renderer` key is not
 read until Settings is ported (writing a partial settings.json from here would
 race the shipping app's save).
+
+### Drive the UI from an agent (Slint MCP)
+
+Slint 1.18 ships an embedded MCP server over Streamable HTTP: list windows,
+read the element tree, click/type, and capture screenshots. It is compiled in
+and inert until a port is given.
+
+```bash
+outpeek-app.exe --mcp-port 8099
+```
+
+Then register it once in the agent's MCP config (OpenCode shown; needs a
+restart to load):
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "outpeek-ui": { "type": "remote", "url": "http://127.0.0.1:8099/mcp" }
+    }
+  }
+}
+```
+
+The same flag exists on the standalone `outpeek-overlay.exe`, so the HUD can be
+driven headlessly (state injection still goes through stdin NDJSON there).
+
+Build with `SLINT_EMIT_DEBUG_INFO=1` when an agent has to click by name: without
+it the element tree exposes handles and geometry but no type names or accessible
+labels, so there is nothing for "click the Settings row" to target. With it, the
+sidebar rows report `accessibleRole: Button` and their labels.
 
 ## How to A/B the overlay toggle
 
@@ -181,9 +240,30 @@ matters — a Windows D3D/FemtoVG frame gap while both windows composite.
    bench total) before calling parity. Until then, treat the shared loop as
    **unmeasured on Windows**.
 
+## Settings view
+
+`Settings` is a real view now (sidebar row 2 of 4); `Tracker` and `Settings`
+switch in place, `Overlay` and `Stretch` stay marked `SOON`. The sidebar rows are
+real buttons — hover and pressed backgrounds, a focus ring on Tab, Space/Return
+activation, pointer cursor — and the header title plus the active-row spine
+follow the selection (`navigate` goes through Rust, so the state has one owner).
+Every row is a value resolved on this machine or a sentence saying why it is not:
+
+| Row | Reads from |
+| --- | --- |
+| HUD overlay | the same `Tracker.hud-enabled` + `overlay_renderer.txt` toggle the rail uses; one line for the foreground rule, one for the file it persists to |
+| Appearance | fixed dark — the page states it instead of rendering a dead switch |
+| Data & logs | `paths::app_data_dir()`; log dir resolved as `%LOCALAPPDATA%\<identifier>\logs` (APPDATA, then temp fallback) — selectable text, Ctrl+C copies |
+| Slint MCP | `SLINT_MCP_PORT` (set by `--mcp-port`); unset / valid / invalid are three distinct messages |
+| Version | `CARGO_PKG_VERSION`, `debug`/`release`, and the compiler's own `TARGET` emitted by `build.rs` |
+| Not ported yet | stretch/resolution, config editor, GPU report, updates, HUD edit mode — each with its reason |
+
+All strings come from `src/settings_model.rs`, which is pure and unit-tested
+(path fallbacks, MCP states, version formatting, non-empty not-ported list).
+
 ## Deliberately not ported yet
 
-* Settings, Stretch and Overlay views — sidebar rows are marked `SOON`.
+* Stretch and Overlay views — sidebar rows are marked `SOON`.
 * HUD edit mode (drag/scale/lock chrome) — the callbacks exist in the sidecar;
   the app does not wire them.
 * Rosters / agent icons in the HUD — they need the core-game payload.
@@ -202,11 +282,13 @@ RR; raw/hidden MMR is never read or claimed.
 
 ```bash
 cargo test --manifest-path outpeek-overlay/Cargo.toml   # 11
-cargo test --manifest-path outpeek-app/Cargo.toml       # 36
+cargo test --manifest-path outpeek-app/Cargo.toml       # 45
 ```
 
 Coverage that matters here: partial facts frames, roster → Slint facts, app
 never click-through / overlay always click-through, lockfile shape errors,
 name/tag formatting, tier labels (Unrated→Radiant), phase titles, no-client
 state, transient-error recovery, rank error ≠ Unrated, region from the access
-token, rank payload parsing, and the four-condition HUD visibility gate.
+token, rank payload parsing, the four-condition HUD visibility gate, and the
+Settings page's path fallbacks, MCP port states, version/build lines, and the
+non-empty not-ported list.

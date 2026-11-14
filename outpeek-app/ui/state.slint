@@ -2,7 +2,17 @@
 // Rust owns every value; `.slint` renders and never formats a fact.
 // Unknown values are empty strings, never placeholders-as-data.
 
+// One row of the Settings page's "not ported yet" list.
+export struct SettingsItem {
+    title: string,
+    detail: string,
+}
+
 export global Tracker {
+    // Shell navigation. UI state, not a fact: Rust sets it from the sidebar's
+    // `navigate` callback. "tracker" | "settings".
+    in-out property <string> view: "tracker";
+
     // Riot Client / poll state.
     in-out property <string> client-line: "Starting…";
     in-out property <string> client-tone: "warn"; // "ok" | "warn" | "error"
@@ -36,4 +46,28 @@ export global Tracker {
     in-out property <string> platform-note: "";
 
     in-out property <string> version: "";
+}
+
+// Settings page values. Every string is resolved by `settings_model` at boot;
+// empty means "nothing honest to show", and the page never invents a value.
+export global Settings {
+    // HUD overlay.
+    in-out property <string> hud-rule: "";
+    in-out property <string> hud-file: "";
+    // Appearance.
+    in-out property <string> theme-line: "";
+    // Data & logs. `*-resolved` = false means the row carries a reason instead
+    // of a path (missing APPDATA, no log identifier).
+    in-out property <string> data-path: "";
+    in-out property <bool> data-resolved: false;
+    in-out property <string> log-path: "";
+    in-out property <bool> log-resolved: false;
+    // Slint MCP.
+    in-out property <string> mcp-line: "";
+    in-out property <string> mcp-tone: "off"; // ok | off | warn
+    // Version.
+    in-out property <string> version-line: "";
+    in-out property <string> build-line: "";
+    // Not ported yet.
+    in-out property <[SettingsItem]> not-ported: [];
 }

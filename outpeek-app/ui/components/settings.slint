@@ -1,0 +1,290 @@
+// Settings view. Every row is a fact resolved on this machine or an honest
+// "not available"; there is no decorative control and no disabled fake.
+//
+// Split in two columns: left = the controls that exist today, right = the facts
+// about this build and the list of what it deliberately does not do.
+
+import { Theme, TypeScale, Space } from "tokens.slint";
+import { Tracker, Settings } from "../state.slint";
+import { Plate } from "components/plate.slint";
+import { Caption, Chip, Divider, HudToggle, PanelTitle, StateDot } from "widgets.slint";
+
+/// A path row. The path is selectable text (TextInput read-only), so Ctrl+C
+/// copies it without adding a clipboard dependency or a fake "copy" claim.
+/// Two lines, word-wrapped: a %LOCALAPPDATA% path is longer than any sane
+/// card width, and clipping it mid-segment reads as a bug, not as a cap.
+component PathRow inherits VerticalLayout {
+    in property <string> label: "";
+    in property <string> value: "";
+    in property <bool> resolved: true;
+
+    spacing: 3px;
+
+    PanelTitle { text: root.label; }
+
+    Rectangle {
+        height: 34px;
+        min-width: 0;
+        clip: true;
+        background: transparent;
+
+        TextInput {
+            x: 0;
+            y: 0;
+            min-width: 0;
+            width: parent.width;
+            height: parent.height;
+            text: root.value;
+            read-only: true;
+            single-line: false;
+            wrap: word-wrap;
+            font-family: Theme.font-mono;
+            font-size: TypeScale.micro;
+            color: root.resolved ? Theme.ink : Theme.amber;
+            vertical-alignment: top;
+        }
+    }
+}
+
+component HudCard inherits Plate {
+    callback toggle-hud();
+
+    VerticalLayout {
+        padding: Space.lg;
+        spacing: Space.sm;
+
+        HorizontalLayout {
+            spacing: Space.sm;
+            PanelTitle { text: "HUD OVERLAY"; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            Chip { text: "CANONICAL"; tone: "neutral"; }
+        }
+
+        HorizontalLayout {
+            spacing: Space.md;
+            Text {
+                text: "Overlay shown in game";
+                font-family: Theme.font-body;
+                font-size: TypeScale.title;
+                font-weight: 700;
+                color: Theme.ink;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            HudToggle {
+                checked: Tracker.hud-enabled;
+                toggled => { root.toggle-hud(); }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: Space.sm;
+            alignment: start;
+            StateDot {
+                tone: Tracker.hud-tone;
+                y: 4px;
+            }
+            Text {
+                text: Tracker.hud-status;
+                font-family: Theme.font-body;
+                font-size: TypeScale.caption;
+                color: Tracker.hud-tone == "live" ? Theme.mint : Theme.ink-faint;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+            }
+        }
+
+        Divider {}
+
+        Caption { text: Settings.hud-rule; }
+
+        PathRow {
+            label: "PERSISTED TO";
+            value: Settings.hud-file;
+            resolved: Settings.data-resolved;
+        }
+    }
+}
+
+component AppearanceCard inherits Plate {
+    VerticalLayout {
+        padding: Space.lg;
+        spacing: Space.sm;
+
+        PanelTitle { text: "APPEARANCE"; }
+
+        Text {
+            text: "Dark only";
+            font-family: Theme.font-display;
+            font-size: TypeScale.big;
+            font-weight: 700;
+            color: Theme.ink-dim;
+        }
+
+        Caption { text: Settings.theme-line; }
+    }
+}
+
+component McpCard inherits Plate {
+    VerticalLayout {
+        padding: Space.lg;
+        spacing: Space.sm;
+
+        HorizontalLayout {
+            spacing: Space.sm;
+            PanelTitle { text: "SLINT MCP"; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            Chip {
+                text: Settings.mcp-tone == "ok" ? "ON" : (Settings.mcp-tone == "warn" ? "INVALID" : "OFF");
+                tone: Settings.mcp-tone == "ok" ? "live" : (Settings.mcp-tone == "warn" ? "armed" : "off");
+            }
+        }
+
+        Caption { text: Settings.mcp-line; }
+    }
+}
+
+component VersionCard inherits Plate {
+    VerticalLayout {
+        padding: Space.lg;
+        spacing: 6px;
+
+        PanelTitle { text: "VERSION"; }
+
+        Text {
+            text: Settings.version-line;
+            font-family: Theme.font-display;
+            font-size: TypeScale.big;
+            font-weight: 800;
+            color: Theme.primary;
+        }
+
+        Text {
+            text: Settings.build-line;
+            font-family: Theme.font-mono;
+            font-size: TypeScale.caption;
+            color: Theme.ink-dim;
+        }
+
+        Divider {}
+
+        Caption { text: "Read-only build: loopback reads only, no memory access, no Riot writes."; }
+    }
+}
+
+component PathsCard inherits Plate {
+    VerticalLayout {
+        padding: Space.lg;
+        spacing: Space.md;
+
+        PanelTitle { text: "DATA & LOGS"; }
+
+        PathRow {
+            label: "APP DATA";
+            value: Settings.data-path;
+            resolved: Settings.data-resolved;
+        }
+
+        PathRow {
+            label: "LOG DIRECTORY";
+            value: Settings.log-path;
+            resolved: Settings.log-resolved;
+        }
+
+        Caption {
+            text: "Both paths are selectable — click and Ctrl+C. The log directory resolves the way the Tauri build resolves it; this shell does not write log files yet.";
+        }
+    }
+}
+
+component NotPortedCard inherits Plate {
+    VerticalLayout {
+        padding: Space.lg;
+        spacing: Space.sm;
+
+        HorizontalLayout {
+            spacing: Space.sm;
+            PanelTitle { text: "NOT PORTED YET"; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            Chip { text: "HONEST LIST"; tone: "off"; }
+        }
+
+        for item in Settings.not-ported: HorizontalLayout {
+            spacing: Space.sm;
+            alignment: start;
+
+            Rectangle {
+                width: 4px;
+                height: 4px;
+                border-radius: 2px;
+                y: 7px;
+                background: Theme.ink-faint;
+            }
+
+            VerticalLayout {
+                spacing: 1px;
+                horizontal-stretch: 1;
+
+                Text {
+                    text: item.title;
+                    font-family: Theme.font-body;
+                    font-size: TypeScale.caption;
+                    font-weight: 700;
+                    color: Theme.ink-dim;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                }
+
+                Text {
+                    text: item.detail;
+                    font-family: Theme.font-body;
+                    font-size: TypeScale.micro;
+                    color: Theme.ink-faint;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+    }
+}
+
+export component SettingsPage inherits VerticalLayout {
+    callback toggle-hud();
+
+    padding: Space.xl;
+    spacing: Space.lg;
+
+    HorizontalLayout {
+        spacing: Space.lg;
+        vertical-stretch: 1;
+
+        // Left: the controls and facts that exist today.
+        VerticalLayout {
+            horizontal-stretch: 3;
+            spacing: Space.lg;
+            vertical-stretch: 1;
+
+            HudCard { vertical-stretch: 0; toggle-hud => { root.toggle-hud(); } }
+            AppearanceCard { vertical-stretch: 0; }
+            McpCard { vertical-stretch: 0; }
+            VersionCard { vertical-stretch: 0; }
+
+            Rectangle { vertical-stretch: 1; }
+        }
+
+        // Right: where the data lives, and what is deliberately absent.
+        VerticalLayout {
+            // One long path must not decide the page proportions: cap this
+            // column and let the control column take the rest.
+            max-width: 500px;
+            horizontal-stretch: 2;
+            spacing: Space.lg;
+            vertical-stretch: 1;
+
+            PathsCard { vertical-stretch: 0; }
+            NotPortedCard { vertical-stretch: 0; }
+
+            Rectangle { vertical-stretch: 1; }
+        }
+    }
+}

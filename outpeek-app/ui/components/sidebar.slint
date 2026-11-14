@@ -1,5 +1,6 @@
-// Left rail. Tracker is the only ported view; Overlay/Settings/Stretch are
-// explicitly marked SOON instead of being rendered as dead fake screens.
+// Left rail. Tracker and Settings are real views and switch the content area;
+// Overlay and Stretch stay explicitly marked SOON instead of being rendered as
+// dead fake screens.
 
 import { Theme, TypeScale, Space, Shape } from "tokens.slint";
 import { Tracker } from "../state.slint";
@@ -7,6 +8,7 @@ import { NavRow, HudToggle, StateDot, Divider } from "widgets.slint";
 
 export component Sidebar inherits Rectangle {
     callback toggle-hud();
+    callback navigate(string);
 
     width: 224px;
     background: Theme.container-low;
@@ -54,9 +56,17 @@ export component Sidebar inherits Rectangle {
 
         Rectangle { height: 14px; }
 
-        NavRow { label: "Tracker"; active: true; }
+        NavRow {
+            label: "Tracker";
+            active: Tracker.view == "tracker";
+            clicked => { root.navigate("tracker"); }
+        }
         NavRow { label: "Overlay"; soon: true; }
-        NavRow { label: "Settings"; soon: true; }
+        NavRow {
+            label: "Settings";
+            active: Tracker.view == "settings";
+            clicked => { root.navigate("settings"); }
+        }
         NavRow { label: "Stretch"; soon: true; }
 
         Rectangle { vertical-stretch: 1; }

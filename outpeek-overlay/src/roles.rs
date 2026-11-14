@@ -30,6 +30,19 @@ pub fn wants_overlay_shell(role: WindowRole) -> bool {
     matches!(role, WindowRole::Overlay)
 }
 
+/// The recipe is applied at creation, while the HWND is still hidden, and
+/// again on every show.
+///
+/// Overlay only, and the pre-show pass is the one that matters: a fresh Slint
+/// window is decorated (and topmost when the `.slint` says always-on-top), so
+/// waiting for the first show to restyle it puts winit's default frame on the
+/// user's screen — the decorated topmost flash the sidecar already shipped
+/// once. The app window must keep its decoration (taskbar, resize grip,
+/// activation), so it is never restyled before it appears.
+pub fn should_style_hidden(role: WindowRole) -> bool {
+    matches!(role, WindowRole::Overlay)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -44,5 +57,25 @@ mod tests {
     fn overlay_window_gets_the_overlay_recipe() {
         assert!(wants_clickthrough(WindowRole::Overlay));
         assert!(wants_overlay_shell(WindowRole::Overlay));
+    }
+
+    #[test]
+    fn only_the_overlay_is_styled_while_hidden() {
+        // The HUD must never be shown with winit's default decorated frame,
+        // even for one frame; the app window must keep its decoration.
+        assert!(should_style_hidden(WindowRole::Overlay));
+        assert!(!should_style_hidden(WindowRole::App));
+    }
+
+    #[test]
+    fn pre_show_styling_never_contradicts_the_shell_rule() {
+        // Anything styled before its first show must also pass the normal
+        // recipe rule: no window gets a pre-show pass the live path refuses.
+        for role in [WindowRole::App, WindowRole::Overlay] {
+            if should_style_hidden(role) {
+                assert!(wants_overlay_shell(role));
+                assert!(wants_clickthrough(role));
+            }
+        }
     }
 }

@@ -21,13 +21,28 @@ use std::time::{Duration, Instant};
 use outpeek_app::hud::{self, PLATFORM_SUPPORTS_HUD};
 use outpeek_app::model::{self, ClientState, RankView, TrackerSnapshot};
 use outpeek_app::overlay_renderer::OverlayRendererSetting;
+use outpeek_app::settings_model::{self, McpPort, PathState};
 use outpeek_app::worker::{self, Event, Flags};
-use outpeek_app::{paths, PRODUCT_NAME, VERSION};
+use outpeek_app::{app_window, paths, PRODUCT_NAME, VERSION};
 use outpeek_overlay::ui::OverlayWindow;
-use slint::ComponentHandle as _;
+use slint::{ComponentHandle as _, ModelRc, VecModel};
 
 /// Persisted HUD toggle. Missing file = on: this app's own HUD is the point.
-const RENDERER_FILE: &str = "overlay_renderer.txt";
+/// Same file the Settings page reports, from one constant.
+const RENDERER_FILE: &str = settings_model::RENDERER_FILE;
+
+/// Build profile the Settings page reports. Compile-time fact, not runtime env.
+const BUILD_PROFILE: &str = if cfg!(debug_assertions) {
+    "debug"
+} else {
+    "release"
+};
+/// Target triple emitted by build.rs from the compiler's own TARGET. Never a
+/// guessed host string.
+const BUILD_TARGET: &str = match option_env!("OUTPEEK_TARGET") {
+    Some(target) => target,
+    None => "unknown target",
+};
 
 fn main() {
     // Pin the one proven renderer before any window exists.
@@ -38,6 +53,10 @@ fn main() {
     paths::migrate_legacy_data();
 
     let app = AppWindow::new().expect("outpeek-app: app window");
+    // Frame styling is best-effort and logged: a refused DWM attribute costs a
+    // cosmetic detail, never the app. The HWND can be absent before the event
+    // loop starts, so the first tick retries once.
+    let chrome_done = apply_window_chrome(&app);
     // The HUD window is created hidden here; a failure is a notice in the
     // tracker, never a startup failure (the tracker must still work).
     let (overlay, overlay_error) = match OverlayWindow::new() {
@@ -47,6 +66,13 @@ fn main() {
         }
         Err(e) => (None, Some(e.to_string())),
     };
+    // The HUD's native recipe lands now, on the still-hidden window: anything
+    // that shows it later maps a HUD, never winit's default decorated/topmost
+    // frame. Slint creates the HWND from the event loop, so the pass retries
+    // there and logs the applied style once (`[outpeek-overlay] style_hidden`).
+    if let Some(overlay) = &overlay {
+        outpeek_overlay::hud::style_hidden(overlay, outpeek_overlay::roles::WindowRole::Overlay);
+    }
     // PRESENT defaults to 1 for the standalone binary's first-frame contract;
     // the app owns the gate, and it starts closed. Without this the first
     // facts frame would show the HUD before the foreground check ran.
@@ -72,6 +98,7 @@ fn main() {
     }
     t.set_platform_note(platform_note.into());
     apply_hud(&app, enabled.load(Ordering::Relaxed), false);
+    apply_settings(&app);
 
     // Overlay close does not kill the app; app close kills the process.
     app.window().on_close_requested(|| {
@@ -90,9 +117,26 @@ fn main() {
         let foreground = foreground.clone();
         let stop = stop.clone();
         let flags = flags.clone();
+        // The window is laid out only after the loop runs; log its real size
+        // there, once, as the startup proof that the frame exists.
+        {
+            let app_weak = app.as_weak();
+            slint::Timer::single_shot(Duration::from_millis(250), move || {
+                if let Some(app) = app_weak.upgrade() {
+                    let size = app.window().size();
+                    eprintln!(
+                        "[{PRODUCT_NAME}] app window {}x{} physical",
+                        size.width, size.height
+                    );
+                }
+            });
+        }
         slint::Timer::single_shot(Duration::ZERO, move || {
             start_worker(app_weak.clone(), overlay_weak.clone(), &flags);
             if let Some(app) = app_weak.upgrade() {
+                if !chrome_done {
+                    apply_window_chrome(&app);
+                }
                 spawn_foreground_watch(
                     stop.clone(),
                     enabled,
@@ -133,7 +177,9 @@ fn main() {
 }
 
 /// `--mcp-port PORT` (and `--help`). Slint reads `SLINT_MCP_PORT` at backend
-/// init; the flag only fills it when the environment did not.
+/// init; the flag only fills it when the environment did not. A port the app
+/// cannot use is rejected here instead of being handed to Slint, which would
+/// print its own error and leave MCP silently off.
 fn parse_args() {
     let args: Vec<String> = std::env::args().collect();
     let mut i = 1;
@@ -141,11 +187,23 @@ fn parse_args() {
         match args[i].as_str() {
             "--mcp-port" => {
                 i += 1;
-                if let Some(port) = args.get(i) {
-                    if std::env::var_os("SLINT_MCP_PORT").is_none() {
-                        // SAFETY: single-threaded at startup, before any
-                        // backend or event loop exists.
-                        unsafe { std::env::set_var("SLINT_MCP_PORT", port) };
+                let Some(port) = args.get(i) else {
+                    eprintln!("outpeek-app: --mcp-port needs a value (1–65535)");
+                    std::process::exit(2);
+                };
+                match settings_model::parse_mcp_port(Some(port)) {
+                    McpPort::Set(_) => {
+                        if std::env::var_os("SLINT_MCP_PORT").is_none() {
+                            // SAFETY: single-threaded at startup, before any
+                            // backend or event loop exists.
+                            unsafe { std::env::set_var("SLINT_MCP_PORT", port) };
+                        }
+                    }
+                    _ => {
+                        eprintln!(
+                            "outpeek-app: --mcp-port '{port}' is not a usable port (1–65535)"
+                        );
+                        std::process::exit(2);
                     }
                 }
             }
@@ -196,6 +254,19 @@ fn wire_callbacks(
     foreground: &Arc<AtomicBool>,
     flags: &Arc<Flags>,
 ) {
+    // Sidebar navigation: Rust owns the view state, so the header, the active
+    // row and the window title can never disagree with the content area.
+    {
+        let app_weak = app.as_weak();
+        app.on_navigate(move |view| {
+            if let Some(app) = app_weak.upgrade() {
+                app.global::<Tracker>().set_view(view.clone());
+            }
+            #[cfg(debug_assertions)]
+            eprintln!("[{PRODUCT_NAME}] nav -> {view}");
+        });
+    }
+
     // Kill switch. Persist first, then apply to the live window on this thread
     // so a hitch is isolated by one click instead of an app restart.
     {
@@ -242,6 +313,108 @@ fn apply_hud(ui: &AppWindow, enabled: bool, game_foreground: bool) {
     t.set_hud_enabled(enabled);
     t.set_hud_status(status.text.into());
     t.set_hud_tone(status.tone.as_str().into());
+}
+
+/// Fill the Settings page once at boot. Every value is resolved on this
+/// machine; a missing base becomes the reason, never an invented path.
+fn apply_settings(ui: &AppWindow) {
+    // The real data directory first (it creates it, like every other read);
+    // the pure fallback only supplies the honest message when it cannot.
+    let data = paths::app_data_dir()
+        .map(PathState::Resolved)
+        .unwrap_or_else(|| settings_model::data_dir(None));
+    let local_app_data = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from);
+    let roaming = std::env::var_os("APPDATA").map(std::path::PathBuf::from);
+    let log = settings_model::log_dir(
+        local_app_data.as_deref(),
+        roaming.as_deref(),
+        &std::env::temp_dir(),
+        settings_model::LOG_IDENTIFIER,
+    );
+    // Read after `parse_args`: the flag fills this before the backend starts.
+    let mcp_port = std::env::var("SLINT_MCP_PORT").ok();
+    let view = settings_model::resolve(
+        data,
+        log,
+        mcp_port.as_deref(),
+        PRODUCT_NAME,
+        VERSION,
+        BUILD_PROFILE,
+        BUILD_TARGET,
+    );
+
+    let s = ui.global::<Settings>();
+    s.set_data_path(view.data_path.display().into());
+    s.set_data_resolved(view.data_path.is_resolved());
+    s.set_log_path(view.log_path.display().into());
+    s.set_log_resolved(view.log_path.is_resolved());
+    s.set_hud_file(view.hud_file.into());
+    s.set_hud_rule(view.hud_rule.into());
+    s.set_theme_line(view.theme_line.into());
+    s.set_mcp_line(settings_model::mcp_line(&view.mcp).into());
+    s.set_mcp_tone(settings_model::mcp_tone(&view.mcp).into());
+    s.set_version_line(view.version_line.into());
+    s.set_build_line(view.build_line.into());
+
+    let rows: Vec<SettingsItem> = view
+        .not_ported
+        .iter()
+        .map(|row| SettingsItem {
+            title: row.title.into(),
+            detail: row.detail.into(),
+        })
+        .collect();
+    s.set_not_ported(ModelRc::new(VecModel::from(rows)));
+}
+
+/// Paint the app window's DWM frame and ask for rounded corners.
+///
+/// App-window only: the HUD keeps the overlay recipe (DONOTROUND, no frame) and
+/// is never passed here. Every attribute result is logged; a refused attribute
+/// is cosmetic and never fatal.
+#[cfg(windows)]
+fn apply_window_chrome(ui: &AppWindow) -> bool {
+    use raw_window_handle::HasWindowHandle as _;
+
+    let handle = ui.window().window_handle();
+    let Ok(raw) = handle.window_handle() else {
+        eprintln!(
+            "[{PRODUCT_NAME}] app-window chrome: no Win32 HWND yet; retrying on the first tick"
+        );
+        return false;
+    };
+    let raw_window_handle::RawWindowHandle::Win32(hwnd) = raw.as_raw() else {
+        eprintln!("[{PRODUCT_NAME}] app-window chrome: not a Win32 window; skipping");
+        return true;
+    };
+    let caption = app_caption_color(ui);
+    let report = app_window::style_app_window(hwnd.hwnd.get() as isize, caption);
+    eprintln!("[{PRODUCT_NAME}] {}", report.log_line(caption));
+    if !report.all_ok() {
+        eprintln!(
+            "[{PRODUCT_NAME}] app-window chrome: a DWM attribute was refused; that part keeps the system frame"
+        );
+    }
+    true
+}
+
+#[cfg(not(windows))]
+fn apply_window_chrome(ui: &AppWindow) -> bool {
+    // DWM does not exist on this host; corners and frame stay the platform's.
+    // The token is still resolved so the log shows the colour Windows will use.
+    let caption = app_window::rgb_hex(app_caption_color(ui));
+    eprintln!(
+        "[{PRODUCT_NAME}] app-window chrome: skipped (non-Windows host); caption token #{caption:06X}"
+    );
+    true
+}
+
+/// DWM caption colour taken from the design token the window already uses:
+/// `Theme.surface-dim` in `outpeek-overlay/ui/tokens.slint` (`#0e0813`).
+/// Reading it means a token change repaints the frame; no second hex lives here.
+fn app_caption_color(ui: &AppWindow) -> u32 {
+    let color = ui.global::<Theme>().get_surface_dim().color();
+    app_window::colorref(color.red(), color.green(), color.blue())
 }
 
 fn apply_snapshot(ui: &AppWindow, snap: &TrackerSnapshot) {

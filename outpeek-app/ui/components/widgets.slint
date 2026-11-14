@@ -61,17 +61,52 @@ export component StateDot inherits Rectangle {
                 : Theme.ink-faint;
 }
 
+/// Sidebar navigation row: a real button. Hover, pressed and keyboard focus
+/// all change something visible; pointer cursor; Space/Return activates.
+/// A `soon` row is inert but still reads as a row: faint label + SOON chip.
 export component NavRow inherits Rectangle {
     in property <string> label: "";
     in property <bool> active: false;
     in property <bool> soon: false;
+    out property <bool> has-focus: scope.has-focus;
+    out property <bool> pressed: !root.soon && touch.pressed;
     callback clicked();
 
     height: 40px;
     border-radius: Shape.sm;
-    background: active
-        ? Theme.container
-        : (hover.has-hover && !soon ? Theme.container-low : transparent);
+    border-width: 1px;
+    border-color: root.has-focus && !root.soon ? Theme.primary : transparent;
+    background: root.pressed
+        ? Theme.container-high
+        : root.active
+            ? Theme.container
+            : (touch.has-hover && !root.soon ? Theme.container-low : transparent);
+
+    accessible-role: button;
+    accessible-enabled: !root.soon;
+    accessible-label: root.label;
+    accessible-action-default => { touch.clicked(); }
+
+    // Pointer cursor over the whole row, including the padding.
+    touch := TouchArea {
+        enabled: !root.soon;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    scope := FocusScope {
+        x: 0;
+        width: 0; // Tab-focusable, but clicks must not land here.
+        enabled: !root.soon;
+
+        key-pressed(event) => {
+            if (event.text == Key.Space || event.text == Key.Return) {
+                touch.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
 
     // Active accent spine, same 2px as the HUD's live spine.
     if active: Rectangle {
@@ -97,20 +132,11 @@ export component NavRow inherits Rectangle {
             vertical-alignment: center;
         }
         Rectangle { horizontal-stretch: 1; }
-        if root.soon: Text {
+        if root.soon: Chip {
             text: "SOON";
-            font-family: Theme.font-mono;
-            font-size: TypeScale.micro;
-            letter-spacing: 0.8px;
-            color: Theme.ink-faint;
-            vertical-alignment: center;
+            tone: "off";
+            y: (parent.height - self.height) / 2;
         }
-    }
-
-    hover := TouchArea {
-        enabled: !root.soon;
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
     }
 }
 
@@ -144,6 +170,25 @@ export component HudToggle inherits Rectangle {
 export component Divider inherits Rectangle {
     height: 1px;
     background: Theme.line-soft;
+}
+
+/// Small mono section label. One definition for every panel in the app.
+export component PanelTitle inherits Text {
+    text: "";
+    font-family: Theme.font-mono;
+    font-size: TypeScale.micro;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    color: Theme.ink-faint;
+}
+
+/// Body copy for panels: wraps, never shouts.
+export component Caption inherits Text {
+    text: "";
+    font-family: Theme.font-body;
+    font-size: TypeScale.caption;
+    color: Theme.ink-faint;
+    wrap: word-wrap;
 }
 
 /// Small text button (rank refresh). Disabled colour when `enabled` is false.

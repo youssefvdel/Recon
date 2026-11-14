@@ -13,6 +13,17 @@ use crate::image_cache;
 use crate::ui::{Facts, OverlayWindow, PlayerFact};
 use slint::ComponentHandle as _;
 
+/// How often the pre-show pass retries while the backend is still
+/// materialising the native handle.
+#[cfg(windows)]
+pub const STYLE_HIDDEN_RETRY: std::time::Duration = std::time::Duration::from_millis(20);
+
+/// How long it keeps trying: Slint creates a window's HWND from the event
+/// loop's first `create_inactive_windows` pass, i.e. within an iteration or
+/// two of a running loop — never at component creation.
+#[cfg(windows)]
+pub const STYLE_HIDDEN_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Partial facts update. Every field is optional: only the keys present in the
 /// object are applied.
 #[derive(Debug, Default, Clone, serde::Deserialize)]
@@ -211,6 +222,90 @@ pub fn apply_facts(win: &OverlayWindow, msg: FactsMsg) {
     }
 }
 
+/// The overlay HWND, when the backend exposes one (Win32 only).
+///
+/// One place for "how to get the HWND": the pre-show pass and
+/// [`sync_visibility`] must address the same window, and the standalone
+/// binary's probes use it too.
+#[cfg(windows)]
+pub fn win32_hwnd(win: &OverlayWindow) -> Option<isize> {
+    use raw_window_handle::HasWindowHandle as _;
+    let handle = win.window().window_handle();
+    let raw = handle.window_handle().ok()?;
+    match raw.as_raw() {
+        raw_window_handle::RawWindowHandle::Win32(h) => Some(h.hwnd.get() as isize),
+        _ => None,
+    }
+}
+
+/// Apply the overlay recipe at creation, while the window is still hidden.
+///
+/// `OverlayWindow::new()` hands back a normal Slint window: decorated, and
+/// topmost because the `.slint` declares `always-on-top`. The
+/// transparent/toolwindow/click-through recipe used to be applied only on the
+/// first show, so any path that showed the window before that pass painted a
+/// decorated topmost frame over whatever was on screen — the same flash the
+/// sidecar already had to fix. Styling is a pure style write and cannot map the
+/// window (see `crate::win_style::style_hidden`); [`sync_visibility`] still
+/// re-asserts the recipe on every show and on the driver's 2 s cadence.
+///
+/// Returns whether the recipe ran: false off Windows, for the app window (the
+/// [`crate::roles::should_style_hidden`] rule), or when the backend exposes no
+/// Win32 HWND yet.
+pub fn style_hidden(win: &OverlayWindow, role: crate::roles::WindowRole) -> bool {
+    if !crate::roles::should_style_hidden(role) {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        if style_hidden_once(win) {
+            return true;
+        }
+        // No HWND yet: Slint creates it from the event loop, not from
+        // `OverlayWindow::new()`. Keep trying so the recipe is on the window
+        // before anything can show it (and so the startup log can prove it).
+        schedule_style_hidden(win.as_weak(), std::time::Instant::now());
+        false
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = win;
+        false
+    }
+}
+
+/// One pre-show attempt. True when the recipe was written.
+#[cfg(windows)]
+fn style_hidden_once(win: &OverlayWindow) -> bool {
+    match win32_hwnd(win) {
+        Some(val) => crate::win_style::style_hidden(val),
+        None => false,
+    }
+}
+
+/// Retry [`style_hidden_once`] on the event loop until it lands or the budget
+/// runs out; gives up with one line, never spins.
+#[cfg(windows)]
+fn schedule_style_hidden(win: slint::Weak<OverlayWindow>, started: std::time::Instant) {
+    slint::Timer::single_shot(STYLE_HIDDEN_RETRY, move || {
+        let Some(win) = win.upgrade() else {
+            return;
+        };
+        if style_hidden_once(&win) {
+            return;
+        }
+        if started.elapsed() >= STYLE_HIDDEN_BUDGET {
+            eprintln!(
+                "[outpeek-overlay] style_hidden: no Win32 HWND after {}ms; \
+                 the first show will style the window",
+                started.elapsed().as_millis()
+            );
+            return;
+        }
+        schedule_style_hidden(win.as_weak(), started);
+    });
+}
+
 /// Window-level visibility: shown while editing or while the driver says the
 /// HUD has a reason to be on screen. The `.slint` phase gates
 /// (`selecting`/`peeking`) decide what paints inside; this only owns the
@@ -253,6 +348,17 @@ pub fn sync_visibility(win: &OverlayWindow, rect: Option<RectMsg>) {
                 h.max(100) as u32,
             ));
         }
+        // Recipe first, map second: a window that is still hidden gets the
+        // full popup/toolwindow/transparent/click-through style, so the very
+        // first ShowWindow maps a HUD — never a decorated topmost frame. The
+        // pass cannot show the window, and a window that is already visible
+        // is left for the re-assert below (same write, no double work).
+        #[cfg(windows)]
+        if let Some(val) = win32_hwnd(win) {
+            if !crate::win_style::visible(val) {
+                crate::win_style::apply(val, !edit, r);
+            }
+        }
         let show_r = win.show();
         eprintln!(
             "[outpeek-overlay] show result: {}",
@@ -260,18 +366,13 @@ pub fn sync_visibility(win: &OverlayWindow, rect: Option<RectMsg>) {
         );
         #[cfg(windows)]
         {
-            use raw_window_handle::HasWindowHandle as _;
-            let handle = win.window().window_handle();
-            if let Ok(raw) = handle.window_handle() {
-                if let raw_window_handle::RawWindowHandle::Win32(h) = raw.as_raw() {
-                    let val = h.hwnd.get() as isize;
-                    crate::win_style::apply(val, !edit, r);
-                    eprintln!(
-                        "[outpeek-overlay] hwnd={val} visible={}",
-                        crate::win_style::visible(val)
-                    );
-                    crate::win_style::refocus_if_stolen(val, prev_fg);
-                }
+            if let Some(val) = win32_hwnd(win) {
+                crate::win_style::apply(val, !edit, r);
+                eprintln!(
+                    "[outpeek-overlay] hwnd={val} visible={}",
+                    crate::win_style::visible(val)
+                );
+                crate::win_style::refocus_if_stolen(val, prev_fg);
             }
         }
     } else {

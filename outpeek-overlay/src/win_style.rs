@@ -386,6 +386,26 @@ pub fn apply(val: isize, clickthrough: bool, rect: Option<(i32, i32, i32, i32)>)
     }
 }
 
+/// The recipe applied at creation, while the window is still hidden.
+///
+/// Same style write as [`apply`] minus every geometry flag: the first show
+/// sizes and places the window. Nothing here can map the window — no
+/// `SWP_SHOWWINDOW` is ever passed — so a HUD that never gets presented stays
+/// invisible, and one that is presented never flashes winit's default
+/// decorated/topmost frame on the way in.
+///
+/// Returns whether the HWND existed and the pass ran, and logs the readback
+/// once: this runs at startup, so the log is the only place the applied style
+/// can be checked without a visible window.
+pub fn style_hidden(val: isize) -> bool {
+    if !valid(val) {
+        return false;
+    }
+    apply(val, true, None);
+    eprintln!("[outpeek-overlay] style_hidden: {}", probe_json(val));
+    true
+}
+
 /// Style/readback snapshot for `--probe` and the soak predicate. Mirrors the
 /// main app's `overlay_clickthrough_missing` predicate: click-through is
 /// WS_EX_TRANSPARENT, never WS_EX_LAYERED.

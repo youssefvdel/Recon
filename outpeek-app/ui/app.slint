@@ -1,36 +1,64 @@
 // Outpeek app shell. One window; the HUD is a second Window from the
 // `outpeek-overlay` crate at runtime. Tokens and the plate component are
 // imported from that crate's UI through build.rs include paths — no copies.
+//
+// Views: Tracker and Settings are real and switch in place (the sidebar writes
+// `Tracker.view`). Overlay and Stretch stay marked SOON because they are not
+// ported — a dead screen would be a lie.
 
 import { Theme, Space } from "tokens.slint";
 import { Tracker } from "state.slint";
 import { Sidebar } from "components/sidebar.slint";
 import { Header } from "components/header.slint";
 import { LiveCard, RankCard, AccountCard, MatchesCard } from "components/cards.slint";
+import { SettingsPage } from "components/settings.slint";
 
-// Re-exported so the Rust side can address the same global (`app.global::<Tracker>()`).
-export { Tracker } from "state.slint";
+// Re-exported so the Rust side can address the same globals, read the Theme
+// token for the DWM caption colour, and use the row struct without the
+// deprecated generated alias.
+export { Tracker, Settings, SettingsItem } from "state.slint";
+export { Theme } from "tokens.slint";
 
 export component AppWindow inherits Window {
-    title: "Outpeek — Tracker";
+    title: "Outpeek — " + (Tracker.view == "settings" ? "Settings" : "Tracker");
     preferred-width: 1180px;
     preferred-height: 780px;
     min-width: 980px;
     min-height: 640px;
+    // The resize ceiling, declared because Slint derives the window's min AND
+    // max from this layout: a finite maximum computed from the content (~984 px
+    // on Windows) wins over `preferred-width`, so the shell opened at min width
+    // (996x819 outer measured live). 4K is the clamp, not a launch size; the
+    // window system still caps to the work area.
+    max-width: 3840px;
+    max-height: 2160px;
     background: Theme.surface-dim;
 
     callback toggle-hud();
     callback refresh-rank();
+    // Navigation goes through Rust so the view state has one owner (and one
+    // debug log line per click).
+    callback navigate(string);
 
     HorizontalLayout {
         Sidebar {
             toggle-hud => { root.toggle-hud(); }
+            navigate(view) => { root.navigate(view); }
         }
 
         VerticalLayout {
-            Header {}
+            Header {
+                title: Tracker.view == "settings" ? "Settings" : "Tracker";
+                subtitle: Tracker.view == "settings"
+                    ? "What this build really does — and what it does not"
+                    : "Live from the Riot Client loopback — read-only";
+            }
 
-            VerticalLayout {
+            if Tracker.view == "settings": SettingsPage {
+                toggle-hud => { root.toggle-hud(); }
+            }
+
+            if Tracker.view == "tracker": VerticalLayout {
                 padding: Space.xl;
                 spacing: Space.lg;
 
