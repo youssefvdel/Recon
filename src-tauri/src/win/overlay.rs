@@ -69,6 +69,7 @@ pub(crate) fn show_overlay(app: tauri::AppHandle) -> Result<(), String> {
             elapsed.as_millis()
         );
     }
+    crate::overlay_sidecar::push_current();
     Ok(())
 }
 
@@ -77,7 +78,9 @@ pub(crate) fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("overlay")
         .ok_or_else(|| "Overlay window not found".to_string())?;
-    window.hide().map_err(|e| format!("Overlay hide failed: {e}"))
+    let r = window.hide().map_err(|e| format!("Overlay hide failed: {e}"));
+    crate::overlay_sidecar::push_current();
+    r
 }
 
 
@@ -92,6 +95,7 @@ pub(crate) fn force_overlay_edit_mode_off(app: &tauri::AppHandle, reason: &str) 
         log::warn!("overlay edit mode force-exited ({reason})");
         let _ = app.emit("overlay-edit-mode-changed", false);
     }
+    crate::overlay_sidecar::push_current();
 }
 
 #[tauri::command]
@@ -135,6 +139,7 @@ pub(crate) fn set_overlay_edit_mode(app: tauri::AppHandle, in_edit_mode: bool) -
     // (audit overlay#5). Mouse drag/click do not need activation, and the
     // Ctrl+Shift+H chord plus the on-screen Lock button cover exiting.
     let _ = app.emit("overlay-edit-mode-changed", true);
+    crate::overlay_sidecar::push_current();
     Ok(())
 }
 

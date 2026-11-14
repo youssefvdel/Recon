@@ -13,6 +13,9 @@ dist-ssr
 src-tauri/target/
 # Fetched WebView2 Fixed Runtime (169 MB) — never commit; CI fetches it.
 src-tauri/webview2-runtime/
+# Built sidecar binary (cargo xwin -> src-tauri/binaries/) — never commit;
+# CI rebuilds it from recon-overlay/.
+src-tauri/binaries/
 *.local
 .env
 bot/.env

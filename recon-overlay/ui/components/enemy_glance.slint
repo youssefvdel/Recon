@@ -1,0 +1,90 @@
+// 3/5 — Enemy-five glance. Same portrait+crest language as YourFive, but
+// dimmed with a coral edge so friend/foe reads instantly at a glance.
+// Agent-select + Tab-hold only — never ambient in-match.
+
+import { Theme, TypeScale, Space, Shape, Motion } from "../tokens.slint";
+import { Facts, PlayerFact } from "../facts.slint";
+import { Plate } from "plate.slint";
+
+component FoeCell inherits Rectangle {
+    in property <PlayerFact> p;
+    in property <length> cell: 64px;
+
+    width: cell;
+    height: cell + 20px;
+
+    portrait := Rectangle {
+        x: (parent.width - cell) / 2;
+        y: 0px;
+        width: cell;
+        height: cell;
+        border-radius: Shape.md;
+        border-width: 1px;
+        border-color: p.locked ? Theme.coral : Theme.line-soft;
+        background: Theme.container-low;
+        Text {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            text: "?";
+            font-family: Theme.font-display;
+            font-size: 18px;
+            font-weight: 800;
+            color: Theme.ink-faint;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        Image {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            source: p.icon;
+            image-fit: cover;
+            image-rendering: smooth;
+        }
+        Image {
+            x: parent.width - 26px;
+            y: parent.height - 22px;
+            width: 24px;
+            height: 24px;
+            source: p.crest;
+            image-fit: contain;
+            image-rendering: smooth;
+        }
+    }
+}
+
+export component EnemyGlance inherits Plate {
+    in property <[PlayerFact]> players: Facts.enemy-five;
+    in property <float> scale: 1.0;
+
+    // Coral spine = foe. Mirrors YourFive's primary spine.
+    hot: false;
+
+    VerticalLayout {
+        padding: Space.md;
+        spacing: Space.sm;
+        Text {
+            text: "ENEMY GLANCE";
+            font-family: Theme.font-mono;
+            font-size: TypeScale.micro;
+            font-weight: 700;
+            letter-spacing: 1px;
+            color: Theme.coral;
+        }
+        row := HorizontalLayout {
+            spacing: Space.sm;
+            alignment: center;
+            for p in players: FoeCell { p: p; cell: 64px * scale; }
+        }
+        Text {
+            text: "Tab-hold only — hidden mid-fight";
+            font-family: Theme.font-mono;
+            font-size: TypeScale.micro;
+            color: Theme.ink-faint;
+            horizontal-alignment: center;
+        }
+    }
+}

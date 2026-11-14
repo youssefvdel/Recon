@@ -20,6 +20,7 @@ mod settings;
 mod state;
 mod win;
 mod commands;
+mod overlay_sidecar;
 
 // Re-exported at the crate root so the split moved code without moving any
 // caller: `crate::OVERLAY_EDIT_MODE` and friends still resolve.
@@ -287,7 +288,7 @@ fn show_message_box(title: &str, body: &str) {
     eprintln!("{title}: {body}");
 }
 
-fn fatal_startup_error(identifier: &str, detail: &str) {
+fn fatal_startup_error(identifier: &str, detail: &str) -> ! {
     log_line(
         identifier,
         log::Level::Error,
@@ -403,7 +404,7 @@ pub fn run() {
     );
 
     let setup_log_id = log_id.clone();
-    let run_result = builder
+    let build_result = builder
         .manage(app_state)
         .setup(move |app| {
             // The plugin is attached by now: replay the pre-attach markers so
@@ -455,6 +456,9 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_millis(700));
                 win::overlay::create_overlay_verified(&overlay_app, &overlay_log_id);
             });
+            // Native sidecar behind the TS overlay: missing binary is a warn,
+            // never a failure (overlay_sidecar owns that policy).
+            overlay_sidecar::spawn_sidecar(app.handle().clone());
             space_spam::start(app.handle());
             daemons::display_hotkey(app.handle().clone(), rx, pref_clone);
 
@@ -634,6 +638,7 @@ pub fn run() {
             commands::display::get_all_monitors,
             win::overlay::get_overlay_monitor,
             win::overlay::set_overlay_monitor,
+            overlay_sidecar::sidecar_status,
             commands::display::set_monitor_device_enabled,
             commands::display::add_custom_resolution,
             commands::display::remove_custom_override,
@@ -651,14 +656,22 @@ pub fn run() {
             commands::window::window_start_dragging,
             commands::window::window_is_maximized,
         ])
-        .run(context);
+        .build(context)
+        .map_err(|e| e.to_string());
 
-    // No `.expect()` here: this process has no console, so a panic on a failed
-    // run (window/webview creation is the usual cause) exits silently with zero
-    // windows. Surface it in a dialog instead.
-    if let Err(error) = run_result {
-        fatal_startup_error(&log_id, &error.to_string());
-    }
+    // Build errors (window/webview creation is the usual cause) surface in a
+    // dialog: this process has no console, so an `.expect()` here would exit
+    // silently with zero windows.
+    let app = match build_result {
+        Ok(app) => app,
+        Err(error) => fatal_startup_error(&log_id, &error.to_string()),
+    };
+    app.run(|_app_handle, event| {
+        // Polite sidecar shutdown; its --parent-pid watchdog is the backstop.
+        if matches!(event, tauri::RunEvent::Exit) {
+            crate::overlay_sidecar::shutdown_sidecar();
+        }
+    });
 }
 
 #[cfg(test)]

@@ -65,7 +65,9 @@
     "longDescription": "Recon is a competitive stretched resolution utility and real-time scout for Valorant.",
     "homepage": "https://reconlab.app",
     "licenseFile": "../LICENSE",
-    "externalBin": [],
+    "externalBin": [
+      "binaries/recon-overlay"
+    ],
     "icon": [
       "icons/icon.ico",
       "icons/icon.png",

@@ -1,0 +1,93 @@
+// 1/5 — Match strip. Agent-select header only: Map • Mode • SELECT/LIVE +
+// side + server. In-match it collapses to a slim score line while Tab is held.
+
+import { Theme, TypeScale, Space, Shape, Motion } from "../tokens.slint";
+import { Plate } from "plate.slint";
+
+export component MatchStrip inherits Plate {
+    in property <string> map: "Ascent";
+    in property <string> mode: "Competitive";
+    in property <string> label: "SELECT";
+    in property <bool> live: false;
+    in property <string> side: "";
+    in-out property <string> server: "";
+    in property <int> blue: 0;
+    in property <int> red: 0;
+    in property <bool> show-score: false;
+
+    VerticalLayout {
+        padding: Space.md;
+        spacing: Space.xs;
+
+        head := HorizontalLayout {
+            spacing: Space.sm;
+            alignment: start;
+
+            dot := Rectangle {
+                width: 8px;
+                height: 8px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 4px;
+                background: live ? Theme.mint : Theme.primary;
+            }
+            title := Text {
+                text: map + "  •  TEAM SCOUT";
+                font-family: Theme.font-display;
+                font-size: TypeScale.title;
+                font-weight: 800;
+                letter-spacing: 1px;
+                color: Theme.ink;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+            mode-chip := Text {
+                text: "•  " + mode;
+                font-family: Theme.font-mono;
+                font-size: TypeScale.micro;
+                color: Theme.ink-dim;
+            }
+            if side != "": Text {
+                text: side == "Defense" ? "DEF" : "ATK";
+                font-family: Theme.font-mono;
+                font-size: TypeScale.micro;
+                font-weight: 700;
+                color: Theme.ink-dim;
+            }
+            live-chip := Rectangle {
+                border-radius: Shape.pill;
+                background: live ? #a8f5cc26 : #d0bcff26;
+                chip-label := Text {
+                    x: 8px;
+                    y: 3px;
+                    text: label;
+                    font-family: Theme.font-mono;
+                    font-size: TypeScale.micro;
+                    font-weight: 800;
+                    color: live ? Theme.mint : Theme.primary;
+                }
+                width: chip-label.width + 16px;
+                height: chip-label.height + 6px;
+            }
+            if server != "": Text {
+                text: server;
+                font-family: Theme.font-mono;
+                font-size: TypeScale.micro;
+                color: Theme.ink-faint;
+            }
+        }
+
+        if show-score: score-row := HorizontalLayout {
+            spacing: Space.sm;
+            alignment: center;
+            opacity: show-score ? 1 : 0;
+            animate opacity { duration: Motion.fast; easing: ease-in-out; }
+            Text {
+                text: blue + " — " + red;
+                font-family: Theme.font-display;
+                font-size: TypeScale.big;
+                font-weight: 800;
+                color: Theme.ink;
+            }
+        }
+    }
+}

@@ -1,0 +1,57 @@
+// Recon overlay — facts. The ONLY data contract between Rust and UI.
+// Rust owns every value here (versioned DTOs); .slint only renders.
+// No URLs, no fetching, no logic — icons/crests arrive as <image>
+// already resolved from the disk cache by Rust (see design doc § image
+// pipeline). Unknown values stay empty, never placeholders-as-data.
+
+export struct PlayerFact {
+    name: string,
+    agent: string,
+    icon: image,
+    crest: image,
+    locked: bool,
+    isme: bool,
+    party: int,
+    rr: int, // -1 = unknown, renders as empty slot (never a dash-as-value)
+}
+
+export global Facts {
+    // Phase gates what paints. "idle" | "pregame" | "coregame".
+    in-out property <string> phase: "idle";
+    in-out property <bool> tab-held: false;
+    in-out property <bool> edit-mode: false;
+    in-out property <bool> lite: true;
+
+    // Match strip.
+    in-out property <string> map-name: "Ascent";
+    in-out property <string> mode: "Competitive";
+    in-out property <string> phase-label: "SELECT";
+    in-out property <bool> live: false;
+    in-out property <string> side: "";
+    in-out property <string> server: "";
+    in-out property <int> blue-score: 0;
+    in-out property <int> red-score: 0;
+
+    // Rosters. Lite renders icons + crests only; Full adds names/stats.
+    in-out property <[PlayerFact]> your-five;
+    in-out property <[PlayerFact]> enemy-five;
+
+    // Map pick hint — one line, precomputed by Rust (personal TRN record
+    // or rank-tuned meta fallback, never both fighting in the UI).
+    in-out property <string> hint-line: "";
+    in-out property <string> hint-source: "";
+    in-out property <float> hint-win01: 0.0;
+    in-out property <int> hint-games: 0;
+
+    // Status whisper — one self-hiding line. Rust clears it; UI just fades.
+    in-out property <string> whisper: "";
+    in-out property <string> whisper-tone: "info"; // "info" | "warn" | "score"
+
+    // Cluster placement. Logical px on the current display; Rust clamps +
+    // persists per display-key (mirrors the TS layouts map). Scale is a
+    // multiplier applied to cluster width + portraits.
+    in-out property <length> cluster-x: 680px;
+    in-out property <length> cluster-y: 96px;
+    in-out property <float> ui-scale: 1.0;
+    in-out property <string> display-key: "";
+}

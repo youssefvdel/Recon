@@ -33,6 +33,6 @@ pub use overlay_placement::{
 pub(crate) use overlay_placement::overlay_monitor_file;
 pub use overlay_window::{
     install_overlay_subclass, is_tab_down, make_child_windows_clickthrough,
-    overlay_clickthrough_missing, restore_blur_behind, set_overlay_editable, set_overlay_windowed,
-    setup_overlay_window, strip_all_dwm_borders, toggle_overlay_clickthrough,
+    overlay_clickthrough_missing, overlay_frame_dirty, restore_blur_behind, set_overlay_editable,
+    set_overlay_windowed, setup_overlay_window, strip_all_dwm_borders, toggle_overlay_clickthrough,
 };

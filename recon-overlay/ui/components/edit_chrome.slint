@@ -1,0 +1,207 @@
+// Edit-mode chrome. Painted ONLY while Facts.edit-mode is true (out of
+// edit the window is click-through and this tree is fully transparent).
+// One drag handle moves the whole cluster; scale steps replace pixel
+// resize-drag (Rust clamps + persists per display-key). Lite/Full toggle,
+// reset, and lock live in the top-center toolbar.
+
+import { Theme, TypeScale, Space, Shape, Motion } from "../tokens.slint";
+
+export component DragHandle inherits Rectangle {
+    callback nudged(length, length);
+
+    height: 28px;
+    border-radius: Shape.md;
+    background: #4f378b59;
+    border-width: 1px;
+    border-color: Theme.primary;
+
+    opacity: 1;
+    animate opacity { duration: Motion.fast; easing: ease-in-out; }
+
+    area := TouchArea {
+        mouse-cursor: move;
+        moved => { root.nudged(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y); }
+    }
+    Text {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        text: "⠿  DRAG CLUSTER  •  " + root.pos-label;
+        font-family: Theme.font-mono;
+        font-size: TypeScale.micro;
+        font-weight: 700;
+        color: Theme.primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    in property <string> pos-label: "";
+}
+
+export component EditChrome inherits Rectangle {
+    callback toggle-lite();
+    callback reset-layout();
+    callback scale-step(float);
+    callback lock-overlay();
+
+    in property <bool> lite: true;
+    in property <string> display-key: "";
+    in property <string> hint: "DRAG HANDLE MOVES CLUSTER • SCROLL FREE • ESC LOCKS";
+
+    // Toolbar — fixed top-center, edit mode only.
+    bar := Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: 16px;
+        width: 560px;
+        height: 44px;
+        border-radius: Shape.lg;
+        border-width: 1px;
+        border-color: Theme.primary;
+        background: #23192fd9;
+        drop-shadow-color: #000000b8;
+        drop-shadow-offset-x: 0px;
+        drop-shadow-offset-y: 12px;
+        drop-shadow-blur: 32px;
+
+        row := HorizontalLayout {
+            padding-left: Space.md;
+            padding-right: Space.md;
+            spacing: Space.sm;
+            alignment: center;
+            Text {
+                text: "HUD EDIT";
+                font-family: Theme.font-display;
+                font-size: TypeScale.caption;
+                font-weight: 800;
+                letter-spacing: 1px;
+                color: Theme.ink;
+                vertical-alignment: center;
+            }
+            lite-btn := Rectangle {
+                width: 120px;
+                height: 28px;
+                border-radius: Shape.pill;
+                background: lite ? Theme.primary : Theme.container-highest;
+                area-lite := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.toggle-lite(); }
+                }
+                Text {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: parent.height;
+                    text: lite ? "LITE ✓" : "FULL";
+                    font-family: Theme.font-mono;
+                    font-size: TypeScale.micro;
+                    font-weight: 800;
+                    color: lite ? #381e72 : Theme.ink-dim;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            scale-down := Rectangle {
+                width: 28px;
+                height: 28px;
+                area-dn := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.scale-step(0.9); }
+                }
+                Text {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: parent.height;
+                    text: "−";
+                    font-size: 16px;
+                    color: Theme.ink-dim;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            scale-up := Rectangle {
+                width: 28px;
+                height: 28px;
+                area-up := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.scale-step(1.1); }
+                }
+                Text {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: parent.height;
+                    text: "+";
+                    font-size: 16px;
+                    color: Theme.ink-dim;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            reset-btn := Rectangle {
+                width: 64px;
+                height: 28px;
+                area-reset := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.reset-layout(); }
+                }
+                Text {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: parent.height;
+                    text: "RESET";
+                    font-family: Theme.font-mono;
+                    font-size: TypeScale.micro;
+                    font-weight: 700;
+                    color: Theme.ink-dim;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            lock-btn := Rectangle {
+                width: 96px;
+                height: 28px;
+                border-radius: Shape.pill;
+                background: Theme.mint;
+                area-lock := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.lock-overlay(); }
+                }
+                Text {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: parent.height;
+                    text: "LOCK ✓";
+                        font-family: Theme.font-mono;
+                        font-size: TypeScale.micro;
+                        font-weight: 800;
+                        color: #1a5238;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+    // Screen-bounds frame so the display perimeter reads at a glance.
+    frame := Rectangle {
+        x: 12px;
+        y: 12px;
+        width: parent.width - 24px;
+        height: parent.height - 24px;
+        border-radius: Shape.xl;
+        border-width: 1px;
+        border-color: #d0bcff40;
+        background: transparent;
+    }
+    frame-tag := Text {
+        x: 24px;
+        y: 20px;
+        text: "DISPLAY " + display-key + "  •  " + hint;
+        font-family: Theme.font-mono;
+        font-size: TypeScale.micro;
+        color: Theme.primary;
+    }
+}

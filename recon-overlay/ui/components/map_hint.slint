@@ -1,0 +1,74 @@
+// 4/5 — Map pick hint. One line: Rust precomputes personal TRN map record
+// OR rank-tuned meta fallback — the UI never chooses, it just renders the
+// verdict with a source chip + a whisper-thin win-rate bar.
+
+import { Theme, TypeScale, Space, Shape } from "../tokens.slint";
+import { Plate } from "plate.slint";
+
+export component MapHint inherits Plate {
+    in property <string> line: "";
+    in property <string> source: "";
+    in property <float> win01: 0.0;
+    in property <int> games: 0;
+
+    min-height: 56px;
+
+    VerticalLayout {
+        padding-left: Space.md;
+        padding-right: Space.md;
+        padding-top: Space.sm;
+        padding-bottom: Space.sm;
+        spacing: Space.xs;
+
+        row := HorizontalLayout {
+            spacing: Space.sm;
+            alignment: start;
+            chip := Rectangle {
+                border-radius: Shape.pill;
+                background: source == "META" ? #e8b73a26 : #d0bcff26;
+                chip-label := Text {
+                    x: 8px;
+                    y: 3px;
+                    text: source;
+                    font-family: Theme.font-mono;
+                    font-size: TypeScale.micro;
+                    font-weight: 800;
+                    color: source == "META" ? Theme.amber : Theme.primary;
+                }
+                width: chip-label.width + 16px;
+                height: chip-label.height + 6px;
+            }
+            Text {
+                text: line;
+                font-family: Theme.font-body;
+                font-size: TypeScale.body;
+                font-weight: 600;
+                color: Theme.ink;
+                overflow: elide;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            if games > 0: Text {
+                text: games + " games";
+                font-family: Theme.font-mono;
+                font-size: TypeScale.micro;
+                color: Theme.ink-faint;
+                vertical-alignment: center;
+            }
+        }
+        // Whisper-thin win bar — mint at/above 50%, dim below.
+        track := Rectangle {
+            height: 3px;
+            border-radius: 2px;
+            background: Theme.container-highest;
+            fill := Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width * win01;
+                height: parent.height;
+                border-radius: 2px;
+                background: win01 >= 0.5 ? Theme.mint : Theme.ink-faint;
+            }
+        }
+    }
+}

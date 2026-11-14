@@ -1,0 +1,54 @@
+// Shared glass plate. The premium look lives here so all five Lite widgets
+// stay visually one family: layered gradient + top sheen + 1px inner
+// stroke + deep drop shadow. No backdrop-blur anywhere.
+//
+// Noise: a tiled 128px grain PNG at ~4% sits above the sheen once the
+// fixer adds recon-overlay/ui/assets/noise-128.png (Image element below
+// is commented until the asset ships — uncomment, do not restyle).
+
+import { Theme, Shape } from "../tokens.slint";
+
+export component Plate inherits Rectangle {
+    in property <bool> hot: false;
+    in property <bool> editing: false;
+
+    border-radius: Shape.lg;
+    border-width: 1px;
+    border-color: editing ? Theme.primary : Theme.line;
+    background: @linear-gradient(135deg, Theme.glass-top 0%, Theme.glass-bottom 100%);
+    drop-shadow-color: #000000b8;
+    drop-shadow-offset-x: 0px;
+    drop-shadow-offset-y: 12px;
+    drop-shadow-blur: 32px;
+
+    // 1px inner stroke — the crisp edge that sells "glass" without blur.
+    inner := Rectangle {
+        x: 1px;
+        y: 1px;
+        width: parent.width - 2px;
+        height: parent.height - 2px;
+        border-radius: Shape.md;
+        border-width: 1px;
+        border-color: Theme.edge-light;
+        background: @linear-gradient(180deg, Theme.sheen 0%, transparent 30%);
+    }
+
+    // Live/select accent spine.
+    if hot: Rectangle {
+        x: 0px;
+        y: 10px;
+        width: 2px;
+        height: parent.height - 20px;
+        border-radius: 2px;
+        background: Theme.primary;
+    }
+
+    // Noise tile (fixer: ship ui/assets/noise-128.png, then uncomment).
+    // grain := Image {
+    //     x: 1px; y: 1px;
+    //     width: parent.width - 2px; height: parent.height - 2px;
+    //     source: @image-url("../assets/noise-128.png");
+    //     image-fit: fill;
+    //     opacity: 0.04;
+    // }
+}

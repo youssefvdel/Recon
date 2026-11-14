@@ -19,12 +19,14 @@ const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
 pkg.version = v;
 writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 
-const cargoPath = join(root, 'src-tauri', 'Cargo.toml');
-const cargoOrig = readFileSync(cargoPath, 'utf8');
-if (!/^version = ".*"$/m.test(cargoOrig)) {
-  console.error('Cargo.toml: no version line matched, left untouched');
-  process.exit(1);
+const cargoPaths = [join(root, 'src-tauri', 'Cargo.toml'), join(root, 'recon-overlay', 'Cargo.toml')];
+for (const cargoPath of cargoPaths) {
+  const cargoOrig = readFileSync(cargoPath, 'utf8');
+  if (!/^version = ".*"$/m.test(cargoOrig)) {
+    console.error(`${cargoPath}: no version line matched, left untouched`);
+    process.exit(1);
+  }
+  writeFileSync(cargoPath, cargoOrig.replace(/^version = ".*"$/m, `version = "${v}"`));
 }
-writeFileSync(cargoPath, cargoOrig.replace(/^version = ".*"$/m, `version = "${v}"`));
 
-console.log(`Bumped to ${v}: package.json + src-tauri/Cargo.toml (tauri.conf follows package.json)`);
+console.log(`Bumped to ${v}: package.json + src-tauri/Cargo.toml + recon-overlay/Cargo.toml (tauri.conf follows package.json)`);

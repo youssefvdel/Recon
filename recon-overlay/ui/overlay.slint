@@ -1,0 +1,123 @@
+// Recon overlay — Slint sidecar entry. Transparent fullscreen Window that
+// renders the Lite five as ONE top-center cluster with two densities:
+// agent-select (full cluster) and in-match Tab-peek (strip + rosters).
+//
+// Window contract (fixer owns the native side, .slint only declares it):
+//   background: transparent + no-frame + always-on-top. Transparency and
+//   click-through are NOT automatic in Slint on Windows (upstream #722,
+//   #6021) — the Rust host must wire the DirectComposition path (never
+//   WS_EX_LAYERED) and OS hit-test passthrough outside edit mode.
+//   Repaint-on-demand: no animation-tick(), no timers — opacity animates
+//   only when a Facts property changes.
+
+import { Facts } from "facts.slint";
+import { Theme, Motion, Space } from "tokens.slint";
+import { MatchStrip } from "components/match_strip.slint";
+import { YourFive } from "components/your_five.slint";
+import { EnemyGlance } from "components/enemy_glance.slint";
+import { MapHint } from "components/map_hint.slint";
+import { StatusWhisper } from "components/status_whisper.slint";
+import { EditChrome, DragHandle } from "components/edit_chrome.slint";
+
+// Rust-side contract: the sidecar binary drives Facts + PlayerFact directly.
+// Re-export keeps them in the generated public API (no visual change).
+export { Facts, PlayerFact } from "facts.slint";
+
+export component OverlayWindow inherits Window {
+    title: "Recon Overlay";
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+    preferred-width: 1920px;
+    preferred-height: 1080px;
+
+    callback toggle-lite();
+    callback reset-layout();
+    callback scale-step(float);
+    callback lock-overlay();
+    callback nudge-cluster(length, length);
+
+    // Phase gates. Edit mode previews everything.
+    property <bool> selecting: Facts.phase == "pregame" || Facts.edit-mode;
+    property <bool> peeking: (Facts.phase == "coregame" && Facts.tab-held) || Facts.edit-mode;
+    property <bool> cluster-on: selecting || peeking;
+
+    // Edit dimmer — fullscreen, fades, never intercepts (Rust owns capture).
+    dim := Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        background: #00000066;
+        opacity: Facts.edit-mode ? 1 : 0;
+        animate opacity { duration: Motion.mid; easing: ease-in-out; }
+    }
+
+    // THE cluster — one drag target, two densities, top-center anchored.
+    cluster := VerticalLayout {
+        x: Facts.cluster-x;
+        y: Facts.cluster-y;
+        width: 560px * Facts.ui-scale;
+        spacing: Space.sm;
+        alignment: start;
+        opacity: cluster-on ? 1 : 0;
+        animate opacity { duration: Motion.mid; easing: ease-in-out; }
+
+        if Facts.edit-mode: DragHandle {
+            pos-label: Facts.display-key;
+            nudged(dx, dy) => { root.nudge-cluster(dx, dy); }
+        }
+        MatchStrip {
+            map: Facts.map-name;
+            mode: Facts.mode;
+            label: Facts.phase-label;
+            live: Facts.live;
+            side: Facts.side;
+            server: Facts.server;
+            blue: Facts.blue-score;
+            red: Facts.red-score;
+            show-score: Facts.phase == "coregame";
+            hot: Facts.phase != "idle";
+            editing: Facts.edit-mode;
+        }
+        if selecting: YourFive {
+            players: Facts.your-five;
+            full: !Facts.lite;
+            scale: Facts.ui-scale;
+            editing: Facts.edit-mode;
+        }
+        if peeking: EnemyGlance {
+            players: Facts.enemy-five;
+            scale: Facts.ui-scale;
+            editing: Facts.edit-mode;
+        }
+        if selecting: MapHint {
+            line: Facts.hint-line;
+            source: Facts.hint-source;
+            win01: Facts.hint-win01;
+            games: Facts.hint-games;
+            editing: Facts.edit-mode;
+        }
+    }
+
+    // Status whisper — bottom-center, self-hiding, above everything ambient.
+    whisper := StatusWhisper {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - 64px;
+        text: Facts.whisper;
+        tone: Facts.whisper-tone;
+    }
+
+    if Facts.edit-mode: EditChrome {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        lite: Facts.lite;
+        display-key: Facts.display-key;
+        toggle-lite() => { root.toggle-lite(); }
+        reset-layout() => { root.reset-layout(); }
+        scale-step(f) => { root.scale-step(f); }
+        lock-overlay() => { root.lock-overlay(); }
+    }
+}

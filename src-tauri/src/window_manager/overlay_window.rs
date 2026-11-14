@@ -375,6 +375,32 @@ pub fn overlay_clickthrough_missing(hwnd_val: isize) -> bool {
     }
 }
 
+/// Pure bit test behind [`overlay_frame_dirty`]: true when any frame/chrome
+/// bit survived (or WS_POPUP went missing). Split out so the rule is
+/// unit-testable without an HWND.
+pub(crate) fn frame_bits_dirty(style: u32) -> bool {
+    style & (0x00C00000 | 0x00040000 | 0x00010000 | 0x00020000 | 0x00080000 | 0x00800000) != 0
+        || style & 0x80000000 == 0 // WS_POPUP
+}
+
+/// True when the overlay regained any frame/chrome style bits — i.e. something
+/// (Tauri/winit re-asserting decorations on show/resize/focus, a debug
+/// windowed round-trip) re-added a caption, thick frame, border or sysmenu
+/// after our setup. That paints a top bar over the game even while
+/// WS_EX_TRANSPARENT is intact, which is exactly the case the click-through
+/// predicate above cannot see: it only watches one ex-style bit. The daemon
+/// heals this with the same toggle path (which also re-asserts the DWM
+/// no-chrome attributes), nothing else.
+pub fn overlay_frame_dirty(hwnd_val: isize) -> bool {
+    unsafe {
+        let hwnd = HWND(hwnd_val as *mut std::ffi::c_void);
+        if !IsWindow(hwnd).as_bool() {
+            return false;
+        }
+        frame_bits_dirty(GetWindowLongPtrW(hwnd, GWL_STYLE) as u32)
+    }
+}
+
 /// Click-through style toggle. Visibility-preserving by design: leaves
 /// WS_VISIBLE alone and never passes SWP_SHOWWINDOW, so daemon-adjacent
 /// calls (boot init, edit-mode exit, daemon self-heal) can never undo a
@@ -452,4 +478,31 @@ extern "system" {
         pv_attribute: *const std::ffi::c_void,
         cb_attribute: u32,
     ) -> windows::core::HRESULT;
+}
+
+#[cfg(test)]
+mod frame_predicate_tests {
+    use super::frame_bits_dirty;
+
+    /// The recipe's own clean state: POPUP + CLIPSIBLINGS, nothing else.
+    const CLEAN: u32 = 0x80000000 | 0x04000000;
+
+    #[test]
+    fn clean_recipe_is_not_dirty() {
+        assert!(!frame_bits_dirty(CLEAN));
+    }
+
+    #[test]
+    fn each_frame_bit_counts_as_dirty() {
+        // WS_CAPTION | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX |
+        // WS_SYSMENU | WS_BORDER, one at a time over the clean base.
+        for bit in [0x00C00000u32, 0x00040000, 0x00010000, 0x00020000, 0x00080000, 0x00800000] {
+            assert!(frame_bits_dirty(CLEAN | bit), "bit {bit:#x} must be dirty");
+        }
+    }
+
+    #[test]
+    fn missing_popup_counts_as_dirty() {
+        assert!(frame_bits_dirty(0x04000000));
+    }
 }

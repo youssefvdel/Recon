@@ -1,0 +1,85 @@
+// Recon overlay — design tokens. Single source of truth for paint, type,
+// space, shape and motion. Mirrors the M3 dark-violet direction from the
+// TS app (tailwind.config.ts) so the sidecar reads as the same product.
+//
+// Glass without blur: legibility comes from layered gradients + a 1px inner
+// stroke + drop shadow (see components/plate.slint). No backdrop-blur —
+// banned on this DirectComposition surface.
+
+export global Theme {
+    // Surfaces — plates sit at ~85% alpha over the live game.
+    in-out property <brush> surface-dim: #0e0813;
+    in-out property <brush> surface: #140e1b;
+    in-out property <brush> container-low: #1c1325;
+    in-out property <brush> container: #23192f;
+    in-out property <brush> container-high: #2e213d;
+    in-out property <brush> container-highest: #3a2a4c;
+
+    // Glass gradient stops (layered over surface for depth, no blur).
+    in-out property <brush> glass-top: #3a2a4cd9;
+    in-out property <brush> glass-bottom: #140e1bd9;
+    in-out property <brush> sheen: #ffffff14;
+
+    // Lines.
+    in-out property <brush> line: #49454f8c;
+    in-out property <brush> line-soft: #3529458c;
+    in-out property <brush> edge-light: #ffffff12;
+
+    // Accents.
+    in-out property <brush> primary: #d0bcff;
+    in-out property <brush> primary-dim: #4f378b;
+    in-out property <brush> amber: #e8b73a;
+    in-out property <brush> mint: #a8f5cc;
+    in-out property <brush> coral: #ff8a7a;
+    in-out property <brush> error: #ffb4ab;
+
+    // Party spines (queued-together groups).
+    in-out property <brush> party-1: #7dd3fc;
+    in-out property <brush> party-2: #e8b73a;
+    in-out property <brush> party-3: #f0abfc;
+
+    // Text.
+    in-out property <brush> ink: #e6e0e9;
+    in-out property <brush> ink-dim: #cac4d0;
+    in-out property <brush> ink-faint: #938f99;
+
+    // Fonts. Bundled by Rust via register-font-from-path; system-ui fallback.
+    in-out property <string> font-display: "Outfit";
+    in-out property <string> font-body: "DM Sans";
+    in-out property <string> font-mono: "JetBrains Mono";
+}
+
+export global TypeScale {
+    // 11px floor — never smaller (audit/ui.md #3, stretched 1440p legibility).
+    in-out property <length> micro: 11px;
+    in-out property <length> caption: 12px;
+    in-out property <length> body: 13px;
+    in-out property <length> title: 14px;
+    in-out property <length> big: 20px;
+}
+
+export global Space {
+    in-out property <length> xs: 4px;
+    in-out property <length> sm: 8px;
+    in-out property <length> md: 12px;
+    in-out property <length> lg: 16px;
+    in-out property <length> xl: 24px;
+}
+
+export global Shape {
+    in-out property <length> sm: 8px;
+    in-out property <length> md: 12px;
+    in-out property <length> lg: 16px;
+    in-out property <length> xl: 24px;
+    in-out property <length> pill: 999px;
+    in-out property <length> stroke: 1px;
+    // Agent portraits live in the 64–96px band on transparent.
+    in-out property <length> portrait: 72px;
+    in-out property <length> crest: 28px;
+}
+
+export global Motion {
+    in-out property <duration> fast: 120ms;
+    in-out property <duration> mid: 200ms;
+    in-out property <duration> slow: 400ms;
+}

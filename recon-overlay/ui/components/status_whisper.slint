@@ -1,0 +1,41 @@
+// 5/5 — Status whisper. One self-hiding line: score + notices. Rust sets
+// and clears the text (with a ~4s timer for notices); the UI only fades.
+// Tone: info = primary, warn = amber, score = mint.
+
+import { Theme, TypeScale, Space, Shape, Motion } from "../tokens.slint";
+
+export component StatusWhisper inherits Rectangle {
+    in property <string> text: "";
+    in property <string> tone: "info";
+
+    property <brush> tone-color: tone == "warn" ? Theme.amber : tone == "score" ? Theme.mint : Theme.primary;
+
+    width: 420px;
+    height: 30px;
+    border-radius: Shape.pill;
+    border-width: 1px;
+    border-color: Theme.line-soft;
+    background: #140e1bd9;
+    drop-shadow-color: #000000a6;
+    drop-shadow-offset-x: 0px;
+    drop-shadow-offset-y: 6px;
+    drop-shadow-blur: 18px;
+
+    opacity: text == "" ? 0 : 1;
+    animate opacity { duration: Motion.slow; easing: ease-in-out; }
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        text: text;
+        font-family: Theme.font-mono;
+        font-size: TypeScale.micro;
+        font-weight: 600;
+        color: parent.tone-color;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}

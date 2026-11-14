@@ -133,6 +133,10 @@ pub(crate) fn overlay_daemon(auto_overlay_handle: AppHandle) {
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(std::time::Duration::from_millis(2000));
+            // Sidecar follows at daemon cadence (covers the edit/windowed
+            // paths that `continue` below, and the no-TS-overlay case):
+            // full snapshot, best-effort.
+            crate::overlay_sidecar::push_current();
             // No HUD window: nothing to show, align, heal or hide.
             if !OVERLAY_AVAILABLE.load(Ordering::Relaxed) {
                 continue;
@@ -216,11 +220,24 @@ pub(crate) fn overlay_daemon(auto_overlay_handle: AppHandle) {
                         }
                         // Self-heal: if something re-applied default styles
                         // (opaque layer eating game input), reassert click-through.
-                        if window_manager::overlay_clickthrough_missing(hwnd.0 as isize) {
+                        // The frame check is the pale-bar half: a re-added
+                        // caption/thick-frame paints a top bar over the game
+                        // while TRANSPARENT stays set, which the predicate
+                        // above cannot see. Same toggle path re-strips the
+                        // frame bits and the DWM no-chrome attributes.
+                        let hwnd_val = hwnd.0 as isize;
+                        let heal_click = window_manager::overlay_clickthrough_missing(hwnd_val);
+                        let heal_frame =
+                            !heal_click && window_manager::overlay_frame_dirty(hwnd_val);
+                        if heal_click {
                             log::warn!("overlay daemon: click-through lost — reasserting");
+                        } else if heal_frame {
+                            log::warn!("overlay daemon: frame chrome reappeared — reasserting");
+                        }
+                        if heal_click || heal_frame {
                             let _ = overlay.set_ignore_cursor_events(true);
                             if let Err(e) = window_manager::toggle_overlay_clickthrough(
-                                hwnd.0 as isize,
+                                hwnd_val,
                                 true,
                             ) {
                                 log::warn!(
