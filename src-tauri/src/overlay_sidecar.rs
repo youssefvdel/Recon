@@ -7,9 +7,10 @@
 //! transition; the TS overlay stays the fallback either way — a missing
 //! binary is a warn, never a startup failure.
 //!
-//! What the main app owns today: rect, present, edit, tab_held, lite.
-//! Score/phase/rosters arrive with the Rust live pipeline (Phase 0/1) and
-//! stay at the sidecar's `.slint` defaults until then.
+//! What the main app owns today: rect, present, edit, tab_held, lite, plus the
+//! live fact set (phase, phase_label, map, mode, blue, red) from the Rust live
+//! service (`src/live.rs`). Rosters need the core-game payload and stay at the
+//! sidecar's empty defaults until that lands.
 
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -150,10 +151,14 @@ pub(crate) fn sidecar_running() -> bool {
         .unwrap_or(false)
 }
 
-/// Full state the main app owns today: rect, visibility, edit, Tab, lite.
-/// Score/phase/rosters follow with the Rust live pipeline.
+/// Full state the main app owns today: rect, visibility, edit, Tab, lite,
+/// plus the live fact set (phase/map/mode/scores) from the Rust live service.
+/// Rosters are not in this frame yet — they need the core-game payload, not
+/// presences (Phase 1+); the sidecar keeps its empty-list defaults.
 pub(crate) fn sidecar_facts_snapshot() -> serde_json::Value {
     let (x, y, w, h) = sidecar_rect();
+    let facts = crate::live::current_facts();
+    let live = facts.phase == "coregame";
     serde_json::json!({
         "seq": FACT_SEQ.fetch_add(1, Ordering::Relaxed),
         "present": crate::state::OVERLAY_PRESENT.load(Ordering::Relaxed),
@@ -161,6 +166,15 @@ pub(crate) fn sidecar_facts_snapshot() -> serde_json::Value {
         "lite": true,
         "tab_held": crate::window_manager::is_tab_down(),
         "rect": {"x": x, "y": y, "w": w, "h": h},
+        // Live facts. Empty string = unknown; the sidecar clears its default
+        // placeholder rather than inventing a map/mode.
+        "phase": facts.phase,
+        "phase_label": facts.phase_label,
+        "live": live,
+        "map": facts.map,
+        "mode": facts.mode,
+        "blue": facts.blue,
+        "red": facts.red,
     })
 }
 

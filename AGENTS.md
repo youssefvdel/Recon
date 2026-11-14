@@ -23,7 +23,7 @@ Note: "agents" in this codebase means VALORANT game characters (`TrackerAgents.t
 - `src/` — React frontend: `App.tsx`, `main.tsx`, `types.ts`, `components/` (~35 views: tracker, overlay, stretch, config), `hooks/`, `utils/` (ipc, tracker, trn, riotChat, store, updater), `assets/`.
 - `src-tauri/src/` — Rust backend: `lib.rs` (commands/state), `main.rs`, `display.rs`, `custom_res.rs`, `gpu.rs`, `game_config.rs`, `tracker.rs`, `trn_proxy.rs`, `calculator.rs`, `accounts.rs`, `perf.rs`, `shortcuts.rs`, `window_manager.rs`, `updater.rs`.
 - `src-tauri/` — `Cargo.toml` (crate `outpeek`, version must match root `package.json`), `tauri.conf.json` (windows: `main`, `overlay`, `dev`), `icons/`, `capabilities/`.
-- `scripts/` — Bun/Node checks: `bump-version.js`, `*-check.ts` (loadout, devqa, perf, trn-*, match-server, party-color, consent, live-poll, cooldown-chrome).
+- `scripts/` — Bun/Node checks: `bump-version.js`, `*-check.ts` (loadout, devqa, perf, trn-*, match-server, party-color, consent, live-poll, guards).
 - `website/` — standalone Vite + React + Tailwind marketing site. Own `package.json`, `bun.lock`.
 - `dist/` — Vite frontend output (Tauri `frontendDist`). Generated, never edit.
 

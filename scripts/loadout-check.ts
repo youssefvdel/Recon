@@ -100,6 +100,47 @@ const odin = l.weapons.find((w) => w.weaponName === 'Odin');
 const spray = l.expressions.find((e) => e.kind === 'spray');
 const flex = l.expressions.find((e) => e.kind === 'flex');
 
+// Synthetic case: an equipped Goldwing Judge chroma must resolve to the chroma's
+// fullRender (variant photo), never the base skin or default art. No network —
+// the catalog is hand-built, so this one runs even when the CDN is unreachable.
+const { parseLoadoutEntry } = await import('../src/utils/loadout.ts');
+const JUDGE = 'ec845bf4-4f79-ddda-a3da-0db3774b2794';
+const GOLDWING_SKIN = '37735cf0-4c4f-6efd-6222-8582622d68a0';
+const GOLDWING_CHROMA = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const GOLDWING_FULL = 'https://media.valorant-api.com/weaponskinchromas/xxx/fullrender.png';
+const goldwingCatalog = {
+  weapons: {
+    [JUDGE]: { uuid: JUDGE, name: 'Judge', category: 'EEquippableCategory::Shotgun', icon: 'weapon.png' },
+  },
+  skinIndex: {
+    [GOLDWING_SKIN]: { weaponUuid: JUDGE, name: 'Goldwing Judge', icon: 'skinic.png', fullRender: '', isDefault: false },
+    [GOLDWING_CHROMA]: { weaponUuid: JUDGE, name: 'Goldwing Judge', icon: '', fullRender: GOLDWING_FULL, isDefault: false },
+  },
+  sprays: {},
+  flex: {},
+  buddies: {},
+  chromaNames: {},
+  levelIndex: {},
+} as unknown as Parameters<typeof parseLoadoutEntry>[1];
+const goldwing = parseLoadoutEntry(
+  {
+    Subject: 'puuid-here',
+    CharacterID: 'agent-id',
+    Loadout: {
+      Subject: 'puuid-here',
+      Items: {
+        [JUDGE]: {
+          Sockets: {
+            [SKIN_SOCKET]: { Item: { ID: GOLDWING_CHROMA } },
+            [SKIN_ID_SOCKET]: { Item: { ID: GOLDWING_SKIN } },
+          },
+        },
+      },
+    },
+  },
+  goldwingCatalog
+).weapons.find((w) => w.weaponUuid === JUDGE);
+
 const checks: [string, boolean][] = [
   ['4 weapons parsed', l.weapons.length === 4],
   ['subject (PUUID) extracted', l.subject === '29bf3c62-9f92-5b55-8188-a4e88f04b8ec'],
@@ -123,6 +164,10 @@ const checks: [string, boolean][] = [
   ['resolve by index', resolveLoadoutForPlayer(all, { index: 0 }).loadout !== null],
   ['unknown puuid -> null', resolveLoadoutForPlayer(all, { puuid: 'nope' }).loadout === null],
   ['grouped into Rifle + Sidearm + Sniper', !!groupByCategory(l.weapons)['EEquippableCategory::Rifle'] && !!groupByCategory(l.weapons)['EEquippableCategory::Sidearm'] && !!groupByCategory(l.weapons)['EEquippableCategory::Sniper']],
+  // --- Goldwing Judge chroma (merged from loadout-goldwing-check.ts) ---
+  ['goldwing: skin name resolves', goldwing?.skinName === 'Goldwing Judge'],
+  ['goldwing: not default', goldwing?.isDefaultSkin === false],
+  ['goldwing: icon is the variant fullRender', goldwing?.icon === GOLDWING_FULL],
 ];
 
 let fail = 0;

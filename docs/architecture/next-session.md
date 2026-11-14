@@ -152,13 +152,13 @@ write; the pin's expected list shrinking is the receipt that raw writes converte
 
 ## Checks that must stay green
 
-`bun run build:ui`, `bun run lint`, every `scripts/*-check.ts` (21 today), the
+`bun run build:ui`, `bun run lint`, every `scripts/*-check.ts` (19 today), the
 header↔call-site assertion in `scripts/devqa-check.ts`, and the host-agnostic
 backend tests:
 
 ```bash
-cargo test --manifest-path src-tauri/pure/Cargo.toml   # 37 tests, no Windows/Tauri
-bun test tests/                                        # 16 tests, no Tauri/browser
+cargo test --manifest-path src-tauri/pure/Cargo.toml   # 66 tests, no Windows/Tauri
+bun test tests/                                        # 65 tests, no Tauri/browser
 ```
 
 Windows target (four runs, all must exit 0): `cargo xwin check` release and

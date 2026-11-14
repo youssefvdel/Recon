@@ -60,9 +60,6 @@ dashboard renders, and it is a pure function of its arguments.
   canonical comparison, and the storefront response validation are host-agnostic
   by nature but live in modules that import Tauri IPC; testing them needs a small
   extraction or `bun test` with the transport mocked. Not done in this pass.
-- **`updater.rs` version maths** — pure and valuable (`alpha9 < alpha10` natural
-  ordering, channel endpoint selection), blocked only by the module's Tauri
-  imports. Extraction is a small, additive refactor.
 
 ## CI note
 

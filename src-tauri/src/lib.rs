@@ -5,6 +5,8 @@ mod display;
 mod fs_migrate;
 mod game_config;
 mod gpu;
+mod live;
+mod live_facts;
 mod paths;
 mod perf;
 mod riot_http;
@@ -466,6 +468,10 @@ pub fn run() {
             // Native sidecar behind the TS overlay: missing binary is a warn,
             // never a failure (overlay_sidecar owns that policy).
             overlay_sidecar::spawn_sidecar(app.handle().clone());
+            // Rust live-facts service (docs/live-rust-pipeline.md §Phase 0):
+            // one presence poller, feeds the sidecar snapshot and emits
+            // `recon:live-facts` on change. Additive — the TS poller stays.
+            live::start(app.handle().clone());
             space_spam::start(app.handle());
             daemons::display_hotkey(app.handle().clone(), rx, pref_clone);
 

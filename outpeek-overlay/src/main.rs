@@ -42,10 +42,10 @@ static PRESENT: AtomicU8 = AtomicU8::new(1);
 /// Partial facts update from the main app. Every field is optional: only the
 /// keys present in the object are applied.
 ///
-/// There is deliberately NO `phase` fabrication here: the main app only sends
-/// what it owns (rect, edit, visibility, tab, lite). Score/phase/rosters
-/// arrive with the Rust live pipeline (Phase 0/1) and stay at their `.slint`
-/// defaults until then.
+/// There is deliberately NO fabrication here: the main app sends only what it
+/// owns — window state (rect, edit, visibility, tab, lite) plus the live fact
+/// set from the Rust live service (phase, map, mode, scores). Rosters need the
+/// core-game payload and stay at their empty `.slint` defaults until then.
 #[derive(Debug, Default, Clone, serde::Deserialize)]
 #[allow(dead_code)]
 struct FactsMsg {

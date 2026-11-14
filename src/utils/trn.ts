@@ -82,6 +82,8 @@ const TRN_COOLDOWN_KEY = 'recon_trn_cooldown_until_v1';
  * run byte-identical. Flag persists in localStorage (absent = ON).
  * ------------------------------------------------------------------ */
 const TRN_ENABLED_KEY = 'recon_tracker_enabled_v1';
+/** tracker kill-switch OFF shape. Callers already swallow TRN_* as fall-back-to-Riot. */
+export const TRN_DISABLED = 'TRN_DISABLED';
 let trnEnabled: boolean | null = null;
 
 /** Parse the persisted toggle: absent (default ON) or anything but '0' → on. Pure. */
@@ -164,11 +166,21 @@ export function setTrnHttpEnabled(on: boolean): void {
 export const TRN_HTTP_DISABLED = 'TRN_HTTP_DISABLED';
 /** tracker.gg says this Riot profile is private (HTTP 451). Terminal — never retried. */
 export const TRN_PRIVATE = 'TRN_PRIVATE';
+/** tracker.gg has no profile for this account (HTTP 404, direct transport). */
+export const TRN_NO_DATA = 'TRN_NO_DATA';
+/** tracker.gg rate-limited us (HTTP 429 / our own cooldown shape). Not terminal. */
+export const TRN_RATE_LIMITED = 'TRN_RATE_LIMITED';
+/** Warden captcha wall (429 challenge body / 403 block page). Human-only. */
+export const TRN_CAPTCHA_REQUIRED = 'TRN_CAPTCHA_REQUIRED';
+
+/** Error message of anything thrown/rejected, as one string. Pure. */
+const errText = (msg: unknown): string =>
+  typeof msg === 'string' ? msg : msg instanceof Error ? msg.message : String(msg ?? '');
 
 /** True for the opt-out shape. Pure. */
 /** True when tracker.gg returned 451 / our 451 marker. Pure. */
 export function isTrnPrivateMarked(msg: unknown): boolean {
-  const s = typeof msg === 'string' ? msg : msg instanceof Error ? msg.message : String(msg ?? '');
+  const s = errText(msg);
   return s.includes(TRN_PRIVATE) || isTrnPrivateError(s);
 }
 
@@ -310,6 +322,46 @@ async function httpGet(path: string): Promise<string> {
 }
 
 /**
+ * Codes that are a REAL tracker.gg ANSWER rather than a transport failure.
+ *
+ * The direct transport must hand these to the ladder untouched and never fall
+ * back to the hidden window on one. This array is the single source of truth:
+ * the allowlist regex below is built FROM it, so a code cannot be added to the
+ * regex without appearing here — and `contracts/trn-errors.json` is asserted
+ * against this list by `tests/trn-errors.test.ts`.
+ */
+export const TRN_ANSWER_CODES = [
+  TRN_PRIVATE,
+  TRN_NO_DATA,
+  TRN_RATE_LIMITED,
+  TRN_CAPTCHA_REQUIRED,
+] as const;
+
+/** Same language the hand-written allowlist had: any occurrence of any code
+ *  above, in one alternation built from the one list. */
+const TRN_ANSWER_RE = new RegExp(TRN_ANSWER_CODES.join('|'));
+
+/** True for a tracker.gg answer (not a transport failure). Pure. */
+export function isTrnAnswer(msg: unknown): boolean {
+  return TRN_ANSWER_RE.test(errText(msg));
+}
+
+/** True for the edge transport's `HTTP {status}` answer shape. Pure. */
+export function isTrnHttpStatus(msg: unknown): boolean {
+  return /HTTP \d{3}/.test(errText(msg));
+}
+
+/**
+ * The cooldown ladder's trigger. The ONE condition that steps it, extracted
+ * from trnGet so the contract test drives the real predicate (no copy).
+ * Pure.
+ */
+export function isTrnCooldownTrigger(msg: unknown): boolean {
+  const s = errText(msg);
+  return s.includes('429') || s.includes('403') || s.includes('1015');
+}
+
+/**
  * Transport for one path: direct first for the standard endpoints, the hidden
  * window otherwise, and the window as the fallback whenever the direct path is
  * switched off or cannot be reached. A TRN answer (200 or an HTTP status the
@@ -330,9 +382,7 @@ async function transportGet(path: string, drain: boolean): Promise<string> {
       // renamed command, a capability denial, DNS/TLS/timeout, or an error text
       // we have never seen — so the window gets a turn. TRN_HTTP_DISABLED is
       // deliberately NOT an answer: the opt-out means "use the other path".
-      const isTrnAnswer = /TRN_(PRIVATE|NO_DATA|RATE_LIMITED|CAPTCHA_REQUIRED)/.test(msg);
-      const isHttpStatus = /HTTP \d{3}/.test(msg);
-      if (isTrnAnswer || isHttpStatus) throw new Error(msg);
+      if (isTrnAnswer(msg) || isTrnHttpStatus(msg)) throw new Error(msg);
       if (import.meta.env.DEV) trnLog('falling back to edge', msg.slice(0, 100));
     }
   }
@@ -542,19 +592,26 @@ export function trnPlayerFromPath(path: string): { name: string; tag: string } |
   }
 }
 
+/** True when the message proves the profile is ABSENT: a plain `HTTP 404`
+ *  from the edge transport, or `TRN_NO_DATA` from the direct one. Pure. */
+export function isTrnMissingMarked(msg: unknown): boolean {
+  const s = errText(msg);
+  return s.includes('HTTP 404') || /\bTRN_NO_DATA\b/.test(s);
+}
+
 /** Central writer: note a proven private/missing from ANY path's outcome
  *  (fill, Overview, modals, maps/tabs, enrichment, QA) — parsed from the
  *  request path, so writers are never forgotten per-callsite again. Returns
  *  the kind noted (for tests/logs), null when nothing provable. */
 export function noteNegativeFromPath(path: string, msg: unknown): 'private' | 'missing' | null {
-  const s = typeof msg === 'string' ? msg : msg instanceof Error ? msg.message : String(msg ?? '');
+  const s = errText(msg);
   // A 404 reaches us in TWO shapes now: `HTTP 404` from the edge transport, and
   // `TRN_NO_DATA` from the direct one. Matching only the first is why 8 of 10
   // players were re-fired every poll instead of being marked missing.
   const kind =
     isTrnPrivateError(s) || s.includes(TRN_PRIVATE)
       ? 'private'
-      : s.includes('HTTP 404') || /\bTRN_NO_DATA\b/.test(s)
+      : isTrnMissingMarked(s)
         ? 'missing'
         : null;
   if (!kind) return null;
@@ -583,6 +640,11 @@ export function isTrnProxyNotReady(msg: unknown): boolean {
 /** In-match-fullscreen pause shape (Rust gate + the pre-check below throw
  *  the identical string so callers treat both the same). Pure const. */
 export const TRN_PROXY_PAUSED = 'EDGE_PAUSED game fullscreen';
+
+/** True for the in-match-fullscreen pause shape above. Pure. */
+export function isTrnProxyPaused(msg: unknown): boolean {
+  return errText(msg).includes(TRN_PROXY_PAUSED);
+}
 
 /** Marker inside a network-dead outcome: the in-page fetch itself threw
  *  (status 0) — the page's network is down, not Cloudflare answering.
@@ -628,7 +690,8 @@ export function isTrnDeadQuiet(): boolean {
  * later call at the top of trnGet: no ladder step, no path-fail stamp, no
  * dead-quiet, no wire. Only a user action clears it (see the banner).
  * ------------------------------------------------------------------ */
-export const TRN_CAPTCHA_REQUIRED = 'TRN_CAPTCHA_REQUIRED';
+/* Shape `TRN_CAPTCHA_REQUIRED` is declared with the other error codes above so
+ * the direct-transport answer allowlist and this ladder share ONE literal. */
 
 /** True for the captcha wall. Pure. */
 export function isTrnCaptcha(msg: unknown): boolean {
@@ -647,6 +710,8 @@ export function isTrnCaptcha(msg: unknown): boolean {
  * status-0 breaker. One shared window, doubling 5s→60s, cleared by the next
  * answered request. Module state, not persisted.
  * ------------------------------------------------------------------ */
+/** Quiet shape while the shared proxy backoff is on. Not an answer, no ladder. */
+export const TRN_PROXY_BACKOFF = 'TRN_PROXY_BACKOFF';
 const TRN_PROXY_BACKOFF_BASE_MS = 5_000;
 const TRN_PROXY_BACKOFF_MAX_MS = 60_000;
 const TRN_PROXY_BACKOFF_MAX_STEP = 4;
@@ -763,6 +828,8 @@ const TRN_PATH_STAMPS_MAX = 64;
  * every poll — so the choke lives here, keyed by exact request path: any
  * failed wire attempt stamps it, repeats fail fast without touching gate,
  * budget, or wire. Successes never stamp (caches own the hot path). */
+/** Quiet shape while this exact path cools after a failure. Not an answer. */
+export const TRN_PATH_BACKOFF = 'TRN_PATH_BACKOFF';
 const TRN_PATH_RETRY_MS = 30 * 1000;
 const trnPathFailedAt = new Map<string, number>();
 
@@ -968,7 +1035,7 @@ export async function trnGet(
   const path = withOverwolfSource(rawPath);
   if (!isTrackerEnabled()) {
     report('EDGE');
-    throw new Error('TRN_DISABLED tracker off');
+    throw new Error(`${TRN_DISABLED} tracker off`);
   }
   if (!isTauri()) {
     report('EDGE');
@@ -1029,7 +1096,7 @@ export async function trnGet(
   if (trnPathCooling(path)) {
     if (import.meta.env.DEV) trnLog('path-backoff fail-fast', `path=${path.slice(0, 80)}`);
     report('EDGE');
-    throw new Error('TRN_PATH_BACKOFF');
+    throw new Error(TRN_PATH_BACKOFF);
   }
 
   // Dead-network breaker BEFORE anything with a cost: consecutive status-0
@@ -1052,7 +1119,7 @@ export async function trnGet(
   if (!directServes && trnProxyBackoffRemainingMs() > 0) {
     if (import.meta.env.DEV) trnLog('proxy-backoff fail-fast', `remaining=${Math.ceil(trnProxyBackoffRemainingMs() / 1000)}s`);
     report('EDGE');
-    throw new Error(`TRN_PROXY_BACKOFF ${Math.ceil(trnProxyBackoffRemainingMs() / 1000)}s`);
+    throw new Error(`${TRN_PROXY_BACKOFF} ${Math.ceil(trnProxyBackoffRemainingMs() / 1000)}s`);
   }
 
   // Pause pre-check BEFORE the gate slot claim: a paused call fetches nothing,
@@ -1079,7 +1146,7 @@ export async function trnGet(
     // Fail fast: during cooldown we must not touch the network at all.
     if (import.meta.env.DEV) trnLog('cooldown fail-fast', `remaining=${Math.ceil(cooling / 1000)}s`);
     report('EDGE');
-    throw new Error(`TRN_RATE_LIMITED ${Math.ceil(cooling / 1000)}s`);
+    throw new Error(`${TRN_RATE_LIMITED} ${Math.ceil(cooling / 1000)}s`);
   }
 
   // Serialise: claim the next slot, then wait for it. Concurrent callers queue
@@ -1115,7 +1182,7 @@ export async function trnGet(
     if (trnNextSlot === slot + gap) trnNextSlot = slot;
     if (import.meta.env.DEV) trnLog('cooldown fail-fast', `post-wait remaining=${Math.ceil(trnCooldownRemainingMs() / 1000)}s`);
     report('EDGE');
-    throw new Error(`TRN_RATE_LIMITED ${Math.ceil(trnCooldownRemainingMs() / 1000)}s`);
+    throw new Error(`${TRN_RATE_LIMITED} ${Math.ceil(trnCooldownRemainingMs() / 1000)}s`);
   }
 
   let raw: string;
@@ -1158,8 +1225,8 @@ export async function trnGet(
     }
     // Race backstop: paused after waiting (match started mid-queue) — refund
     // the slot so followers don't pay for a call that fetched nothing.
-    if (msg.includes(TRN_PROXY_PAUSED) && trnNextSlot === slot + gap) trnNextSlot = slot;
-    if (msg.includes('429') || msg.includes('403') || msg.includes('1015')) {
+    if (isTrnProxyPaused(msg) && trnNextSlot === slot + gap) trnNextSlot = slot;
+    if (isTrnCooldownTrigger(msg)) {
       trnCooldownStep = Math.min(trnCooldownStep + 1, TRN_COOLDOWN_MAX_STEP);
       trnCooldownUntil = Date.now() + trnCooldownDelayMs(trnCooldownStep);
       if (typeof localStorage !== 'undefined') {

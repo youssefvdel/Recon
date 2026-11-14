@@ -38,6 +38,11 @@ pub mod fs_migrate;
 #[path = "../../src/paths.rs"]
 pub mod app_paths;
 
+// Rust live service, pure half: presence JSON → facts. Only `serde_json`, so
+// the fixture matrix the native overlay depends on runs on any host.
+#[path = "../../src/live_facts.rs"]
+pub mod live_facts;
+
 #[cfg(test)]
 mod tests {
     use crate::cache_paths::{
@@ -572,5 +577,235 @@ mod tests {
         trace_push(&mut buf, TraceLine { seq: 1, text: "x".to_string() }, 0);
         assert!(buf.is_empty());
         assert_eq!(TRACE_RING_CAP, 512);
+    }
+
+    // ---- live_facts.rs: presence JSON -> HUD facts (Phase 0) ----------------
+
+    use crate::live_facts::{
+        decode_base64, derive_facts, find_local_presence, map_display_name, queue_mode_label,
+        LiveFacts, LIVE_FACTS_VERSION,
+    };
+
+    const ME: &str = "11111111-2222-3333-4444-555555555555";
+
+    /// Test-only base64 encoder: production only ever decodes.
+    fn b64(bytes: &[u8]) -> String {
+        const TABLE: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+        for chunk in bytes.chunks(3) {
+            let b1 = chunk[0] as u32;
+            let b2 = *chunk.get(1).unwrap_or(&0) as u32;
+            let b3 = *chunk.get(2).unwrap_or(&0) as u32;
+            let n = (b1 << 16) | (b2 << 8) | b3;
+            out.push(TABLE[((n >> 18) & 63) as usize] as char);
+            out.push(TABLE[((n >> 12) & 63) as usize] as char);
+            out.push(if chunk.len() > 1 { TABLE[((n >> 6) & 63) as usize] as char } else { '=' });
+            out.push(if chunk.len() > 2 { TABLE[(n & 63) as usize] as char } else { '=' });
+        }
+        out
+    }
+
+    fn presence_with_blob(puuid: &str, blob: Value) -> Value {
+        json!({
+            "puuid": puuid,
+            "game_name": "Youssef",
+            "game_tag": "EUW",
+            "private": b64(blob.to_string().as_bytes()),
+        })
+    }
+
+    fn presences(entries: Vec<Value>) -> Value {
+        json!({ "presences": entries })
+    }
+
+    fn ingame_blob() -> Value {
+        json!({
+            "sessionLoopState": "INGAME",
+            "queueId": "competitive",
+            "matchMap": "Ascent",
+            "partyOwnerMatchScoreAllyTeam": 6,
+            "partyOwnerMatchScoreEnemyTeam": 4,
+            "partyId": "party-1",
+        })
+    }
+
+    #[test]
+    fn ingame_presence_yields_score_map_queue_and_phase() {
+        let root = presences(vec![presence_with_blob(ME, ingame_blob())]);
+        let f = derive_facts(&root, ME, 1_700_000_000_000);
+        assert_eq!(f.version, LIVE_FACTS_VERSION);
+        assert_eq!(f.source, "presences");
+        assert_eq!(f.confidence, "high");
+        assert_eq!(f.phase, "coregame");
+        assert_eq!(f.phase_label, "LIVE");
+        assert_eq!(f.loop_state, "INGAME");
+        assert_eq!(f.map, "Ascent");
+        assert_eq!(f.queue, "competitive");
+        assert_eq!(f.mode, "Competitive");
+        assert_eq!((f.blue, f.red), (6, 4));
+        assert_eq!(f.updated_at, 1_700_000_000_000);
+        assert_eq!(f.seq, 0, "seq is the emitter's bookkeeping, not the derivation's");
+    }
+
+    #[test]
+    fn nested_match_presence_data_is_the_authoritative_blob() {
+        // Modern shape: the live values live under matchPresenceData, so a
+        // stale flat copy must not win.
+        let root = presences(vec![presence_with_blob(
+            ME,
+            json!({
+                "matchPresenceData": {
+                    "sessionLoopState": "INGAME",
+                    "queueId": "unrated",
+                    "matchMap": "/Game/Maps/Ascent/Ascent",
+                    "partyOwnerMatchScoreAllyTeam": 12,
+                    "partyOwnerMatchScoreEnemyTeam": "9",
+                },
+                "sessionLoopState": "MENU",
+                "queueId": "competitive",
+                "partyOwnerMatchScoreAllyTeam": 0,
+            }),
+        )]);
+        let f = derive_facts(&root, ME, 0);
+        assert_eq!(f.phase, "coregame");
+        assert_eq!(f.map, "Ascent", "a content path renders as its map name");
+        assert_eq!(f.queue, "unrated");
+        assert_eq!(f.mode, "Unrated");
+        assert_eq!((f.blue, f.red), (12, 9), "numeric strings count like Number()");
+    }
+
+    #[test]
+    fn pregame_is_select_with_no_score() {
+        let root = presences(vec![presence_with_blob(
+            ME,
+            json!({
+                "sessionLoopState": "PREGAME",
+                "queueId": "swiftplay",
+                "matchMap": "Haven",
+            }),
+        )]);
+        let f = derive_facts(&root, ME, 0);
+        assert_eq!(f.phase, "pregame");
+        assert_eq!(f.phase_label, "SELECT");
+        assert_eq!((f.blue, f.red), (0, 0));
+        assert_eq!(f.map, "Haven");
+        assert_eq!(f.mode, "Swiftplay");
+    }
+
+    #[test]
+    fn menu_keeps_the_last_match_out_of_the_fact_set() {
+        // Presence keeps the previous match's map/queue/score while in menus;
+        // an idle HUD must never show a finished score.
+        let root = presences(vec![presence_with_blob(
+            ME,
+            json!({
+                "sessionLoopState": "MENU",
+                "queueId": "competitive",
+                "matchMap": "Ascent",
+                "partyOwnerMatchScoreAllyTeam": 13,
+                "partyOwnerMatchScoreEnemyTeam": 11,
+            }),
+        )]);
+        let f = derive_facts(&root, ME, 0);
+        assert_eq!(f.phase, "idle");
+        assert_eq!(f.phase_label, "");
+        assert_eq!((f.map.as_str(), f.queue.as_str(), f.mode.as_str()), ("", "", ""));
+        assert_eq!((f.blue, f.red), (0, 0));
+        assert_eq!(f.confidence, "high", "the loop state WAS readable; the match is over");
+        assert_eq!(f.loop_state, "MENU");
+    }
+
+    #[test]
+    fn malformed_presence_reads_as_unknown_never_as_a_match() {
+        // Not-JSON base64, non-UTF8 base64, plain garbage, empty string.
+        for private in ["bm90IGpzb24=", "//79", "not base64 !!", ""] {
+            let root = presences(vec![json!({ "puuid": ME, "private": private })]);
+            let f = derive_facts(&root, ME, 0);
+            assert_eq!(f.phase, "idle", "{private}");
+            assert_eq!(f.confidence, "low", "{private}");
+            assert_eq!(f.updated_at, 0);
+        }
+        // No private key at all.
+        let root = presences(vec![json!({ "puuid": ME })]);
+        assert_eq!(derive_facts(&root, ME, 0).confidence, "low");
+        // Not even the expected object shape.
+        assert_eq!(derive_facts(&json!([1, 2, 3]), ME, 0).phase, "idle");
+        assert_eq!(derive_facts(&json!(null), ME, 0).phase, "idle");
+        assert_eq!(derive_facts(&json!({ "presences": "nope" }), ME, 0).phase, "idle");
+    }
+
+    #[test]
+    fn readable_blob_without_loop_state_is_medium_not_a_match() {
+        let root = presences(vec![presence_with_blob(ME, json!({ "partyId": "party-1" }))]);
+        let f = derive_facts(&root, ME, 0);
+        assert_eq!(f.confidence, "medium");
+        assert_eq!(f.phase, "idle");
+        assert_eq!(f.map, "");
+    }
+
+    #[test]
+    fn another_players_presence_is_never_taken_for_ours() {
+        let other = "99999999-8888-7777-6666-555555555555";
+        let root = presences(vec![presence_with_blob(other, ingame_blob())]);
+        assert!(find_local_presence(&root, ME).is_none());
+        let f = derive_facts(&root, ME, 0);
+        assert_eq!(f.phase, "idle");
+        assert_eq!(f.confidence, "low");
+        // An empty puuid is "not found", never "first presence wins".
+        assert!(find_local_presence(&root, "").is_none());
+        // `pid` form: puuid@region is accepted as the id.
+        let pid = format!("{ME}@eu1.pvp.net");
+        let root = presences(vec![json!({ "pid": pid, "private": "" })]);
+        assert!(find_local_presence(&root, ME).is_some());
+    }
+
+    #[test]
+    fn base64_accepts_url_safe_and_unpadded_but_rejects_garbage() {
+        assert_eq!(decode_base64("aGVsbG8=").as_deref(), Some(&b"hello"[..]));
+        assert_eq!(decode_base64("aGVsbG8").as_deref(), Some(&b"hello"[..]));
+        assert_eq!(decode_base64("aGVs bG8=").as_deref(), Some(&b"hello"[..]));
+        assert_eq!(decode_base64("-_8=").as_deref(), Some(&[0xFBu8, 0xFF][..]));
+        assert!(decode_base64("a").is_none(), "a 6-bit tail is not a byte");
+        assert!(decode_base64("ab=c").is_none(), "data after padding");
+        assert!(decode_base64("====").is_none());
+        assert!(decode_base64("aGVs*bG8=").is_none());
+    }
+
+    #[test]
+    fn same_facts_ignores_bookkeeping_and_detects_real_changes() {
+        let root = presences(vec![presence_with_blob(ME, ingame_blob())]);
+        let a = derive_facts(&root, ME, 1_000);
+        let mut b = a.clone();
+        b.seq = 7;
+        b.updated_at = 9_999;
+        assert!(a.same_facts(&b), "seq/updated_at alone must never re-emit");
+        b.red += 1;
+        assert!(!a.same_facts(&b), "a round can decide the match");
+        b.red -= 1;
+        b.map = "Haven".to_string();
+        assert!(!a.same_facts(&b));
+        b.map = "Ascent".to_string();
+        b.phase = "idle".to_string();
+        assert!(!a.same_facts(&b));
+        assert!(LiveFacts::default().same_facts(&LiveFacts::idle(123)));
+    }
+
+    #[test]
+    fn queue_labels_and_map_paths_match_the_ts_renderer() {
+        assert_eq!(queue_mode_label("competitive"), "Competitive");
+        assert_eq!(queue_mode_label("SWIFTPLAY"), "Swiftplay");
+        assert_eq!(queue_mode_label("quickbomb"), "Swiftplay");
+        assert_eq!(queue_mode_label("spikerush"), "Spike Rush");
+        assert_eq!(queue_mode_label("premier"), "Premier");
+        assert_eq!(queue_mode_label(""), "");
+        // Unknown ids stay visible (title-cased), never hidden.
+        assert_eq!(queue_mode_label("newmode"), "Newmode");
+        assert_eq!(map_display_name("Ascent"), "Ascent");
+        assert_eq!(map_display_name("/Game/Maps/Ascent/Ascent"), "Ascent");
+        assert_eq!(map_display_name("  "), "");
+        // A codename is surfaced as-is: translating it needs the game-data
+        // table, which the UI owns.
+        assert_eq!(map_display_name("/Game/Maps/duality/duality"), "Duality");
     }
 }

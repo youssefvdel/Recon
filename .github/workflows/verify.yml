@@ -1,0 +1,43 @@
+name: Verify
+
+# Every push to main and every PR: the same `bun run verify` a developer runs
+# locally. Ubuntu because verify is platform-neutral (tsc, oxlint, check
+# scripts, pure-Rust tests, bun tests) — the Windows-only paths are covered by
+# build-windows.yml and release.yml.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify
+        # Versions, tsc + vite, oxlint, scripts/*-check.ts, pure-Rust tests,
+        # bun test. No secrets, no Windows runtime, no signing keys.
+        run: bun run verify

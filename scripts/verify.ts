@@ -3,11 +3,12 @@
  * bun run verify — every check the project owns, in one place.
  *
  * Stages, fail fast, one line each:
- *   1. build:ui       tsc -b + vite build
- *   2. lint           oxlint
- *   3. check scripts  scripts/*-check.ts, all of them, in name order
- *   4. pure rust      cargo test --manifest-path src-tauri/pure/Cargo.toml
- *   5. bun tests      `bun run test`, only once package.json defines it
+ *   1. versions       package.json == src-tauri == outpeek-overlay
+ *   2. build:ui       tsc -b + vite build
+ *   3. lint           oxlint
+ *   4. check scripts  scripts/*-check.ts, all of them, in name order
+ *   5. pure rust      cargo test --manifest-path src-tauri/pure/Cargo.toml
+ *   6. bun tests      `bun run test`, only once package.json defines it
  *
  * The tauri crate's `cargo test --lib` is deliberately not here: tauri-build
  * validates bundle.resources, so it needs the Windows WebView2 runtime present.
@@ -108,6 +109,70 @@ function hasBunTests(): boolean {
   return typeof pkg.scripts?.test === "string";
 }
 
+/**
+ * The updater reads src-tauri/Cargo.toml, the Tauri bundle reads package.json,
+ * and the overlay sidecar carries its own version. Drift between them only
+ * shows up as a broken release, so it is checked before anything expensive.
+ */
+function readJsonVersion(rel: string): string | null {
+  try {
+    const parsed = JSON.parse(readFileSync(join(ROOT, rel), "utf8"));
+    return typeof parsed.version === "string" ? parsed.version : null;
+  } catch {
+    return null;
+  }
+}
+
+function readCargoPackageVersion(rel: string): string | null {
+  let text: string;
+  try {
+    text = readFileSync(join(ROOT, rel), "utf8");
+  } catch {
+    return null;
+  }
+  let inPackage = false;
+  for (const raw of text.split("\n")) {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith("[")) {
+      inPackage = trimmed === "[package]";
+      continue;
+    }
+    // Only the crate's own version: `version = "2"` under [dependencies] is
+    // not the app version.
+    const match = inPackage ? /^version\s*=\s*"([^"]+)"/.exec(trimmed) : null;
+    if (match) return match[1];
+  }
+  return null;
+}
+
+const VERSION_SOURCES: ReadonlyArray<{ label: string; read: () => string | null }> = [
+  { label: "package.json", read: () => readJsonVersion("package.json") },
+  { label: "src-tauri/Cargo.toml", read: () => readCargoPackageVersion("src-tauri/Cargo.toml") },
+  { label: "outpeek-overlay/Cargo.toml", read: () => readCargoPackageVersion("outpeek-overlay/Cargo.toml") },
+];
+
+function versionsStage(): StageResult {
+  const started = performance.now();
+  const found = VERSION_SOURCES.map((s) => ({ label: s.label, version: s.read() }));
+  const distinct = new Set(found.map((f) => f.version));
+  const ok = distinct.size === 1 && !distinct.has(null);
+  return {
+    name: "versions",
+    ok,
+    ms: performance.now() - started,
+    detail: ok
+      ? `${found[0].version} in all ${found.length} manifests`
+      : `drift: ${found.map((f) => `${f.label}=${f.version ?? "<missing>"}`).join(", ")}`,
+    output: ok
+      ? undefined
+      : [
+          "version drift — these must match:",
+          ...found.map((f) => `  ${f.label.padEnd(26)} ${f.version ?? "<missing>"}`),
+          "  fix: bun run bump -- X.Y.Z (syncs all three)",
+        ].join("\n"),
+  };
+}
+
 async function checksStage(): Promise<StageResult> {
   const scripts = checkScripts();
   const started = performance.now();
@@ -135,7 +200,8 @@ async function checksStage(): Promise<StageResult> {
 
 async function main(): Promise<void> {
   const started = performance.now();
-  const stages: Array<() => Promise<StageResult>> = [
+  const stages: Array<() => StageResult | Promise<StageResult>> = [
+    versionsStage,
     () => run("build:ui", [BUN, "run", "build:ui"], "tsc -b + vite"),
     () => run("lint", [BUN, "run", "lint"], "oxlint"),
     checksStage,

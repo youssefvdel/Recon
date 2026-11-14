@@ -54,8 +54,8 @@ bun run tauri build
 > var), so the build stalls at "Decrypting updater signing key, expect a prompt
 > for password". Run the build from MSYS bash (e.g. Hermes-bundled Git), where
 > `export ...=""` produces a real empty value that reaches Tauri. `python` is
-> not installed on this box, so `make-latest-json.sh` fails — use the Node
-> equivalent (same manifest shape) instead.
+> not installed on this box, so `latest.json` comes from
+> `scripts/make-latest-json.mjs` (same manifest shape).
 
 > Pass the key **contents**. `TAURI_SIGNING_PRIVATE_KEY_PATH` was tried first and did
 > not take effect — the build proceeded unsigned and only warned at the very end.
@@ -91,7 +91,7 @@ file must be attached to the release. Tauri does not create it outside CI, so th
 a script:
 
 ```bash
-bash scripts/make-latest-json.sh 0.4.0 /tmp/outpeek_release_notes.md
+bun scripts/make-latest-json.mjs 0.4.0 /tmp/outpeek_release_notes.md
 ```
 
 It reads the `.sig` next to the setup exe and writes the manifest

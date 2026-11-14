@@ -71,13 +71,13 @@ const {
   TRN_NEGATIVE_BACKOFF,
   TRN_NEG_PRIVATE_MS,
   TRN_NEG_MISSING_MS,
+  TRN_PRIVATE,
   isTrnDeadQuiet,
   TRN_NET_DEAD_MARK,
   TRN_DEAD_STREAK_MAX,
   TRN_DEAD_QUIET_MS,
   TRN_DEAD_QUIET,
 } = await import('../src/utils/trn.ts');
-const { parseGamePodId, extractGamePodId } = await import('../src/utils/matchServer.ts');
 
 const TRN_ENABLED_KEY = 'recon_tracker_enabled_v1';
 
@@ -117,26 +117,6 @@ check('ON survives cache reset (default)', isTrackerEnabled(), true);
 check('no cooldown pending initially', trnCooldownRemainingMs(), 0);
 check('cooldown step 0 initially', trnCooldownStepCount(), 0);
 check('UA major display constant', TRN_UA_MAJOR, 153);
-
-// --- fixture parser (same fixtures as the Dev QA page) ---
-check(
-  'frankfurt fixture',
-  parseGamePodId(extractGamePodId({ GamePodID: 'aresriot.aws-rclusterprod-eu2-1.eu-gp-frankfurt-1' })),
-  'Frankfurt · EU2'
-);
-check(
-  'oregon fixture',
-  parseGamePodId(extractGamePodId({ GamePodID: 'aresriot.aws-rclusterprod-us2-1.na-gp-oregon-1' })),
-  'Oregon · US2'
-);
-check(
-  'unknown fixture falls back to raw pod segment',
-  parseGamePodId(extractGamePodId({ GamePodID: 'aresriot.custom-cluster-9.custompod-xyz' })),
-  'custompod-xyz'
-);
-check('absent payload → null (hidden chip)', parseGamePodId(extractGamePodId({})), null);
-check('null payload → null (hidden chip)', parseGamePodId(extractGamePodId(null)), null);
-check('null pod → null (hidden chip)', parseGamePodId(null), null);
 
 // --- cooldown remaining: stored-key paths (cross-tab cooldown) ---
 const TRN_COOLDOWN_KEY = 'recon_trn_cooldown_until_v1';
@@ -466,7 +446,7 @@ check(
   true
 );
 check('pre-check throws the paused shape', trnSrc.includes('throw new Error(TRN_PROXY_PAUSED)'), true);
-check('race refund frees the slot', trnSrc.includes('msg.includes(TRN_PROXY_PAUSED) && trnNextSlot === slot + gap'), true);
+check('race refund frees the slot', trnSrc.includes('isTrnProxyPaused(msg) && trnNextSlot === slot + gap'), true);
 check('pre-check invoke is windowless (no eval)', trnSrc.includes("invoke<boolean>('trn_proxy_paused'"), true);
 check('rust pre-check command exists', proxySrc.includes('pub fn trn_proxy_paused'), true);
 check('pre-check command registered', libSrc.includes('trn_proxy::trn_proxy_paused'), true);
@@ -907,8 +887,19 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
 // silently stopped falling back the day Tauri reworded its rejection.
 {
   const src = trnSrc;
-  check('fallback allowlist exists', src.includes('isTrnAnswer') && src.includes('isHttpStatus'), true);
-  check('TRN answers are allowlisted', /TRN_\(PRIVATE\|NO_DATA\|RATE_LIMITED\|CAPTCHA_REQUIRED\)/.test(src), true);
+  check('fallback allowlist exists', src.includes('isTrnAnswer') && src.includes('isTrnHttpStatus'), true);
+  // The four codes are the allowlist; trn.ts builds both the regex and the
+  // contract fixture from TRN_ANSWER_CODES, so the list itself is the source.
+  // Assert the identifiers, not their wire values: the values are the transport
+  // contract and may be renamed without the allowlist changing shape.
+  check(
+    'TRN answers are allowlisted',
+    src.includes('TRN_ANSWER_CODES') &&
+      ['TRN_PRIVATE', 'TRN_NO_DATA', 'TRN_RATE_LIMITED', 'TRN_CAPTCHA_REQUIRED'].every((c) =>
+        src.includes(c)
+      ),
+    true
+  );
   check('HTTP status is allowlisted', /\/HTTP \\d\{3\}\//.test(src), true);
   check('unknown rejections fall through to edge', src.includes("trnLog('falling back to edge'"), true);
   // The old denylist must be gone: no literal 'not found' match.
@@ -931,7 +922,7 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
 
   // 451 / TRN_PRIVATE is terminal and distinct.
   const PR = '/api/v2/valorant/standard/profile/riot/PrivUser%239999';
-  check('TRN_PRIVATE lands as private', noteNegativeFromPath(PR, 'TRN_PRIVATE profile is private on tracker.gg'), 'private');
+  check('TRN_PRIVATE lands as private', noteNegativeFromPath(PR, `${TRN_PRIVATE} profile is private on tracker.gg`), 'private');
   check('private reads as private', trnPlayerState('PrivUser', '9999'), 'private');
   // The selector body must not consult local Riot at all (the comment above it
   // explains WHY incognito is rejected, so only the function body is scanned).
@@ -1132,7 +1123,7 @@ check('export handler lost the Qa prefix', !dashboard.includes('downloadQaLogs')
   check('proxy backoff is edge-only', src.includes('if (!directServes && trnProxyBackoffRemainingMs() > 0)'), true);
   // Both breakers still EXIST for the edge path.
   check('dead-quiet still throws when it applies', src.includes('TRN_DEAD_QUIET} '), true);
-  check('proxy backoff still throws when it applies', src.includes("throw new Error(`TRN_PROXY_BACKOFF"), true);
+  check('proxy backoff still throws when it applies', src.includes("throw new Error(`${TRN_PROXY_BACKOFF"), true);
 }
 
 // --- data-layer step 1: raw transport is private (task-from-design) ---------
