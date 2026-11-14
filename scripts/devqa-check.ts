@@ -606,8 +606,10 @@ check(
   true
 );
 check(
-  'failures stamp the path (HTTP or status-0 only)',
-  trnSrc.includes("if (msg.includes('HTTP ') || isTrnNetDead(msg)) noteTrnPathFailed(path);"),
+  'failures stamp the path (answered HTTP, rate-limit answer, or status-0)',
+  trnSrc.includes(
+    "if (msg.includes('HTTP ') || ladderStepped || isTrnNetDead(msg)) noteTrnPathFailed(path);"
+  ),
   true
 );
 

@@ -17,7 +17,8 @@
 //! in `win_style` — `.slint` only declares no-frame/always-on-top/transparent.
 //!
 //! Modes: default (stdin-driven HUD), `--probe` (one-shot style/readback
-//! dump), `--show-test <secs>` (timed visible pass for screenshots),
+//! dump), `--health` (windowless construct-and-report for the main app's
+//! renderer gate), `--show-test <secs>` (timed visible pass for screenshots),
 //! `--soak <secs>` (hidden style-predicate watch). `--parent-pid <pid>`
 //! exits with the main app so a stray fullscreen topmost window is impossible.
 
@@ -390,7 +391,7 @@ fn current_hwnd(win: &OverlayWindow) -> Option<isize> {
 }
 
 fn usage() -> &'static str {
-    "usage: outpeek-overlay [--parent-pid N] [--probe] [--show-test SECS] [--soak SECS]"
+    "usage: outpeek-overlay [--parent-pid N] [--probe] [--health] [--show-test SECS] [--soak SECS]"
 }
 
 fn main() {
@@ -409,6 +410,7 @@ fn main() {
                 parent_pid = args.get(i).and_then(|s| s.parse().ok());
             }
             "--probe" => mode = "probe",
+            "--health" => mode = "health",
             "--show-test" => {
                 mode = "show-test";
                 i += 1;
@@ -442,6 +444,7 @@ fn main() {
 
     match mode {
         "probe" => return run_probe(),
+        "health" => return run_health(),
         "show-test" => return run_show_test(secs),
         "soak" => {
             eprintln!("[sidecar] dispatch soak secs={secs}");
@@ -583,6 +586,32 @@ fn run_probe() {
 #[cfg(not(windows))]
 fn run_probe() {
     emit_event(serde_json::json!({"ok": false, "reason": "probe needs Windows"}));
+    std::process::exit(1);
+}
+
+/// `--health`: build the window the HUD renders into, report, exit — never
+/// show it. The main app's `auto` renderer gate runs this before spawning the
+/// real process, so "the binary starts" is not mistaken for "the HUD works".
+///
+/// Not `--probe`: that one shows the window for ~50 ms to read the applied
+/// styles back, and a boot-time health check must never flash a fullscreen
+/// layer over the game.
+#[cfg(windows)]
+fn run_health() {
+    match OverlayWindow::new() {
+        Ok(_win) => {
+            emit_event(serde_json::json!({"ok": true, "slint": env!("CARGO_PKG_VERSION")}));
+        }
+        Err(e) => {
+            emit_event(serde_json::json!({"ok": false, "reason": e.to_string()}));
+            std::process::exit(1);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn run_health() {
+    emit_event(serde_json::json!({"ok": false, "reason": "health needs Windows"}));
     std::process::exit(1);
 }
 

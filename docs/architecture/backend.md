@@ -17,7 +17,7 @@ the Rust process only. React half: [`frontend.md`](./frontend.md); measured proc
 | `trn_http.rs` (263) | direct `api.tracker.network` transport (reqwest/rustls) | 1 | `spawn_blocking` only | — |
 | `trn_cache.rs` (1263) | on-disk TRN response cache + pruner | 6 | — | — |
 | `perf.rs` (1209) / `space_spam.rs` (212) | process sampling / Space hold-to-repress | 1 each | — / 2 (`:30` hook, `:59` injector) | — |
-| `custom_res.rs` (1185), `gpu.rs` (1099), `game_config.rs` (899), `calculator.rs` (229) | CRU/EDID, GPU, VALORANT ini, stretch math — helpers only | — | — | — |
+| `custom_res/` (mod 522 / timing 584 / edid 109), `gpu.rs` (1099), `game_config.rs` (899), `calculator.rs` (229) | CRU/EDID, GPU, VALORANT ini, stretch math — helpers only; `timing.rs` + `edid.rs` are pure and tested on Linux, `mod.rs` keeps the registry/SetupAPI writes | — | — | — |
 | `paths.rs`, `settings.rs`, `shortcuts.rs`, `updater.rs`, `webview_guard.rs` | data dirs/migration, `settings.json`, quick shortcuts, updater wiring, WebView2 presence gate | — | plugin/1-shot | — |
 
 ## 2. Command surface — 101 commands, 8 modules
@@ -88,8 +88,8 @@ outcomes but checked before transport selection. Move both inside `edgeGet`.
 
 ## 5. Slop / structural debt
 
-- **Size:** 8 of 21 modules >1000 lines (`display` 2822, `trn_proxy` 2417, `lib` 1598,
-  `trn_cache` 1263, `perf` 1209, `custom_res` 1185, `gpu` 1099, `accounts` 1079) — 11.7k/17.4k.
+- **Size:** 7 of 21 modules >1000 lines (`display` 2822, `trn_proxy` 2417, `lib` 1598,
+  `trn_cache` 1263, `perf` 1209, `gpu` 1099, `accounts` 1079) — 11.5k/17.4k.
   `lib.rs` registers 64 of 101 commands.
 - **Dead surface:** the 17 registered-but-uncalled commands above; no unregistered handlers.
 - **Logging is a no-op:** `tauri-plugin-log = "2"` is in `Cargo.toml` but never registered in the

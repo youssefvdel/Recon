@@ -25,6 +25,12 @@ fn default_true() -> bool {
     true
 }
 
+fn default_overlay_renderer() -> String {
+    crate::overlay_renderer::OverlayRendererSetting::DEFAULT
+        .as_str()
+        .to_string()
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 struct AppSettings {
     #[serde(default)]
@@ -46,6 +52,11 @@ struct AppSettings {
     /// Raw `shortcuts.txt` payload (`id|name|match|icon|removable` lines).
     #[serde(default)]
     shortcuts_raw: Option<String>,
+    /// Which HUD renders: `"ts"`, `"native"` or `"auto"`. Resolved against the
+    /// sidecar health by `overlay_renderer::resolve_renderer`; exactly one HUD
+    /// is live for every value.
+    #[serde(default = "default_overlay_renderer")]
+    overlay_renderer: String,
 }
 
 static SETTINGS_LOCK: Mutex<()> = Mutex::new(());
@@ -56,6 +67,7 @@ fn parse_bool_flag(raw: &str) -> bool {
 
 fn migrate_legacy() -> AppSettings {
     let mut s = AppSettings::default();
+    s.overlay_renderer = default_overlay_renderer();
     // start_minimized has no legacy file for most installs (it is new):
     // absence means ON, an explicit "0" means OFF.
     s.start_minimized = crate::paths::read_data_file("start_minimized.txt")
@@ -198,4 +210,20 @@ pub fn load_shortcuts_raw() -> Option<String> {
 
 pub fn save_shortcuts_raw(raw: &str) {
     update(|s| s.shortcuts_raw = Some(raw.to_string()));
+}
+
+// -- Overlay renderer -------------------------------------------------------
+
+/// Current renderer setting. An unreadable/unknown value reads as Auto.
+pub fn overlay_renderer_setting() -> crate::overlay_renderer::OverlayRendererSetting {
+    crate::overlay_renderer::OverlayRendererSetting::parse(&read().overlay_renderer)
+}
+
+/// Persist a renderer setting and return the normalized value that was stored
+/// (`"auto"` for anything unrecognized).
+pub fn save_overlay_renderer(raw: &str) -> String {
+    let setting = crate::overlay_renderer::OverlayRendererSetting::parse(raw);
+    let normalized = setting.as_str().to_string();
+    update(|s| s.overlay_renderer = normalized.clone());
+    normalized
 }

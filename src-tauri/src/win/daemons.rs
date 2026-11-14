@@ -25,7 +25,8 @@ use crate::display;
 use crate::gpu;
 use crate::log_line;
 use crate::state::{
-    AUTO_BORDERLESS_ENABLED, OVERLAY_AVAILABLE, OVERLAY_EDIT_MODE, OVERLAY_EDIT_WATCHDOG_MS, OVERLAY_PRESENT, OVERLAY_WINDOWED,
+    ACTIVE_RENDERER_NATIVE, AUTO_BORDERLESS_ENABLED, OVERLAY_AVAILABLE, OVERLAY_EDIT_MODE,
+    OVERLAY_EDIT_WATCHDOG_MS, OVERLAY_PRESENT, OVERLAY_WINDOWED,
 };
 use crate::win::overlay::{force_overlay_edit_mode_off, hide_overlay, show_overlay};
 use crate::window_manager;
@@ -137,6 +138,22 @@ pub(crate) fn overlay_daemon(auto_overlay_handle: AppHandle) {
             // paths that `continue` below, and the no-TS-overlay case):
             // full snapshot, best-effort.
             crate::overlay_sidecar::push_current();
+            // HUD ownership: while the native sidecar owns the screen, the
+            // Tauri window must neither show nor align — both are full-screen
+            // alpha layers, so showing this one too would composite two HUDs
+            // and feed the edit/hit-test paths a window the user cannot see.
+            // Hiding a window left over from a switch or a crash hand-back is
+            // this tick's job; the daemon is the only place that can.
+            if ACTIVE_RENDERER_NATIVE.load(Ordering::Relaxed) {
+                if let Some(overlay) = auto_overlay_handle.get_webview_window("overlay") {
+                    if overlay.is_visible().unwrap_or(false) {
+                        if let Err(e) = hide_overlay(auto_overlay_handle.clone()) {
+                            log::warn!("overlay daemon: native renderer owns the HUD, hide failed: {e}");
+                        }
+                    }
+                }
+                continue;
+            }
             // No HUD window: nothing to show, align, heal or hide.
             if !OVERLAY_AVAILABLE.load(Ordering::Relaxed) {
                 continue;
@@ -277,8 +294,12 @@ pub(crate) fn overlay_guard(guard_handle: AppHandle) {
                 continue;
             }
             // The fast path only runs when the UI says the layer has no
-            // content of its own; otherwise the 2 s daemon owns it.
-            let gated = !OVERLAY_EDIT_MODE.load(Ordering::Relaxed)
+            // content of its own; otherwise the 2 s daemon owns it. It also
+            // stays out of native ownership: the Tab peek is a Tauri-window
+            // feature, and showing it while the sidecar renders would put two
+            // HUDs on screen.
+            let gated = !ACTIVE_RENDERER_NATIVE.load(Ordering::Relaxed)
+                && !OVERLAY_EDIT_MODE.load(Ordering::Relaxed)
                 && !OVERLAY_WINDOWED.load(Ordering::Relaxed)
                 && !OVERLAY_PRESENT.load(Ordering::Relaxed)
                 && window_manager::is_valorant_foreground();

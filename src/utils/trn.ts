@@ -281,6 +281,37 @@ export function resetTrnCooldown(): void {
   }
 }
 
+/**
+ * The ladder's ONLY step: advance, persist the deadline, record the verdict and
+ * clear the dead breaker. Every trigger shape goes through here exactly once —
+ * a caller cannot double-step a message that matches both the semantic code and
+ * a numeric status, because there is one call site and one increment.
+ *
+ * This is what a DIRECT-transport 429 needed and did not get: the edge shape
+ * carries `HTTP 429`, so the ladder ran; `TRN_RATE_LIMITED` did not, so the
+ * cooldown, the path stamp and the health verdict were all skipped. Returns
+ * false when the message is not a trigger. Mutates module state (test seam:
+ * `trnCooldownStepCount`).
+ */
+export function stepTrnCooldown(msg: unknown): boolean {
+  if (!isTrnCooldownTrigger(msg)) return false;
+  trnCooldownStep = Math.min(trnCooldownStep + 1, TRN_COOLDOWN_MAX_STEP);
+  trnCooldownUntil = Date.now() + trnCooldownDelayMs(trnCooldownStep);
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem(TRN_COOLDOWN_KEY, String(trnCooldownUntil));
+    } catch {}
+  }
+  // A real rate limit (edge OR direct): worth saying out loud, because the user
+  // cannot clear it by clicking anything — only by waiting.
+  setTrnHealth('rate-limited', `tracker.gg rate limit (${Math.ceil(trnCooldownRemainingMs() / 1000)}s)`);
+  // An answered request (even a refusal) proves the path is alive — the ladder
+  // owns rate-limit answers, not the status-0 dead breaker.
+  trnDeadStreak = 0;
+  trnDeadQuietUntil = 0;
+  return true;
+}
+
 /* ------------------------------------------------------------------ *
  * Transport: hidden same-origin WebView2 window (trn_proxy.rs).       *
  * Same-origin fetch: no CORS, genuine navigation chain + real Edge    *
@@ -354,11 +385,21 @@ export function isTrnHttpStatus(msg: unknown): boolean {
 /**
  * The cooldown ladder's trigger. The ONE condition that steps it, extracted
  * from trnGet so the contract test drives the real predicate (no copy).
- * Pure.
+ *
+ * Keys on the SEMANTIC code first, then the edge transport's numeric shapes:
+ * a direct-transport 429 arrives as `TRN_RATE_LIMITED` and carries no `429`
+ * substring, so the numeric test alone let a real rate limit through with no
+ * cooldown, no path stamp and no verdict. `HTTP 429`/`403`/`1015` stay because
+ * that is the edge transport's answer shape. Pure.
  */
 export function isTrnCooldownTrigger(msg: unknown): boolean {
   const s = errText(msg);
-  return s.includes('429') || s.includes('403') || s.includes('1015');
+  return (
+    s.includes(TRN_RATE_LIMITED) ||
+    s.includes('429') ||
+    s.includes('403') ||
+    s.includes('1015')
+  );
 }
 
 /**
@@ -1226,21 +1267,17 @@ export async function trnGet(
     // Race backstop: paused after waiting (match started mid-queue) — refund
     // the slot so followers don't pay for a call that fetched nothing.
     if (isTrnProxyPaused(msg) && trnNextSlot === slot + gap) trnNextSlot = slot;
-    if (isTrnCooldownTrigger(msg)) {
-      trnCooldownStep = Math.min(trnCooldownStep + 1, TRN_COOLDOWN_MAX_STEP);
-      trnCooldownUntil = Date.now() + trnCooldownDelayMs(trnCooldownStep);
-      if (typeof localStorage !== 'undefined') {
-        try {
-          localStorage.setItem(TRN_COOLDOWN_KEY, String(trnCooldownUntil));
-        } catch {}
+    // ONE step for any trigger shape (edge `HTTP 429/403/1015` or the direct
+    // transport's `TRN_RATE_LIMITED`): cooldown + persisted deadline + verdict
+    // + dead-breaker reset all happen inside, once, whatever matched.
+    const ladderStepped = stepTrnCooldown(msg);
+    if (ladderStepped) {
+      if (import.meta.env.DEV) {
+        trnLog(
+          'cooldown engaged',
+          `step=${trnCooldownStep} remaining=${Math.ceil(trnCooldownRemainingMs() / 1000)}s`
+        );
       }
-      // A real Cloudflare rate limit: worth saying out loud, because the user
-      // cannot clear it by clicking anything — only by waiting.
-      setTrnHealth('rate-limited', `tracker.gg rate limit (${Math.ceil(trnCooldownRemainingMs() / 1000)}s)`);
-      // An answered request (even a refusal) proves the path is alive —
-      // the ladder owns HTTP errors, not the dead breaker.
-      trnDeadStreak = 0;
-      trnDeadQuietUntil = 0;
     } else if (isTrnNetDead(msg)) {
       // Status-0: the fetch died pre-status. One is noise; a streak means
       // the page's network is down — go quiet instead of clogging the gate.
@@ -1272,10 +1309,12 @@ export async function trnGet(
       if (import.meta.env.DEV) trnLog('proxy not ready', 'backoff 5s');
     }
     // Stamp failed wire attempts so sibling views don't re-fire one dead URL:
-    // any answered HTTP status or status-0 network death. Shapes that never
-    // touched the wire (pause/quiet/cooldown/disabled/negative/not-ready)
-    // stamp nothing.
-    if (msg.includes('HTTP ') || isTrnNetDead(msg)) noteTrnPathFailed(path);
+    // any answered HTTP status, a rate-limit answer (the direct transport's
+    // `TRN_RATE_LIMITED` has no `HTTP ` prefix) or status-0 network death.
+    // Shapes that never touched the wire (pause/quiet/cooldown/disabled/
+    // negative/not-ready) stamp nothing — and neither does a captcha wall,
+    // which must not fail fast after the user verifies.
+    if (msg.includes('HTTP ') || ladderStepped || isTrnNetDead(msg)) noteTrnPathFailed(path);
     // Central recording: ANY path proving private/missing notes it for ALL
     // readers (fill, views, modals, tabs, enrichment). Parsed from the path —
     // no per-callsite writer to forget.

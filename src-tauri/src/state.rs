@@ -22,6 +22,13 @@ pub(crate) static OVERLAY_WINDOWED: AtomicBool = AtomicBool::new(false);
 /// before touching a window.
 pub static OVERLAY_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
+/// TRUE when the native Slint sidecar owns the HUD. The overlay daemon and the
+/// overlay guard read this before showing, hiding or aligning the Tauri window:
+/// two renderers ship in this build, and this one flag is what keeps exactly
+/// one HUD on screen. Written only by `overlay_sidecar` (startup, crash
+/// hand-back, setting change).
+pub(crate) static ACTIVE_RENDERER_NATIVE: AtomicBool = AtomicBool::new(false);
+
 /// Whether the HUD has content worth compositing right now (audit overlay#4).
 /// TRUE at boot: the daemon's pre-audit behaviour is preserved until the UI
 /// reports its own render gates through `set_overlay_present`.

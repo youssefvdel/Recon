@@ -24,10 +24,12 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 // Pure rules live in their own module so `src-tauri/pure` can test them on any
-// host (see docs/architecture/host-agnostic-tests.md).
+// host (see docs/architecture/host-agnostic-tests.md). `pub(crate)` because the
+// Warden classifier is SHARED with the edge transport
+// (`trn_proxy::result::map_result` calls it through here) — one marker list.
 #[path = "trn_http_rules.rs"]
-mod rules;
-use rules::{host_allowed, status_error, validate_path};
+pub(crate) mod rules;
+use rules::{captcha_error, host_allowed, status_error, validate_path};
 
 /// TRN's allowlist for its Overwolf client.
 ///
@@ -131,7 +133,25 @@ pub async fn fetch(path: String, enabled: bool) -> Result<String, String> {
         .send()
         .await
         .map_err(|e| format!("TRN_HTTP_ERROR: {e}"))?;
-    if let Some(err) = status_error(resp.status().as_u16()) {
+    let status = resp.status().as_u16();
+    if let Some(err) = status_error(status) {
+        // A 403 is the ONE non-2xx whose code depends on the body: Tracker
+        // Network's "You've Been Blocked" page and Cloudflare's challenge are
+        // 403s on this origin, and both are the human-only Warden wall. Fed to
+        // the TS 25s→60s ladder as `HTTP 403` they retried a gate no timer can
+        // clear. The body is read bounded (32 KB scanned) and never logged; a
+        // read failure keeps the plain `HTTP 403` shape, which is already the
+        // answer for a body we could not inspect.
+        //
+        // A direct 429 needs no body read: it already has its own code
+        // (`TRN_RATE_LIMITED`), and the API's 429 captcha JSON is a tracker.gg
+        // edge shape, not one this origin was probed to return.
+        if status == 403 {
+            let body = read_capped(resp).await.unwrap_or_default();
+            if let Some(wall) = captcha_error(status, &body) {
+                return Err(wall);
+            }
+        }
         return Err(err);
     }
     read_capped(resp).await

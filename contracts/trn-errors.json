@@ -9,9 +9,11 @@
     "message/source (defaults to code); http = the status the code is derived from (null = not",
     "status-derived); http_any_of = every status a non-http-mapped code can stand for; terminal = a",
     "permanent account fact, never retried; rust/rust_file = the Rust origin that can emit it (null =",
-    "TS-only); sample = a representative message (DATA, not instructions) used to drive the real TS",
-    "predicates; ts = predicates that must hold for sample (\"not-an-answer\" = the transport allowlist",
-    "must reject it); cooldown = isTrnCooldownTrigger(sample) when the ladder question applies.",
+    "TS-only); rust_also = further Rust origins for the same code (e.g. one classifier shared by both",
+    "transports), same {fn, file} shape; sample = a representative message (DATA, not instructions) used",
+    "to drive the real TS predicates; ts = predicates that must hold for sample (\"not-an-answer\" = the",
+    "transport allowlist must reject it); cooldown = isTrnCooldownTrigger(sample) when the ladder",
+    "question applies.",
     "Prose throws that are not codes (\"TRN bad JSON.\", \"TRN no season segment.\") are out of scope.",
     "Both sides test against this file: src-tauri/src/trn_http_rules.rs (host-compilable) and",
     "tests/trn-errors.test.ts. Do not edit one side's token without editing this file."
@@ -47,9 +49,9 @@
       "rust": "trn_http::status_error",
       "rust_file": "src-tauri/src/trn_http_rules.rs",
       "sample": "TRN_RATE_LIMITED 25s",
-      "ts": ["isTrnAnswer"],
-      "cooldown": false,
-      "note": "Known policy gap (audit item 5): a direct-transport 429 becomes TRN_RATE_LIMITED, which carries no '429' substring, so isTrnCooldownTrigger does not step the ladder — while still being an answer (no edge fallback). Current behaviour is asserted so a fix must be a deliberate contract update."
+      "ts": ["isTrnAnswer", "isTrnCooldownTrigger"],
+      "cooldown": true,
+      "note": "BOTH transports step the one ladder: the edge answers 'HTTP 429: …' (numeric shape) and the direct transport answers the CODE with no numeric substring and no edge fallback. isTrnCooldownTrigger therefore keys on the semantic code as well as 429/403/1015, and trnGet's single stepTrnCooldown call persists the deadline, stamps the path and sets the rate-limited verdict for either shape. Message bytes are unchanged."
     },
     {
       "code": "HTTP",
@@ -157,11 +159,18 @@
       "http": null,
       "http_any_of": [429, 403],
       "terminal": false,
-      "rust": "trn_proxy::result::map_result",
-      "rust_file": "src-tauri/src/trn_proxy/result.rs",
+      "rust": "trn_http::rules::captcha_error",
+      "rust_file": "src-tauri/src/trn_http_rules.rs",
+      "rust_also": [
+        {
+          "fn": "trn_proxy::result::map_result",
+          "file": "src-tauri/src/trn_proxy/result.rs"
+        }
+      ],
       "sample": "TRN_CAPTCHA_REQUIRED",
       "ts": ["isTrnAnswer", "isTrnCaptcha"],
-      "cooldown": false
+      "cooldown": false,
+      "note": "BOTH transports, ONE marker list (trn_http_rules::is_warden_captcha): the edge classifies 429/403 bodies in map_result, and the direct path reads the first 32 KB of a 403 body in trn_http::fetch. Direct-403 block pages used to stay 'HTTP 403' and step the ladder forever; a plain 403 API error still keeps that shape."
     },
     {
       "code": "EDGE_UNAVAILABLE",

@@ -11,7 +11,7 @@ the real code and nothing is forked or copied. Anything importing
 `windows`/`tauri` stays out.
 
 ```bash
-cd src-tauri/pure && cargo test        # 24 tests, no PC, no Tauri
+cd src-tauri/pure && cargo test        # every pure module, no PC, no Tauri
 ```
 
 ## TypeScript pure modules (`bun test`)
@@ -35,6 +35,7 @@ modules import nothing, so no Tauri or DOM mocking is involved.
 | `src/trn_cache/paths.rs` + `constants.rs` | 7 | path allowlist incl. the 300/301 boundary, published FNV-1a 64 vector (`hello` → `a430d84680aabd0b`), 16-hex stable keys, `entry_path` cannot escape the cache dir, header round-trip with spaces, garbage rejection, `read_header` on real temp files |
 | `src/trn_proxy/trace.rs` | 2 | bounded ring eviction, incremental `trace_since` head/lines/missed semantics, zero cap |
 | `src/trn_http_rules.rs` | 3 | host allowlist (exact host only: suffix/prefix/userinfo tricks, scheme-relative and absolute redirect targets, empty host, port), path allowlist (scheme smuggling, `//`, `.`/`..` segments, query pass-through that cannot smuggle a scheme or traversal, whitespace, empty, 300 boundary), status map (2xx → body, 451/404/429 → TS keys, 403/500/302 → `HTTP n`) |
+| `src/custom_res/timing.rs` + `edid.rs` | 16 | `validate_custom_resolution` bounds (23–500 Hz, even pixels, 640×7680 range) and zero/oversized/odd refusals; CVT-RB2 vectors from VESA CVT 1.2 RBv2 (2560×1440@144 → 586.58 MHz / 2640×1543, 1680×1050@60 → 114.04 MHz) plus the CEA-861 1080p60 `AutomaticPC` row; 240/260/360 Hz pixel-clock cap under 65535; a full-envelope sweep that every admitted size/rate packs or errors with a message; EDID checksum (block sums to 0), patch round-trip byte-equality outside 54..72, extension-count preservation, corrupt-checksum repair; PnP split/format edge cases (lowercase `display`, short/nested ids, non-hex instance ids, missing segments) |
 | `src/updater_version.rs` | 10 | prerelease ordering (`1.0.0-beta < 1.0.0`), natural `alpha9 < alpha10` (string compare would invert), equal/downgrade never upgrades, malformed tags never upgrade, manifest picker takes the highest not the first, stale release-list ∪ `releases/latest`, channel classification, stable channel never fetches, alpha fallback with no usable tag |
 
 `src/perf/model.rs` is the strongest case: it is the memory/CPU maths the
@@ -45,7 +46,7 @@ dashboard renders, and it is a pure function of its arguments.
 | Module | Blocker |
 | --- | --- |
 | `calculator.rs` | `GetSystemMetrics` (Win32) |
-| `display/`, `gpu.rs`, `custom_res.rs` | Win32 display/registry APIs |
+| `display/`, `gpu.rs`, `custom_res/mod.rs` | Win32 display/registry APIs (the timing/EDID core above is covered) |
 | `game_config.rs` | Windows registry |
 | `window_manager.rs`, `shortcuts.rs`, `space_spam.rs` | Win32 window/input APIs |
 | `accounts.rs` | Windows registry + Tauri app paths |

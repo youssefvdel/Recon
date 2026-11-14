@@ -50,8 +50,17 @@ import {
   isOverlayVisible,
   getOverlayEditMode,
   setOverlayEditMode,
+  fetchSidecarStatus,
+  setOverlayRenderer,
   isTauri,
 } from '../utils/ipc';
+import {
+  RENDERER_CHOICES,
+  liveRendererLabel,
+  sidecarDetail,
+  type OverlayRendererSetting,
+  type SidecarStatus,
+} from '../utils/overlayRenderer';
 import { APP_VERSION, appVersion } from '../utils/version';
 import { isTrnHttpEnabled, setTrnHttpEnabled } from '../utils/trn';
 import { listen } from '@tauri-apps/api/event';
@@ -106,6 +115,10 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
   const [overlayOpen, setOverlayOpen] = useState(false);
   /** Inline reason when an overlay command refuses (wave-1 Rust now returns Err). */
   const [overlayStatus, setOverlayStatus] = useState<string | null>(null);
+
+  // Which HUD renderer owns the screen: the backend verdict, not a local guess.
+  const [sidecar, setSidecar] = useState<SidecarStatus | null>(null);
+  const [rendererStatus, setRendererStatus] = useState<string | null>(null);
 
   // Diagnostics: log bundle + local-only crash opt-in. Nothing uploads.
   const [crashOn, setCrashOn] = useState<boolean>(() => {
@@ -213,6 +226,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
     getStartMinimized().then(setStartMinimized).catch(() => {});
     isOverlayVisible().then(setOverlayOpen).catch(() => {});
     getOverlayEditMode().then(setInEditMode).catch(() => {});
+    fetchSidecarStatus().then(setSidecar).catch(() => {});
     try {
       const [mons, ovMon] = await Promise.all([fetchAllMonitors(), fetchOverlayMonitor()]);
       const attached = mons.filter((m) => m.is_attached && !m.is_device_disabled);
@@ -328,6 +342,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
     const resync = () => {
       getOverlayEditMode().then(setInEditMode).catch(() => {});
       isOverlayVisible().then(setOverlayOpen).catch(() => {});
+      fetchSidecarStatus().then(setSidecar).catch(() => {});
     };
     // Mount sync (deferred a tick so it is not a setState-in-effect) plus a
     // light poll: the backend emits only edit-mode changes, not visibility,
@@ -474,6 +489,20 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
     } catch (e) {
       setError(String(e));
       setInstalling(false);
+    }
+  };
+
+  /** Switch HUD ownership. Applied by the backend without a restart; the row
+   *  re-reads the live state instead of trusting the click. */
+  const handleRendererChange = async (value: OverlayRendererSetting) => {
+    setRendererStatus(null);
+    setSidecar((prev) => (prev ? { ...prev, setting: value } : prev));
+    try {
+      setSidecar(await setOverlayRenderer(value));
+      setRendererStatus('Saved — takes effect within about two seconds.');
+    } catch (e) {
+      setRendererStatus(`Could not save: ${String(e)}`);
+      fetchSidecarStatus().then(setSidecar).catch(() => {});
     }
   };
 
@@ -907,6 +936,61 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
                 <Eye className="w-3.5 h-3.5" />
                 <span>{overlayOpen ? 'Close Overlay' : 'Open Overlay'}</span>
               </button>
+            </div>
+
+            {/* HUD renderer ownership: two renderers ship, exactly one renders.
+                The badge is the backend verdict (sidecar_status), never a guess
+                from the selected option. */}
+            <div className="p-3.5 sm:p-4 flex flex-col gap-3">
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-0.5">
+                  <div className="text-xs sm:text-sm font-semibold text-m3-on-surface flex items-center gap-2">
+                    <span>HUD Renderer</span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-bold ${
+                        sidecar?.active === 'native'
+                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                          : 'bg-zinc-800 text-zinc-400 border border-zinc-700'
+                      }`}
+                    >
+                      {sidecar ? liveRendererLabel(sidecar).toUpperCase() : 'UNKNOWN'}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-m3-outline leading-snug">
+                    {sidecar
+                      ? sidecarDetail(sidecar)
+                      : 'Reading the live renderer state…'}
+                  </div>
+                </div>
+              </div>
+              <div
+                role="radiogroup"
+                aria-label="HUD renderer"
+                className="grid grid-cols-1 sm:grid-cols-3 gap-2"
+              >
+                {RENDERER_CHOICES.map((choice) => (
+                  <button
+                    key={choice.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={sidecar?.setting === choice.value}
+                    onClick={() => void handleRendererChange(choice.value)}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col gap-0.5 ${
+                      sidecar?.setting === choice.value
+                        ? 'bg-m3-primary/15 border-m3-primary shadow-sm'
+                        : 'bg-m3-surface-container/60 border-m3-outline-subtle/60 hover:bg-m3-surface-container hover:border-m3-outline-subtle'
+                    }`}
+                  >
+                    <span className="text-xs font-bold text-m3-on-surface">{choice.label}</span>
+                    <span className="text-[10px] text-m3-outline leading-snug">{choice.hint}</span>
+                  </button>
+                ))}
+              </div>
+              {rendererStatus && (
+                <p className="text-[11px] text-m3-primary font-medium leading-snug">
+                  {rendererStatus}
+                </p>
+              )}
             </div>
 
             {/* In-Game HUD Layout (Edit Mode) */}

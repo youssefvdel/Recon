@@ -1,5 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
 import { isDevTabHeld } from './devTools';
+import {
+  parseSidecarStatus,
+  type OverlayRendererSetting,
+  type SidecarStatus,
+} from './overlayRenderer';
 import type { DisplayInfo, ShortcutBinding, GpuInfo, GpuSettingsReport, WindowInfo, ConfigFileInfo, MonitorDevice } from '../types';
 
 export const isTauri = () => {
@@ -671,6 +676,29 @@ export async function setOverlayMonitor(monitor: string): Promise<string> {
     return monitor;
   }
   return await invoke<string>('set_overlay_monitor', { monitor });
+}
+
+/** Which HUD renderer is live (native sidecar vs built-in window). */
+export async function fetchSidecarStatus(): Promise<SidecarStatus> {
+  if (!isTauri()) {
+    return parseSidecarStatus({ running: true, healthy: true, setting: 'auto', active: 'native', binary: true });
+  }
+  try {
+    return parseSidecarStatus(await invoke('sidecar_status'));
+  } catch {
+    // An unreadable status is "nothing claimed", never a guessed renderer.
+    return parseSidecarStatus(null);
+  }
+}
+
+/** Persist the renderer preference; the backend applies it without a restart. */
+export async function setOverlayRenderer(
+  setting: OverlayRendererSetting
+): Promise<SidecarStatus> {
+  if (!isTauri()) {
+    return parseSidecarStatus({ running: true, healthy: true, setting, active: setting === 'ts' ? 'ts' : 'native', binary: true });
+  }
+  return parseSidecarStatus(await invoke('set_overlay_renderer', { setting }));
 }
 
 /**

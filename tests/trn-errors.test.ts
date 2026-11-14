@@ -18,6 +18,8 @@ interface ContractEntry {
   terminal: boolean;
   rust: string | null;
   rust_file: string | null;
+  /** Further Rust origins for the same code (one classifier, both transports). */
+  rust_also?: Array<{ fn: string; file: string }>;
   sample: string;
   ts: string[];
   cooldown?: boolean;
@@ -154,22 +156,58 @@ describe('contracts/trn-errors.json', () => {
 
   test('every rust origin named by the fixture still emits that token', () => {
     for (const e of entries) {
-      if (!e.rust_file) continue;
-      expect(
-        rustFile(e.rust_file).includes(codeOf(e)),
-        `${e.rust_file} no longer contains ${codeOf(e)} (${e.rust})`
-      ).toBe(true);
+      const origins: Array<{ fn: string; file: string }> = [];
+      if (e.rust && e.rust_file) origins.push({ fn: e.rust, file: e.rust_file });
+      for (const also of e.rust_also ?? []) origins.push(also);
+      for (const origin of origins) {
+        expect(
+          rustFile(origin.file).includes(codeOf(e)),
+          `${origin.file} no longer contains ${codeOf(e)} (${origin.fn})`
+        ).toBe(true);
+      }
     }
   });
 
-  test('the fixture documents every real mismatch it cannot fix in place', () => {
-    // The known ladder gap is recorded, not hidden: a direct-transport 429 is
-    // an answer (no edge fallback) but steps no cooldown. Changing either
-    // behaviour must update this entry deliberately.
+  test('a code emitted by both transports names both Rust origins', () => {
+    const captcha = entries.find((e) => e.code === 'TRN_CAPTCHA_REQUIRED');
+    expect(captcha?.rust).toContain('trn_http');
+    expect(captcha?.rust_also?.map((o) => o.fn)).toContain('trn_proxy::result::map_result');
+    // Both files carry the literal the classifier returns.
+    expect(rustFile('src-tauri/src/trn_http_rules.rs')).toContain('TRN_CAPTCHA_REQUIRED');
+    expect(rustFile('src-tauri/src/trn_proxy/result.rs')).toContain('TRN_CAPTCHA_REQUIRED');
+  });
+
+  test('a direct-transport 429 is an answer AND steps the ladder', () => {
+    // The mismatch this contract used to document: the direct transport answers
+    // the CODE with no numeric substring, so it reached the ladder with no
+    // cooldown, no path stamp and no verdict. Both now hold, and the message
+    // bytes are unchanged.
     const rateLimited = entries.find((e) => e.code === 'TRN_RATE_LIMITED');
-    expect(rateLimited?.cooldown).toBe(false);
-    expect(rateLimited?.note).toContain('policy gap');
+    expect(rateLimited?.cooldown).toBe(true);
+    expect(rateLimited?.ts).toContain('isTrnCooldownTrigger');
     expect(trn.isTrnAnswer('TRN_RATE_LIMITED 25s')).toBe(true);
-    expect(trn.isTrnCooldownTrigger('TRN_RATE_LIMITED 25s')).toBe(false);
+    expect(trn.isTrnCooldownTrigger('TRN_RATE_LIMITED 25s')).toBe(true);
+    // The edge shape still does, and a code that is not a rate limit never does.
+    expect(trn.isTrnCooldownTrigger('HTTP 429: rate limited')).toBe(true);
+    expect(trn.isTrnCooldownTrigger('TRN_NO_DATA')).toBe(false);
+    expect(trn.isTrnCooldownTrigger('TRN_CAPTCHA_REQUIRED')).toBe(false);
+  });
+
+  test('the ladder steps exactly once, even when the message carries both marks', () => {
+    trn.resetTrnCooldown();
+    const before = trn.trnCooldownStepCount();
+    // A message naming the code AND a numeric 429 matches two arms of the old
+    // predicate; the single step must not run twice for it.
+    expect(trn.stepTrnCooldown('TRN_RATE_LIMITED 429s')).toBe(true);
+    expect(trn.trnCooldownStepCount()).toBe(before + 1);
+    // The step persists a deadline and records the verdict the banner reads.
+    expect(trn.trnCooldownRemainingMs()).toBeGreaterThan(0);
+    expect(trn.getTrnHealth().health).toBe('rate-limited');
+    // A non-trigger never steps.
+    expect(trn.stepTrnCooldown('TRN_NO_DATA')).toBe(false);
+    expect(trn.trnCooldownStepCount()).toBe(before + 1);
+    // Keep the shared module state clean for other tests.
+    trn.resetTrnCooldown();
+    trn.resetTrnHealth();
   });
 });

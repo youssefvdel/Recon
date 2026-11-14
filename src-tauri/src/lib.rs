@@ -23,6 +23,7 @@ mod settings;
 mod state;
 mod win;
 mod commands;
+mod overlay_renderer;
 mod overlay_sidecar;
 
 // Re-exported at the crate root so the split moved code without moving any
@@ -465,9 +466,10 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_millis(700));
                 win::overlay::create_overlay_verified(&overlay_app, &overlay_log_id);
             });
-            // Native sidecar behind the TS overlay: missing binary is a warn,
-            // never a failure (overlay_sidecar owns that policy).
-            overlay_sidecar::spawn_sidecar(app.handle().clone());
+            // HUD ownership: exactly one renderer. `init` reads the persisted
+            // `overlay_renderer` setting and only spawns the native sidecar
+            // when it should own the screen; the daemons read the verdict.
+            overlay_sidecar::init(app.handle().clone());
             // Rust live-facts service (docs/live-rust-pipeline.md §Phase 0):
             // one presence poller, feeds the sidecar snapshot and emits
             // `recon:live-facts` on change. Additive — the TS poller stays.
@@ -652,6 +654,7 @@ pub fn run() {
             win::overlay::get_overlay_monitor,
             win::overlay::set_overlay_monitor,
             overlay_sidecar::sidecar_status,
+            overlay_sidecar::set_overlay_renderer,
             commands::display::set_monitor_device_enabled,
             commands::display::add_custom_resolution,
             commands::display::remove_custom_override,

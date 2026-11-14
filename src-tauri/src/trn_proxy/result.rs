@@ -2,6 +2,9 @@
 //! (moved verbatim from `trn_proxy.rs`; split only.)
 use super::constants::{MAX_SLOT_CHARS};
 use super::script::{SlotResult, snippet};
+// The Warden classifier lives in `trn_http_rules` because the DIRECT transport
+// needs the exact same markers: one list, both transports, no drift.
+use crate::trn_http::rules::is_warden_captcha;
 
 /// Chars of an in-page rejection message that reach a trace line.
 ///
@@ -43,33 +46,6 @@ pub(super) fn trace_err(r: &SlotResult) -> String {
         return " err=<empty>".to_string();
     }
     format!(" err={flat}")
-}
-
-/// True when the response is tracker.gg's human-gate wall rather than a plain
-/// rate limit or permission error.
-///
-/// Two shapes, one wall:
-/// - 429 JSON: `{"errors":[{"code":"Warden::Challenge","message":"…captcha…"}]}`
-///   — the API's captcha gate;
-/// - 403 HTML: Tracker Network's own "You've Been Blocked" page or a Cloudflare
-///   "Attention Required" block page (both probed live 2026-11-06). The hidden
-///   window can no more clear this than it can solve the captcha.
-///
-/// Deliberately conservative: only 403/429, only body markers, case-insensitive.
-/// A normal 403 API error (`{"errors":[…]}` JSON) carries none of the block-page
-/// prose, so it keeps its `HTTP 403` shape and the TS ladder. Pure — unit-tested.
-pub(super) fn is_warden_captcha(status: u16, body: &str) -> bool {
-    let b = body.to_ascii_lowercase();
-    match status {
-        429 => b.contains("warden::challenge") || b.contains("captcha"),
-        403 => {
-            b.contains("you've been blocked")
-                || b.contains("attention required")
-                || b.contains("cf-mitigated")
-                || b.contains("just a moment")
-        }
-        _ => false,
-    }
 }
 
 /// Map a resolved slot to the command surface. Pure — unit-tested.

@@ -51,6 +51,9 @@ pub(crate) fn validate_path(path: &str) -> Result<(), String> {
 }
 
 /// Map a status to this transport's error surface. `None` = a body to return.
+///
+/// Body-blind by design: a 403 with a block page is still `HTTP 403` here, and
+/// only `captcha_error` below may re-classify it once the body was read.
 pub(crate) fn status_error(status: u16) -> Option<String> {
     match status {
         200..=299 => None,
@@ -59,6 +62,67 @@ pub(crate) fn status_error(status: u16) -> Option<String> {
         429 => Some("TRN_RATE_LIMITED".to_string()),
         other => Some(format!("HTTP {other}")),
     }
+}
+
+/// Bytes of a response body inspected for the Warden wall.
+///
+/// Every marker is response chrome — a JSON error code or a block-page title in
+/// the `<head>` — and shows up in the first few hundred bytes. 32 KB is two
+/// orders of magnitude past that and still bounds the scan of a hostile 8 MB
+/// body. A marker past the cap is deliberately NOT found (the plain status shape
+/// is the safe answer).
+pub(crate) const WARDEN_SCAN_MAX: usize = 32 * 1024;
+
+/// 429 JSON challenge markers: the API's own captcha gate.
+const WARDEN_429_MARKERS: [&str; 2] = ["warden::challenge", "captcha"];
+/// 403 block-page markers: Tracker Network's "You've Been Blocked" page and the
+/// Cloudflare "Attention Required" / "Just a moment…" / `cf-mitigated` variants
+/// (both probed live 2026-11-06).
+const WARDEN_403_MARKERS: [&str; 4] = [
+    "you've been blocked",
+    "attention required",
+    "cf-mitigated",
+    "just a moment",
+];
+
+/// First `max` bytes of `body`, cut on a char boundary. Pure.
+fn head(body: &str, max: usize) -> &str {
+    if body.len() <= max {
+        return body;
+    }
+    let mut end = max;
+    while end > 0 && !body.is_char_boundary(end) {
+        end -= 1;
+    }
+    &body[..end]
+}
+
+/// True when the status+body is tracker.gg's human-gate wall rather than a plain
+/// rate limit or permission error.
+///
+/// THE ONE MARKER LIST, called by BOTH transports: the hidden-WebView2 proxy
+/// (`trn_proxy::result::map_result`) and the direct client
+/// (`trn_http::fetch`). Two copies of these literals is how a block page ends up
+/// classified on one path and laddered forever on the other.
+///
+/// Deliberately conservative: only 403/429, only body markers, case-insensitive,
+/// first [`WARDEN_SCAN_MAX`] bytes. A normal 403 API error
+/// (`{"errors":[…]}` JSON) carries none of the block-page prose, so it keeps its
+/// `HTTP 403` shape and the TS ladder. Pure — unit-tested.
+pub(crate) fn is_warden_captcha(status: u16, body: &str) -> bool {
+    let head = head(body, WARDEN_SCAN_MAX).to_ascii_lowercase();
+    let markers: &[&str] = match status {
+        429 => &WARDEN_429_MARKERS,
+        403 => &WARDEN_403_MARKERS,
+        _ => return false,
+    };
+    markers.iter().any(|marker| head.contains(marker))
+}
+
+/// The Warden wall as the code TS branches on, when `status`+`body` is the wall.
+/// `None` = not the wall: the caller keeps its plain status shape. Pure.
+pub(crate) fn captcha_error(status: u16, body: &str) -> Option<String> {
+    is_warden_captcha(status, body).then(|| "TRN_CAPTCHA_REQUIRED".to_string())
 }
 
 /// The shared error-surface contract, asserted on BOTH sides:
@@ -80,6 +144,26 @@ mod contract_tests {
 
     fn contract() -> Value {
         serde_json::from_str(CONTRACT).expect("contracts/trn-errors.json must parse")
+    }
+
+    /// Every Rust origin an entry names: the primary `(rust, rust_file)` plus
+    /// each `(fn, file)` in `rust_also`. A code emitted by both transports must
+    /// be asserted against both, or a deletion on one side goes unnoticed.
+    fn rust_origins(e: &Value) -> Vec<(&str, &str)> {
+        let mut out: Vec<(&str, &str)> = Vec::new();
+        if let (Some(function), Some(file)) = (e["rust"].as_str(), e["rust_file"].as_str()) {
+            out.push((function, file));
+        }
+        if let Some(also) = e["rust_also"].as_array() {
+            for origin in also {
+                if let (Some(function), Some(file)) =
+                    (origin["fn"].as_str(), origin["file"].as_str())
+                {
+                    out.push((function, file));
+                }
+            }
+        }
+        out
     }
 
     /// Every `TRN_HTTP_*` token in `src`, found without a regex dependency.
@@ -150,18 +234,26 @@ mod contract_tests {
     }
 
     #[test]
-    fn every_trn_http_code_in_the_contract_is_still_emitted() {
+    fn every_declared_rust_origin_still_emits_the_code() {
         let v = contract();
         for e in v["codes"].as_array().expect("codes[]") {
-            let Some(rust) = e["rust"].as_str().filter(|r| r.starts_with("trn_http::")) else {
-                continue;
-            };
             let code = e["code"].as_str().expect("code");
             let token = e["match"].as_str().unwrap_or(code);
-            assert!(
-                HTTP_SRC.contains(token) || RULES_SRC.contains(token),
-                "contract says {rust} emits {code}, but neither trn_http.rs nor trn_http_rules.rs contains {token}"
-            );
+            for (function, file) in rust_origins(e) {
+                // This module can only vouch for the two files it can include.
+                // Every other origin is checked against its real source by
+                // tests/trn-errors.test.ts.
+                let src = match file {
+                    "src-tauri/src/trn_http.rs" => Some(HTTP_SRC),
+                    "src-tauri/src/trn_http_rules.rs" => Some(RULES_SRC),
+                    _ => None,
+                };
+                let Some(src) = src else { continue };
+                assert!(
+                    src.contains(token),
+                    "contract says {function} emits {code}, but {file} does not contain {token}"
+                );
+            }
         }
     }
 
@@ -212,5 +304,77 @@ mod contract_tests {
                 "fixture says TS branches on {code}: no quoted literal {token:?} in src/utils/trn.ts"
             );
         }
+    }
+}
+
+/// The Warden wall classifier, shared by BOTH transports. Asserted here on any
+/// host (`src-tauri/pure`), which is the only place the direct 403 branch can be
+/// tested without a network.
+#[cfg(test)]
+mod warden_tests {
+    use super::{captcha_error, is_warden_captcha, status_error, WARDEN_SCAN_MAX};
+
+    const WALL: &str = "TRN_CAPTCHA_REQUIRED";
+
+    /// The exact composition `trn_http::fetch` uses for a non-2xx 403: the wall
+    /// code wins, otherwise the body-blind status shape.
+    fn code_403(body: &str) -> String {
+        captcha_error(403, body).unwrap_or_else(|| status_error(403).expect("403 has an arm"))
+    }
+
+    #[test]
+    fn a_block_page_403_is_the_wall_not_a_permission_error() {
+        // Tracker Network's own page (title probed live) and Cloudflare's.
+        for body in [
+            "<!doctype html><title>You've Been Blocked - Tracker Network</title>",
+            "<title>Attention Required! | Cloudflare</title>",
+            "<p>Just a moment...</p>",
+            "cf-mitigated: challenge",
+            // Case-insensitive.
+            "YOU'VE BEEN BLOCKED",
+        ] {
+            assert_eq!(
+                code_403(body),
+                WALL,
+                "403 block page must classify as the wall: {body:?}"
+            );
+        }
+        // The 429 JSON challenge (the proxy's shape) uses the same list.
+        let warden = r#"{"errors":[{"code":"Warden::Challenge","message":"solve a captcha"}]}"#;
+        assert_eq!(captcha_error(429, warden).as_deref(), Some(WALL));
+        assert_eq!(captcha_error(429, "please solve a CAPTCHA").as_deref(), Some(WALL));
+    }
+
+    #[test]
+    fn a_plain_403_keeps_its_status_shape() {
+        // A normal JSON API error and an empty body are NOT the wall: both keep
+        // the byte-identical `HTTP 403` the TS ladder already owns.
+        assert_eq!(code_403(r#"{"errors":[{"code":"Forbidden"}]}"#), "HTTP 403");
+        assert_eq!(code_403(""), "HTTP 403");
+        // The 429-only markers never leak into a 403, and vice versa.
+        assert_eq!(code_403("captcha"), "HTTP 403");
+        assert_eq!(code_403(r#"{"code":"Warden::Challenge"}"#), "HTTP 403");
+        assert_eq!(captcha_error(429, "you've been blocked"), None);
+        // Only the wall statuses participate: a 200/500 body is never re-read.
+        for status in [200u16, 201, 404, 451, 500, 503] {
+            assert!(!is_warden_captcha(status, "you've been blocked cf-mitigated captcha"));
+        }
+    }
+
+    #[test]
+    fn the_body_scan_is_bounded_to_the_first_32kb() {
+        // A marker at the START is found however large the body is.
+        let mut leading = String::from("<title>You've Been Blocked</title>");
+        leading.push_str(&"a".repeat(WARDEN_SCAN_MAX * 2));
+        assert_eq!(code_403(&leading), WALL);
+        // The same marker PAST the cap is not inspected: bounded work, and the
+        // safe answer is the plain `HTTP 403` the ladder owns.
+        let mut trailing = "a".repeat(WARDEN_SCAN_MAX);
+        trailing.push_str("<title>You've Been Blocked</title>");
+        assert_eq!(code_403(&trailing), "HTTP 403");
+        // No panic when the 32 KB boundary splits a multi-byte char.
+        let mut unicode = "é".repeat(WARDEN_SCAN_MAX / 2);
+        unicode.push_str("<title>You've Been Blocked</title>");
+        assert_eq!(code_403(&unicode), "HTTP 403");
     }
 }

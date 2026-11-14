@@ -43,6 +43,21 @@ pub mod app_paths;
 #[path = "../../src/live_facts.rs"]
 pub mod live_facts;
 
+// HUD ownership: one resolver for "which renderer may render right now", shared
+// by the daemons and the settings UI. Pure, so every mode × health pair is
+// host-testable.
+#[path = "../../src/overlay_renderer.rs"]
+pub mod overlay_renderer;
+
+// The custom-resolution writer is the most destructive code in the app (EDID
+// patching, display timings). Its pure core — range validation, CVT-RB2/CRU
+// timing maths, EDID checksum and base-block patch — touches only `std`, so
+// it is compiled here by path and tested without Windows or a monitor.
+#[path = "../../src/custom_res/timing.rs"]
+pub mod custom_res_timing;
+#[path = "../../src/custom_res/edid.rs"]
+pub mod custom_res_edid;
+
 #[cfg(test)]
 mod tests {
     use crate::cache_paths::{
@@ -807,5 +822,443 @@ mod tests {
         // A codename is surfaced as-is: translating it needs the game-data
         // table, which the UI owns.
         assert_eq!(map_display_name("/Game/Maps/duality/duality"), "Duality");
+    }
+
+    // ---- overlay_renderer.rs: one HUD owns the screen -----------------------
+
+    use crate::overlay_renderer::{
+        resolve_renderer, ActiveOverlayRenderer, OverlayRendererSetting,
+    };
+
+    #[test]
+    fn ts_setting_never_spawns_a_native_hud() {
+        // Health is irrelevant: the user asked for the in-app renderer.
+        assert_eq!(
+            resolve_renderer(OverlayRendererSetting::Ts, true),
+            ActiveOverlayRenderer::Ts
+        );
+        assert_eq!(
+            resolve_renderer(OverlayRendererSetting::Ts, false),
+            ActiveOverlayRenderer::Ts
+        );
+    }
+
+    #[test]
+    fn native_setting_owns_the_screen_even_when_unhealthy() {
+        // Explicit native is a request, not a suggestion: no silent fallback.
+        // An empty HUD is the honest outcome and the status row says why.
+        assert_eq!(
+            resolve_renderer(OverlayRendererSetting::Native, true),
+            ActiveOverlayRenderer::Native
+        );
+        assert_eq!(
+            resolve_renderer(OverlayRendererSetting::Native, false),
+            ActiveOverlayRenderer::Native
+        );
+    }
+
+    #[test]
+    fn auto_follows_sidecar_health_in_both_directions() {
+        // The default: native while the probe passes...
+        assert_eq!(
+            resolve_renderer(OverlayRendererSetting::Auto, true),
+            ActiveOverlayRenderer::Native
+        );
+        // ...and the in-app HUD the moment it does not (failed probe, crash,
+        // missing binary) — exactly one renderer either way.
+        assert_eq!(
+            resolve_renderer(OverlayRendererSetting::Auto, false),
+            ActiveOverlayRenderer::Ts
+        );
+    }
+
+    #[test]
+    fn unknown_or_damaged_settings_read_as_auto() {
+        // A hand-edited settings.json must never leave the app with no HUD:
+        // anything unrecognized is the default.
+        for raw in ["", " ", "garbage", "AUTO ", "\u{0}ts"] {
+            assert_eq!(
+                OverlayRendererSetting::parse(raw),
+                OverlayRendererSetting::Auto,
+                "{raw:?}"
+            );
+        }
+        assert_eq!(OverlayRendererSetting::parse("ts"), OverlayRendererSetting::Ts);
+        assert_eq!(OverlayRendererSetting::parse("TS"), OverlayRendererSetting::Ts);
+        assert_eq!(
+            OverlayRendererSetting::parse(" native "),
+            OverlayRendererSetting::Native
+        );
+        // Round-trip: what the settings store writes is what parses back.
+        for setting in [
+            OverlayRendererSetting::Ts,
+            OverlayRendererSetting::Native,
+            OverlayRendererSetting::Auto,
+        ] {
+            assert_eq!(OverlayRendererSetting::parse(setting.as_str()), setting);
+        }
+        assert_eq!(OverlayRendererSetting::DEFAULT, OverlayRendererSetting::Auto);
+        assert_eq!(ActiveOverlayRenderer::Ts.as_str(), "ts");
+        assert_eq!(ActiveOverlayRenderer::Native.as_str(), "native");
+    }
+}
+
+
+/// The custom-resolution writer: range validation, CVT-RB2 timing maths and
+/// EDID patching — the pure core of the most destructive module in the app.
+///
+/// Vectors: RBv2 constants are VESA CVT 1.2 Reduced Blanking v2 (80 px
+/// horizontal blank = 8 front / 32 sync / 40 back, 460 µs minimum vertical
+/// blank, 8-line vsync, 6-line vback) as ported from CRU
+/// `CalculateCVTRB2Standard`. 2560×1440@144 cross-checks the published
+/// 586.59 MHz / 2640×1543 DP mode (the 10 kHz field truncates to 586.58).
+/// 1920×1080@60 is CEA-861 timing from the `AutomaticPC` table.
+#[cfg(test)]
+mod custom_res_tests {
+    use crate::custom_res_edid::{
+        block_checksum_ok, checksum_byte, device_params_path, extension_block_count,
+        has_all_blocks, is_valid_edid, override_path, patch_edid, split_pnp,
+    };
+    use crate::custom_res_timing::{
+        build_detailed_timing, cvt_rb2_front, hperiod_cvt_rb2, validate_custom_resolution,
+    };
+
+    /// Decoded EDID Type-0 descriptor: every field the encoder writes, read
+    /// back out of its 18 bytes exactly the way a driver would.
+    #[derive(Debug, PartialEq, Eq)]
+    struct Dtd {
+        pclk_10khz: u32,
+        ha: u32,
+        hb: u32,
+        h_total: u32,
+        va: u32,
+        vb: u32,
+        v_total: u32,
+        h_front: u32,
+        h_sync: u32,
+        v_front: u32,
+        v_sync: u32,
+        flags: u8,
+    }
+
+    fn decode(d: &[u8; 18]) -> Dtd {
+        let ha = d[2] as u32 | (((d[4] as u32) & 0xF0) << 4);
+        let hb = d[3] as u32 | (((d[4] as u32) & 0x0F) << 8);
+        let va = d[5] as u32 | (((d[7] as u32) & 0xF0) << 4);
+        let vb = d[6] as u32 | (((d[7] as u32) & 0x0F) << 8);
+        Dtd {
+            pclk_10khz: d[0] as u32 | (d[1] as u32) << 8,
+            ha,
+            hb,
+            h_total: ha + hb,
+            va,
+            vb,
+            v_total: va + vb,
+            h_front: d[8] as u32 | (((d[11] as u32) & 0xC0) << 2),
+            h_sync: d[9] as u32 | (((d[11] as u32) & 0x30) << 4),
+            v_front: ((d[10] as u32) >> 4) | (((d[11] as u32) & 0x0C) << 2),
+            v_sync: (d[10] as u32 & 0x0F) | (((d[11] as u32) & 0x03) << 4),
+            flags: d[17],
+        }
+    }
+
+    fn timing(w: u32, h: u32, hz: u32) -> Dtd {
+        decode(&build_detailed_timing(w, h, hz).expect("timing"))
+    }
+
+    /// A well-formed 128-byte base block whose first descriptor slot is a
+    /// monitor descriptor (so a patch has something real to replace).
+    fn base_edid() -> Vec<u8> {
+        let mut b = vec![0u8; 128];
+        b[..8].copy_from_slice(&[0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00]);
+        b[8..10].copy_from_slice(&[0x10, 0xAC]); // manufacturer "DEL"
+        b[18] = 1; // EDID 1.4
+        b[19] = 4;
+        b[54..58].copy_from_slice(&[0x00, 0x00, 0x00, 0xFC]); // "monitor name" tag
+        b[58..72].copy_from_slice(b"Test Panel 27\"");
+        b[126] = 0; // no extension blocks
+        b[127] = checksum_byte(&b[..127]);
+        b
+    }
+
+    #[test]
+    fn cvt_rb2_matches_the_reference_2560x1440_144_vector() {
+        let d = timing(2560, 1440, 144);
+        // 2640 × 1543 @ 144 Hz = 586.586 MHz; the descriptor stores 10 kHz
+        // units, so truncation puts it at 586.58 (the published mode is 586.59).
+        assert_eq!(d.pclk_10khz, 58_658);
+        assert_eq!((d.ha, d.hb, d.h_total), (2560, 80, 2640));
+        assert_eq!((d.va, d.vb, d.v_total), (1440, 103, 1543));
+        // RBv2 blanking: 8 front / 32 sync / 40 back horizontally.
+        assert_eq!((d.h_front, d.h_sync), (8, 32));
+        // The computed vfront is 89 lines, past the 6-bit field: the encoder
+        // clamps it to 8 and leaves the 12-bit VBlank intact.
+        assert_eq!((d.v_front, d.v_sync), (8, 8));
+        assert_eq!(d.flags, 0b0001_1010, "digital separate, +h -v sync");
+    }
+
+    #[test]
+    fn cvt_rb2_leaves_vfront_encodable_at_1680x1050_60() {
+        let d = timing(1680, 1050, 60);
+        // 1760 × 1080 @ 60 Hz = 114.048 MHz → 11404 after 10 kHz truncation.
+        assert_eq!(d.pclk_10khz, 11_404);
+        assert_eq!((d.h_total, d.v_total), (1760, 1080));
+        assert_eq!((d.v_front, d.v_sync), (16, 8));
+        assert_eq!(d.vb, 30, "vfront 16 + vsync 8 + vback 6");
+    }
+
+    #[test]
+    fn automatic_pc_hit_is_the_cea_861_1920x1080_60_timing() {
+        let d = timing(1920, 1080, 60);
+        assert_eq!(d.pclk_10khz, 14_850, "CEA-861 1080p60 is 148.50 MHz");
+        assert_eq!((d.ha, d.hb, d.h_total), (1920, 280, 2200));
+        assert_eq!((d.va, d.vb, d.v_total), (1080, 45, 1125));
+        assert_eq!((d.h_front, d.h_sync), (88, 44));
+        assert_eq!((d.v_front, d.v_sync), (4, 5));
+        assert_eq!(d.flags, 0b0001_1110, "digital separate, +h +v sync");
+    }
+
+    #[test]
+    fn automatic_pc_hit_quantizes_pixel_clock_to_25() {
+        // 1792 × 798 @ 60 Hz = 85.8096 MHz; TablePClock quantizes to 25
+        // (PClockPrecision / 4) the way CRU does, landing on 85.75 MHz.
+        let d = timing(1366, 768, 60);
+        assert_eq!(d.pclk_10khz, 8_575);
+        assert_eq!((d.h_total, d.v_total), (1792, 798));
+        assert_eq!((d.h_front, d.h_sync), (70, 143));
+    }
+
+    #[test]
+    fn high_refresh_1080p_stays_inside_the_16_bit_clock() {
+        // 240 Hz still fits: 2000 × 1215 @ 240 Hz = 583.20 MHz.
+        let d = timing(1920, 1080, 240);
+        assert_eq!((d.pclk_10khz, d.v_total), (58_320, 1215));
+        assert_eq!(d.v_front, 8, "121 computed front is clamped to the field");
+        // 260 Hz also fits: 2000 × 1227 @ 260 Hz = 638.04 MHz.
+        let d = timing(1920, 1080, 260);
+        assert_eq!((d.pclk_10khz, d.v_total), (63_804, 1227));
+        // 360 Hz needs 932.40 MHz: unencodable, so the DTD is capped near
+        // 650 MHz (2000 × 1221 @ 612.85 MHz) for geometry only.
+        let d = timing(1920, 1080, 360);
+        assert_eq!((d.pclk_10khz, d.v_total), (61_285, 1221));
+        assert!(d.pclk_10khz <= 65_535);
+        assert_eq!((d.v_front, d.v_sync), (8, 8));
+    }
+
+    #[test]
+    fn refresh_bounds_are_23_to_500_inclusive() {
+        assert!(validate_custom_resolution(1920, 1080, 23).is_ok());
+        assert!(validate_custom_resolution(1920, 1080, 500).is_ok());
+        let err = validate_custom_resolution(1920, 1080, 22).unwrap_err();
+        assert!(err.contains("23"), "{err}");
+        let err = validate_custom_resolution(1920, 1080, 501).unwrap_err();
+        assert!(err.contains("500"), "{err}");
+        // The boundaries are real: the extremes still build a descriptor.
+        assert!(build_detailed_timing(1920, 1080, 23).is_ok());
+        assert!(build_detailed_timing(1920, 1080, 500).is_ok());
+    }
+
+    #[test]
+    fn zero_and_oversized_inputs_are_rejected_not_panicking() {
+        assert!(validate_custom_resolution(0, 0, 0).is_err());
+        assert!(validate_custom_resolution(1, 1080, 60).is_err());
+        assert!(validate_custom_resolution(u32::MAX, 1080, 60).is_err());
+        assert!(validate_custom_resolution(1920, u32::MAX, 60).is_err());
+        assert!(validate_custom_resolution(1920, 1080, u32::MAX).is_err());
+        assert!(build_detailed_timing(0, 0, 0).is_err());
+        // Odd sizes cannot be packed into an even-pixel detailed timing.
+        assert!(validate_custom_resolution(1921, 1080, 144).is_err());
+        assert!(validate_custom_resolution(1920, 1081, 144).is_err());
+        // The range admits 8K, but Type-0 fields are 12-bit: 4320 lines and
+        // widths over 4095 can never be encoded, so they fail at pack time.
+        assert!(
+            build_detailed_timing(7680, 4320, 60).unwrap_err().contains("12-bit"),
+            "7680x4320 is out of range for the descriptor"
+        );
+        assert!(build_detailed_timing(4096, 2160, 60).is_err());
+        // The AutomaticPC table's 24/25/30 Hz 1280×720 rows carry a 1760-pixel
+        // horizontal front porch, past the 10-bit H-front field, so those rows
+        // can never be encoded: the add flow errors instead of falling back to
+        // CVT-RB2. Documented here so the rejection stays deliberate.
+        for hz in [24, 25, 30] {
+            let err = build_detailed_timing(1280, 720, hz).unwrap_err();
+            assert!(err.contains("10-bit"), "1280x720@{hz}: {err}");
+        }
+        assert!(build_detailed_timing(1280, 720, 48).is_ok(), "the 48 Hz row fits");
+    }
+
+    #[test]
+    fn timing_helpers_guard_degenerate_rates() {
+        // hperiod: frame period in ps minus the 460 µs blank, per active line.
+        assert_eq!(hperiod_cvt_rb2(1080, 60_000), 15_006_172);
+        // Zero and negative rates return the 460 µs floor instead of dividing.
+        assert_eq!(hperiod_cvt_rb2(1080, 0), 460_000_000);
+        assert_eq!(hperiod_cvt_rb2(1080, -1), 460_000_000);
+        // v_active 0 is clamped to 1: finite, never a panic.
+        assert_eq!(hperiod_cvt_rb2(0, 60_000), 16_206_666_666);
+        // A zero-line pedal returns the minimum 1-line front porch.
+        assert_eq!(cvt_rb2_front(0, 0), 1);
+        assert_eq!(cvt_rb2_front(480, -2), 1);
+        assert_eq!(cvt_rb2_front(1050, 60_000), 16);
+    }
+
+    #[test]
+    fn checksum_byte_makes_a_block_sum_to_zero() {
+        for sum_seed in [0u8, 1, 17, 255] {
+            let mut block = vec![sum_seed; 128];
+            block[127] = checksum_byte(&block[..127]);
+            let sum: u32 = block.iter().map(|b| *b as u32).sum();
+            assert_eq!(sum % 256, 0, "seed {sum_seed}");
+        }
+        // The helper is byte-identical to the expression it replaced.
+        let body: Vec<u8> = (0..127).map(|i| (i * 7 % 251) as u8).collect();
+        let sum: u32 = body.iter().map(|b| *b as u32).sum();
+        assert_eq!(checksum_byte(&body), ((256 - (sum % 256)) % 256) as u8);
+        assert!(block_checksum_ok(&{
+            let mut b = base_edid();
+            b[127] = checksum_byte(&b[..127]);
+            b
+        }));
+    }
+
+    #[test]
+    fn patch_round_trip_is_byte_identical_outside_the_descriptor() {
+        let base = base_edid();
+        let timing = build_detailed_timing(2560, 1440, 144).unwrap();
+        let out = patch_edid(&base, timing).unwrap();
+        // Header, chromaticity, established timings and the trailing
+        // descriptor slots are copied untouched; only 54..72 changes.
+        assert_eq!(out[..54], base[..54]);
+        assert_eq!(out[54..72], timing);
+        assert_eq!(out[72..127], base[72..127]);
+        assert_eq!(out[126], 0, "extension count is preserved, not invented");
+        // The checksum is recomputed for the patched block, and the result is
+        // a valid block by the EDID rule (sum of all 128 bytes ≡ 0).
+        assert!(block_checksum_ok(&out));
+        let sum: u32 = out.iter().map(|b| *b as u32).sum();
+        assert_eq!(sum % 256, 0);
+        // Patching is idempotent: same base + same timing = same bytes.
+        assert_eq!(patch_edid(&base, timing).unwrap(), out);
+        assert_eq!(patch_edid(&out, timing).unwrap(), out);
+    }
+
+    #[test]
+    fn patch_rejects_short_blocks_and_bad_headers() {
+        assert_eq!(
+            patch_edid(&[0u8; 127], [0u8; 18]).unwrap_err(),
+            "Base EDID shorter than 128 bytes."
+        );
+        assert!(patch_edid(&[], [0u8; 18]).is_err());
+        let mut bad = base_edid();
+        bad[0] = 0x01; // broken 00 FF FF FF FF FF FF 00 header
+        assert_eq!(patch_edid(&bad, [0u8; 18]).unwrap_err(), "Base EDID header invalid.");
+        assert!(!is_valid_edid(&bad));
+        assert!(is_valid_edid(&base_edid()));
+        assert!(!is_valid_edid(&base_edid()[..127]), "a short slice is not an EDID");
+    }
+
+    #[test]
+    fn a_corrupt_live_checksum_is_detected_and_the_patch_repairs_it() {
+        let mut base = base_edid();
+        base[100] ^= 0xFF; // byte flipped after the checksum was computed
+        assert!(!block_checksum_ok(&base), "checksum failure is detected");
+        assert!(is_valid_edid(&base), "the header check is independent of the checksum");
+        // The writer still patches (a firmware-reported checksum must not block
+        // the user) and the override it writes is valid again.
+        let out = patch_edid(&base, build_detailed_timing(1920, 1080, 240).unwrap()).unwrap();
+        assert!(block_checksum_ok(&out));
+        assert_eq!(out[100], base[100], "the corrupt byte itself is copied, not guessed");
+    }
+
+    #[test]
+    fn extension_blocks_are_counted_but_never_rewritten() {
+        let mut base = base_edid();
+        base[126] = 2; // declares two 128-byte extension blocks
+        assert_eq!(extension_block_count(&base), 2);
+        assert!(!has_all_blocks(&base), "128 bytes cannot hold the declared blocks");
+        let mut full = base.clone();
+        full.extend_from_slice(&[0u8; 256]);
+        assert!(has_all_blocks(&full));
+        // The writer emits exactly one 128-byte block and leaves the declared
+        // count alone: it writes 54..72 + the checksum, nothing else.
+        let out = patch_edid(&base, [1u8; 18]).unwrap();
+        assert_eq!(out.len(), 128);
+        assert_eq!(out[126], 2, "extension count copied from the base verbatim");
+        assert_eq!(out[72..126], base[72..126]);
+        assert_eq!(extension_block_count(&out), 2);
+        // An empty slice has no count and no blocks.
+        assert_eq!(extension_block_count(&[]), 0);
+        assert!(!has_all_blocks(&[]));
+    }
+
+    #[test]
+    fn split_pnp_accepts_only_display_paths() {
+        let ok = split_pnp(r"DISPLAY\DEL4098\5&1a2b&0&UID4352").unwrap();
+        assert_eq!(ok.0, "DEL4098");
+        assert_eq!(ok.1, "5&1a2b&0&UID4352");
+        // The enum name is case-insensitive and whitespace is trimmed.
+        assert_eq!(split_pnp(" display\\DEL4098\\1 ").unwrap().0, "DEL4098");
+        assert_eq!(split_pnp(r"DISPLAY\A\B").unwrap(), ("A".to_string(), "B".to_string()));
+        // Non-hex, ampersand-heavy instance ids are the norm for PnP, not an
+        // error: the resolver produced them.
+        assert_eq!(
+            split_pnp(r"DISPLAY\GSM5B7B\6&2f7c1d1&0&00000000").unwrap().1,
+            "6&2f7c1d1&0&00000000"
+        );
+        // Nested instance segments rejoin with their separator.
+        assert_eq!(split_pnp(r"DISPLAY\A\B\C").unwrap().1, r"B\C");
+        for bad in [
+            "",
+            "DISPLAY",
+            r"DISPLAY\",
+            r"DISPLAY\DEL4098",
+            r"DISPLAY\DEL4098\",
+            r"PCI\VEN_10DE\DEV_2484",
+            r"\\.\DISPLAY1",
+        ] {
+            assert!(split_pnp(bad).is_none(), "{bad:?} is not a DISPLAY PnP path");
+        }
+    }
+
+    #[test]
+    fn every_admitted_size_and_rate_packs_or_errors_cleanly() {
+        // Sweep the whole validation envelope: no division panic, no partially
+        // written descriptor, and every refusal carries a message.
+        let (mut ok, mut err) = (0u32, 0u32);
+        for w in [640, 641, 800, 1024, 1280, 1366, 1600, 1920, 2090, 2560, 3440, 3840, 4095, 4096, 5120, 7680] {
+            for h in [480, 481, 600, 720, 768, 900, 1050, 1080, 1200, 1440, 1600, 2160, 4095, 4096, 4320] {
+                for hz in [23, 24, 30, 48, 50, 60, 75, 100, 120, 144, 165, 240, 300, 360, 480, 500] {
+                    match build_detailed_timing(w, h, hz) {
+                        Ok(d) => {
+                            let decoded = decode(&d);
+                            assert_eq!((decoded.ha, decoded.va), (w, h), "{w}x{h}@{hz}");
+                            assert!(decoded.pclk_10khz >= 1 && decoded.pclk_10khz <= 65_535);
+                            ok += 1;
+                        }
+                        Err(e) => {
+                            assert!(!e.is_empty(), "{w}x{h}@{hz} failed without a message");
+                            err += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(ok > 0 && err > 0, "swept {ok} ok / {err} err");
+    }
+
+    #[test]
+    fn device_params_path_is_the_registry_location_for_a_pnp_id() {
+        let (dev, inst) = split_pnp(r"DISPLAY\DEL4098\5&1a2b&0&UID4352").unwrap();
+        assert_eq!(
+            device_params_path(&dev, &inst),
+            r"SYSTEM\CurrentControlSet\Enum\DISPLAY\DEL4098\5&1a2b&0&UID4352\Device Parameters"
+        );
+        assert_eq!(
+            override_path(&dev, &inst),
+            r"SYSTEM\CurrentControlSet\Enum\DISPLAY\DEL4098\5&1a2b&0&UID4352\Device Parameters\EDID_OVERRIDE"
+        );
+        // A nested instance id keeps its separator in the registry path.
+        let (dev, inst) = split_pnp(r"DISPLAY\A\B\C").unwrap();
+        assert!(device_params_path(&dev, &inst).ends_with(r"DISPLAY\A\B\C\Device Parameters"));
     }
 }
