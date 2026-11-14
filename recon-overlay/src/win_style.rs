@@ -225,10 +225,8 @@ pub fn strip_dwm(val: isize) {
     }
 }
 
-pub fn install_subclass(val: isize) {
-    unsafe {
-        let _ = SetWindowSubclass(hwnd(val), Some(subclass_proc), 0x7001, 0);
-    }
+pub fn install_subclass(val: isize) -> bool {
+    unsafe { SetWindowSubclass(hwnd(val), Some(subclass_proc), 0x7001, 0).as_bool() }
 }
 
 /// Apply the full recipe: popup, topmost, toolwindow, click-through (or raw
@@ -261,7 +259,9 @@ pub fn apply(val: isize, clickthrough: bool, rect: Option<(i32, i32, i32, i32)>)
         SetWindowLongPtrW(h, GWL_EXSTYLE, ex as i32 as isize);
 
         strip_dwm(val);
-        install_subclass(val);
+        if !install_subclass(val) {
+            eprintln!("[sidecar] WARN: HTTRANSPARENT subclass install FAILED on {val:#x}");
+        }
         if let Some((x, y, w, hgt)) = rect {
             let _ = SetWindowPos(
                 h,
@@ -281,6 +281,21 @@ pub fn apply(val: isize, clickthrough: bool, rect: Option<(i32, i32, i32, i32)>)
                 0,
                 0,
                 SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOSIZE | SWP_NOMOVE,
+            );
+        }
+        // Read back what actually landed: catches a silent SetWindowLongPtr
+        // failure or a backend re-assert between our write and now.
+        let style_after = GetWindowLongPtrW(h, GWL_STYLE) as u32;
+        let ex_after = GetWindowLongPtrW(h, GWL_EXSTYLE) as u32;
+        let want_transparent = clickthrough;
+        let has_transparent = ex_after & 0x00000020 != 0;
+        let has_layered = ex_after & 0x00080000 != 0;
+        let has_frame = style_after
+            & (0x00C00000 | 0x00040000 | 0x00010000 | 0x00020000 | 0x00080000 | 0x00800000)
+            != 0;
+        if has_transparent != want_transparent || has_layered || has_frame {
+            eprintln!(
+                "[sidecar] WARN: style readback mismatch want_ct={want_transparent} ex={ex_after:#x} style={style_after:#x}"
             );
         }
     }
