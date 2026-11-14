@@ -1,5 +1,5 @@
 /* Per-account video memory. Valorant keeps ONE GameUserSettings.ini per PC,
- * not one per Riot account — so Recon remembers the last resolution each
+ * not one per Riot account — so Outpeek remembers the last resolution each
  * account was set to, and the editor labels whose settings are open. */
 
 export interface ConfigAccountCtx {

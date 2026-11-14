@@ -1,4 +1,4 @@
-; Recon NSIS hooks — keep the remembered install directory honest.
+; Outpeek NSIS hooks — keep the remembered install directory honest.
 ;
 ; tauri-bundler writes the install directory to
 ; HKCU\Software\<publisher>\<product> (default value) and restores it blindly on
@@ -24,7 +24,7 @@
 
 !macro NSIS_HOOK_PREINSTALL
   ; .onInit restored $INSTDIR from the registry without checking it. The
-  ; template has already run SetOutPath on it, so "no recon.exe" means the
+  ; template has already run SetOutPath on it, so "no outpeek.exe" means the
   ; remembered path was stale: fall back to the default for this install mode
   ; instead of installing into it. (Checking for an empty directory is not
   ; reliable: FileExists on "dir\*.*" matches an empty directory on some

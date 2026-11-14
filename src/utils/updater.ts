@@ -174,7 +174,7 @@ export function resolveInstallGuard(
   opts?: { manual?: boolean }
 ): { block: string | null; warning: string | null } {
   const manual = opts?.manual === true;
-  const duringMatchWarning = 'Updating restarts Recon during your match — continue?';
+  const duringMatchWarning = 'Updating restarts Outpeek during your match — continue?';
   if (facts.liveMatch) {
     return manual
       ? { block: null, warning: duringMatchWarning }
@@ -189,7 +189,7 @@ export function resolveInstallGuard(
     return manual
       ? {
           block: null,
-          warning: 'Could not verify the match/overlay state. Updating restarts Recon — continue?',
+          warning: 'Could not verify the match/overlay state. Updating restarts Outpeek — continue?',
         }
       : { block: 'Could not verify the match/overlay state — try again in a moment.', warning: null };
   }

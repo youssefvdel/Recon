@@ -14,13 +14,15 @@ src-tauri/target/
 # Fetched WebView2 Fixed Runtime (169 MB) — never commit; CI fetches it.
 src-tauri/webview2-runtime/
 # Built sidecar binary (cargo xwin -> src-tauri/binaries/) — never commit;
-# CI rebuilds it from recon-overlay/.
+# CI rebuilds it from outpeek-overlay/.
 src-tauri/binaries/
 *.local
 .env
 bot/.env
 bot/node_modules/
 tsconfig.tsbuildinfo
+# Sidecar crate build output (local cargo xwin / slint builds).
+outpeek-overlay/target/
 
 # Editor directories and files
 .hermes/

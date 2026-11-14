@@ -65,7 +65,7 @@ export default function TrackerPage({ version, downloadUrl }: TrackerPageProps) 
         accent="Ten players, ranked."
         lede={
           <>
-            Recon reads the lobby while you queue, then keeps a running record of every match you play. Ranks,
+            Outpeek reads the lobby while you queue, then keeps a running record of every match you play. Ranks,
             win rates, the agents you lean on, and the skins other people actually run.
           </>
         }
@@ -93,7 +93,7 @@ export default function TrackerPage({ version, downloadUrl }: TrackerPageProps) 
           <div className="lg:col-span-3">
             <Shot
               src={SHOT.overview.src}
-              alt="The Recon player overview screen, showing a player's rank, rank points and recent form."
+              alt="The Outpeek player overview screen, showing a player's rank, rank points and recent form."
               width={SHOT.overview.width}
               height={SHOT.overview.height}
               caption="PLAYER OVERVIEW"
@@ -148,14 +148,14 @@ export default function TrackerPage({ version, downloadUrl }: TrackerPageProps) 
         <div className="mt-6 sm:mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Shot
             src={SHOT.live.src}
-            alt="The Recon live match panel, listing all ten lobby players with their ranks and party groupings."
+            alt="The Outpeek live match panel, listing all ten lobby players with their ranks and party groupings."
             width={SHOT.live.width}
             height={SHOT.live.height}
             caption="LIVE MATCH SCOUTING"
           />
           <Shot
             src={SHOT.names.src}
-            alt="Recon showing streamer-mode players whose real names were not shown in the lobby."
+            alt="Outpeek showing streamer-mode players whose real names were not shown in the lobby."
             width={SHOT.names.width}
             height={SHOT.names.height}
             caption="UNCOVERED NAMES"
@@ -169,7 +169,7 @@ export default function TrackerPage({ version, downloadUrl }: TrackerPageProps) 
         id="history"
         eyebrow="Match history"
         title="Your recent matches, with something to do about them."
-        lede="A wall of results does not help. Recon sorts your last stretch of games into the three things you can actually change."
+        lede="A wall of results does not help. Outpeek sorts your last stretch of games into the three things you can actually change."
       >
         <Steps
           steps={[
@@ -266,7 +266,7 @@ export default function TrackerPage({ version, downloadUrl }: TrackerPageProps) 
           <div className="lg:col-span-3">
             <Shot
               src={SHOT.hud.src}
-              alt="The Recon HUD in edit mode, laid over a stretched match, with each widget selected for repositioning."
+              alt="The Outpeek HUD in edit mode, laid over a stretched match, with each widget selected for repositioning."
               width={SHOT.hud.width}
               height={SHOT.hud.height}
               caption="HUD EDIT MODE"
@@ -305,7 +305,7 @@ export default function TrackerPage({ version, downloadUrl }: TrackerPageProps) 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Shot
             src={SHOT.loadout.src}
-            alt="The Recon loadout viewer showing a player's owned weapon skins and the agents they use."
+            alt="The Outpeek loadout viewer showing a player's owned weapon skins and the agents they use."
             width={SHOT.loadout.width}
             height={SHOT.loadout.height}
             caption="LOADOUT VIEWER"
@@ -322,15 +322,15 @@ export default function TrackerPage({ version, downloadUrl }: TrackerPageProps) 
 
       {/* ---------------------------------------------------------------- */}
       <Section id="limits" eyebrow="Straight answers">
-        <Callout title="What Recon will not tell you">
+        <Callout title="What Outpeek will not tell you">
           <p>
             <strong className="text-white font-semibold">There is no hidden MMR.</strong> Riot does not expose it, so
-            any product claiming to know your real rank is making it up. Recon shows the competitive rank Riot actually
+            any product claiming to know your real rank is making it up. Outpeek shows the competitive rank Riot actually
             reports, and nothing else.
           </p>
           <p>
             <strong className="text-white font-semibold">Nothing is injected and nothing is read from memory.</strong>{' '}
-            Recon only uses the local client API that already ships with the game.
+            Outpeek only uses the local client API that already ships with the game.
           </p>
           <p>
             <strong className="text-white font-semibold">Hovering a player changes nothing.</strong> Inspecting a
@@ -379,9 +379,9 @@ export default function TrackerPage({ version, downloadUrl }: TrackerPageProps) 
 /* Head tags — the page owner injects these per URL.                    */
 /* ------------------------------------------------------------------ */
 
-const TITLE = 'Valorant Tracker — Lobby Scouting, Match History & Loadouts | Recon';
+const TITLE = 'Valorant Tracker — Lobby Scouting, Match History & Loadouts | Outpeek';
 const DESCRIPTION =
-  'Recon reads your VALORANT lobby live: ten ranked players, party detection and incognito flags. Keeps match history, per-agent and per-map stats, and a click-through HUD overlay with a full loadout viewer.';
+  'Outpeek reads your VALORANT lobby live: ten ranked players, party detection and incognito flags. Keeps match history, per-agent and per-map stats, and a click-through HUD overlay with a full loadout viewer.';
 
 export const seo = {
   title: TITLE,
@@ -396,12 +396,12 @@ export const seo = {
     url: 'https://reconlab.app/tracker/',
     isPartOf: {
       '@type': 'WebSite',
-      name: 'Recon',
+      name: 'Outpeek',
       url: 'https://reconlab.app/',
     },
     about: {
       '@type': 'SoftwareApplication',
-      name: 'Recon',
+      name: 'Outpeek',
       applicationCategory: 'GameApplication',
       operatingSystem: 'Windows 10, Windows 11',
     },

@@ -52,7 +52,7 @@ use tauri::Manager;
 #[cfg(debug_assertions)]
 fn build_dev_window(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, String> {
     tauri::WebviewWindowBuilder::new(app, "dev", tauri::WebviewUrl::App("index.html#dev".into()))
-        .title("Recon \u{2022} Dev Dashboard")
+        .title("Outpeek \u{2022} Dev Dashboard")
         // 16:9. The dashboard is a multi-column grid (1 → 2 at xl → 3 at 2xl),
         // and a 1080x780 window only ever reached 2 columns with the trace log
         // squeezed. NOTE: 1920x1080 inner is larger than a 1080p screen once the
@@ -111,12 +111,12 @@ fn app_log_dir(identifier: &str) -> std::path::PathBuf {
 /// file that only grows is a file nobody keeps. 256 KB ≈ thousands of lines.
 const STARTUP_LOG_MAX_BYTES: u64 = 256 * 1024;
 
-/// Append one line to `recon-startup.log`. Pre-logger paths only; never panics,
+/// Append one line to `outpeek-startup.log`. Pre-logger paths only; never panics,
 /// never blocks startup, silently gives up if the disk is unwritable.
 fn append_startup_log(identifier: &str, level: log::Level, msg: &str) {
     let dir = app_log_dir(identifier);
     let _ = std::fs::create_dir_all(&dir);
-    let path = dir.join("recon-startup.log");
+    let path = dir.join("outpeek-startup.log");
     rotate_startup_log(&path);
     let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
@@ -134,7 +134,7 @@ fn append_startup_log(identifier: &str, level: log::Level, msg: &str) {
 }
 
 /// Rotate the pre-attach log at `STARTUP_LOG_MAX_BYTES`, keeping one previous
-/// generation as `recon-startup.log.1`. Size-based, not per-launch: a crash
+/// generation as `outpeek-startup.log.1`. Size-based, not per-launch: a crash
 /// loop must not erase the evidence of the crash before it.
 fn rotate_startup_log(path: &std::path::Path) {
     let Ok(meta) = std::fs::metadata(path) else {
@@ -148,12 +148,12 @@ fn rotate_startup_log(path: &std::path::Path) {
     let _ = std::fs::rename(path, &prev);
 }
 
-/// Markers written before the log plugin attaches. Replayed into `Recon.log`
+/// Markers written before the log plugin attaches. Replayed into `Outpeek.log`
 /// by `replay_boot_markers`, so the timeline reads in one file.
 static BOOT_MARKERS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// Startup breadcrumb. Written through `log_line`, so it lands in
-/// `Recon.log` once the plugin is attached and in `recon-startup.log` before
+/// `Outpeek.log` once the plugin is attached and in `outpeek-startup.log` before
 /// that — which is the only window where a hang is currently invisible.
 ///
 /// The sequence is the diagnosis: `run() entered` -> `preflight passed` ->
@@ -164,7 +164,7 @@ static BOOT_MARKERS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 fn boot_marker(identifier: &str, msg: &str) {
     let line = format!("[boot] {msg}");
     // Buffer only while the logger is still off — after the replay these lines
-    // are already in Recon.log and must not be replayed twice.
+    // are already in Outpeek.log and must not be replayed twice.
     if log::max_level() == log::LevelFilter::Off {
         if let Ok(mut buf) = BOOT_MARKERS.lock() {
             buf.push(line.clone());
@@ -175,7 +175,7 @@ fn boot_marker(identifier: &str, msg: &str) {
 
 /// Replay the pre-attach markers through the attached logger, once, so the four
 /// boot lines are contiguous and in order in the file a person opens first.
-/// `recon-startup.log` stays as the fallback for a run that never gets here.
+/// `outpeek-startup.log` stays as the fallback for a run that never gets here.
 fn replay_boot_markers() {
     let lines: Vec<String> = match BOOT_MARKERS.lock() {
         Ok(mut buf) => buf.drain(..).collect(),
@@ -187,7 +187,7 @@ fn replay_boot_markers() {
 }
 
 /// JS `logger.warn`/`error` → the same sink the Rust lines use, so `[riot]` and
-/// `[tracker]` diagnostics land in Recon.log instead of only in the in-memory
+/// `[tracker]` diagnostics land in Outpeek.log instead of only in the in-memory
 /// download bundle. Content comes from the redacting JS logger.
 #[tauri::command]
 fn ui_log(level: String, message: String) {
@@ -235,7 +235,7 @@ fn build_log_plugin<R: tauri::Runtime>(identifier: &str) -> tauri::plugin::Tauri
         && std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(dir.join("recon-startup.log"))
+            .open(dir.join("outpeek-startup.log"))
             .is_ok();
 
     if writable {
@@ -295,9 +295,9 @@ fn fatal_startup_error(identifier: &str, detail: &str) -> ! {
         &format!("[startup] fatal: {detail}"),
     );
     show_message_box(
-        "Recon - startup failed",
+        "Outpeek - startup failed",
         &format!(
-            "Recon could not start.\n\nRe-run the installer or check the WebView2 runtime.\n\nDetails: {detail}"
+            "Outpeek could not start.\n\nRe-run the installer or check the WebView2 runtime.\n\nDetails: {detail}"
         ),
     );
     std::process::exit(1);
@@ -307,14 +307,14 @@ fn fatal_startup_error(identifier: &str, detail: &str) -> ! {
 /// be unit-tested without a window.
 fn overlay_unavailable_message(detail: &str) -> String {
     format!(
-        "The in-game HUD window could not be created, so Recon is running without overlays.\n\nEverything else keeps working. Restart Recon, and if the HUD stays missing re-run the installer or check the WebView2 runtime.\n\nDetails: {detail}"
+        "The in-game HUD window could not be created, so Outpeek is running without overlays.\n\nEverything else keeps working. Restart Outpeek, and if the HUD stays missing re-run the installer or check the WebView2 runtime.\n\nDetails: {detail}"
     )
 }
 
 pub(crate) fn notify_overlay_unavailable(detail: &str) {
     log::warn!("[overlay] unavailable: {detail}");
     show_message_box(
-        "Recon - HUD unavailable",
+        "Outpeek - HUD unavailable",
         &overlay_unavailable_message(detail),
     );
 }
@@ -383,7 +383,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         // Our own remote-control surface for testing the running app. It can
         // execute JS and invoke commands with no authentication, so it binds to
-        // loopback only: a machine on the LAN must not be able to drive Recon.
+        // loopback only: a machine on the LAN must not be able to drive Outpeek.
         // Remote tooling reaches it through an SSH tunnel.
         .plugin(
             tauri_plugin_mcp_bridge::Builder::new()
@@ -408,7 +408,7 @@ pub fn run() {
         .manage(app_state)
         .setup(move |app| {
             // The plugin is attached by now: replay the pre-attach markers so
-            // the whole boot timeline is in Recon.log, in order, in one file.
+            // the whole boot timeline is in Outpeek.log, in order, in one file.
             replay_boot_markers();
             boot_marker(&setup_log_id, "setup reached - config windows exist");
 

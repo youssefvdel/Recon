@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Recon",
+  "productName": "Outpeek",
   "version": "../package.json",
-  "identifier": "com.recon.utility",
+  "identifier": "com.outpeek.utility",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://127.0.0.1:5173",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Recon \u2022 Stretched Resolution & Utility",
+        "title": "Outpeek \u2022 Stretched Resolution & Utility",
         "width": 1210,
         "height": 800,
         "minWidth": 1360,
@@ -62,11 +62,11 @@
     "copyright": "Copyright \u00a9 2026 Youssef Adel. All rights reserved.",
     "category": "Utility",
     "shortDescription": "Valorant Stretched Resolution & Scouting Utility",
-    "longDescription": "Recon is a competitive stretched resolution utility and real-time scout for Valorant.",
+    "longDescription": "Outpeek is a competitive stretched resolution utility and real-time scout for Valorant.",
     "homepage": "https://reconlab.app",
     "licenseFile": "../LICENSE",
     "externalBin": [
-      "binaries/recon-overlay"
+      "binaries/outpeek-overlay"
     ],
     "icon": [
       "icons/icon.ico",

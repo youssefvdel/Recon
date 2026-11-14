@@ -51,7 +51,7 @@ export default function DownloadPage({ version = DEFAULT_VERSION, downloadUrl, s
         accent="No key, no account."
         lede={
           <>
-            Recon is a single small Windows installer. It reads the VALORANT client you already have, adds a thin
+            Outpeek is a single small Windows installer. It reads the VALORANT client you already have, adds a thin
             overlay over the game, and gets out of the way. There is nothing to sign up for and nothing to paste.
           </>
         }
@@ -77,7 +77,7 @@ export default function DownloadPage({ version = DEFAULT_VERSION, downloadUrl, s
             className="mt-5 w-full px-8 py-5 rounded-xl bg-[#b6abf7] hover:bg-[#c8c0fa] text-[#1b1721] font-display font-black text-base uppercase tracking-wider flex items-center justify-center gap-3 tap-feedback active:scale-[0.97] shadow-[0_0_40px_rgba(182,171,247,0.4)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b6abf7]"
           >
             <Download className="w-5 h-5 stroke-[2.5]" />
-            <span>Download Recon {version}</span>
+            <span>Download Outpeek {version}</span>
           </a>
 
           <p className="mt-4 text-[11px] font-mono text-zinc-400 leading-relaxed">
@@ -131,7 +131,7 @@ export default function DownloadPage({ version = DEFAULT_VERSION, downloadUrl, s
           <div className="lg:col-span-2">
             <Shot
               src={SHOT_APP.src}
-              alt="The Recon desktop app window, showing its sidebar navigation and overview panel."
+              alt="The Outpeek desktop app window, showing its sidebar navigation and overview panel."
               width={SHOT_APP.width}
               height={SHOT_APP.height}
               caption="RECON DESKTOP APP"
@@ -175,7 +175,7 @@ export default function DownloadPage({ version = DEFAULT_VERSION, downloadUrl, s
               <div className="rounded-2xl border border-white/[0.08] bg-[#120d1a] p-5 sm:p-6">
                 <h3 className="font-display font-semibold text-base text-white">Read-only, start to finish</h3>
                 <p className="mt-2 text-sm text-zinc-300 leading-relaxed">
-                  Recon reads. It does not write to VALORANT or the Riot Client while a match is running, and it does not
+                  Outpeek reads. It does not write to VALORANT or the Riot Client while a match is running, and it does not
                   change anything about how the game executes.
                 </p>
               </div>
@@ -190,7 +190,7 @@ export default function DownloadPage({ version = DEFAULT_VERSION, downloadUrl, s
                 <h3 className="font-display font-semibold text-base text-white">Hovering a player does nothing</h3>
                 <p className="mt-2 text-sm text-zinc-300 leading-relaxed">
                   Inspecting a lobby entry is a local read. Locking one would be a different feature, and it is not one
-                  Recon has.
+                  Outpeek has.
                 </p>
               </div>
               <div className="rounded-2xl border border-white/[0.08] bg-[#120d1a] p-5 sm:p-6">
@@ -206,11 +206,11 @@ export default function DownloadPage({ version = DEFAULT_VERSION, downloadUrl, s
           <div className="lg:col-span-2">
             <Callout tone="good" title="No invented numbers">
               <p>
-                Recon does not display hidden MMR or any stat Riot does not publish. If a field cannot be read, it is
+                Outpeek does not display hidden MMR or any stat Riot does not publish. If a field cannot be read, it is
                 left out rather than filled in with an estimate.
               </p>
               <p>
-                The same rule applies to display state: anything Recon cannot read back from your machine is labelled{' '}
+                The same rule applies to display state: anything Outpeek cannot read back from your machine is labelled{' '}
                 <strong className="text-white font-semibold">UNVERIFIED</strong> instead of being reported as fact.
               </p>
             </Callout>
@@ -223,7 +223,7 @@ export default function DownloadPage({ version = DEFAULT_VERSION, downloadUrl, s
         id="source"
         eyebrow="Source-available"
         title="Read the code, or build it yourself."
-        lede="The repository is on GitHub. Recon is source-available rather than fully open, and the licence terms are in the repository."
+        lede="The repository is on GitHub. Outpeek is source-available rather than fully open, and the licence terms are in the repository."
       >
         <FeatureGrid cols={3}>
           <Feature
@@ -292,9 +292,9 @@ export default function DownloadPage({ version = DEFAULT_VERSION, downloadUrl, s
 /* Head tags — the page owner injects these per URL.                    */
 /* ------------------------------------------------------------------ */
 
-const TITLE = 'Download Recon — VALORANT Tracker & True Stretch | Recon';
+const TITLE = 'Download Outpeek — VALORANT Tracker & True Stretch | Outpeek';
 const DESCRIPTION =
-  'Download Recon for Windows: a VALORANT tracker, live lobby scouting, click-through HUD overlay and true 1.45:1 stretched resolution. Signed installer, read-only, no account, no key.';
+  'Download Outpeek for Windows: a VALORANT tracker, live lobby scouting, click-through HUD overlay and true 1.45:1 stretched resolution. Signed installer, read-only, no account, no key.';
 
 export const seo = {
   title: TITLE,
@@ -309,12 +309,12 @@ export const seo = {
     url: 'https://reconlab.app/download/',
     isPartOf: {
       '@type': 'WebSite',
-      name: 'Recon',
+      name: 'Outpeek',
       url: 'https://reconlab.app/',
     },
     about: {
       '@type': 'SoftwareApplication',
-      name: 'Recon',
+      name: 'Outpeek',
       applicationCategory: 'GameApplication',
       operatingSystem: 'Windows 10, Windows 11',
     },

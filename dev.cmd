@@ -1,5 +1,5 @@
 @echo off
-REM Recon — full Tauri dev app on this PC, UI served from the box on the LAN.
+REM Outpeek — full Tauri dev app on this PC, UI served from the box on the LAN.
 REM
 REM `bun run dev:remote` alone fails with "linker `link.exe` not found" unless
 REM the MSVC environment is loaded first: the linker lives inside Visual Studio

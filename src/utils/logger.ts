@@ -65,7 +65,7 @@ function pushLine(level: string, args: LogArgs): void {
     const formatted = `[${new Date(now).toISOString()}] ${body}`;
     logBuffer.push(formatted);
     if (logBuffer.length > LOG_BUFFER_MAX) logBuffer.splice(0, logBuffer.length - LOG_BUFFER_MAX);
-    // warn+ also reaches Recon.log through the Rust sink; info/debug stay here.
+    // warn+ also reaches Outpeek.log through the Rust sink; info/debug stay here.
     queueForFile(level, formatted);
   } catch {}
 }
@@ -79,7 +79,7 @@ export function getRecentLogs(n = 200): string[] {
 /* ------------------------------------------------------------------ *
  * File sink
  *
- * The ring buffer reaches the Settings → Download logs bundle, but Recon.log
+ * The ring buffer reaches the Settings → Download logs bundle, but Outpeek.log
  * only ever carried Rust lines — so the `[riot]`/`[tracker]` diagnostics added
  * for the signed-out bug were invisible in the file we actually read. warn and
  * error are batched to the Rust `ui_log` command, which writes through the same

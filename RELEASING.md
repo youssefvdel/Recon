@@ -1,4 +1,4 @@
-# Releasing Recon
+# Releasing Outpeek
 
 The in-app updater is **not** a GitHub download link. It uses Tauri's signed
 updater: the app fetches `latest.json` from the newest GitHub release, downloads
@@ -64,10 +64,10 @@ Outputs under `src-tauri/target/release/bundle/`:
 
 | Artifact | Purpose |
 | --- | --- |
-| `nsis/Recon_<v>_x64-setup.exe` | manual installer **and the updater payload** |
-| `nsis/Recon_<v>_x64-setup.exe.sig` | **its signature — without this, updates are refused** |
-| `msi/Recon_<v>_x64_en-US.msi` | enterprise install |
-| `msi/Recon_<v>_x64_en-US.msi.sig` | its signature |
+| `nsis/Outpeek_<v>_x64-setup.exe` | manual installer **and the updater payload** |
+| `nsis/Outpeek_<v>_x64-setup.exe.sig` | **its signature — without this, updates are refused** |
+| `msi/Outpeek_<v>_x64_en-US.msi` | enterprise install |
+| `msi/Outpeek_<v>_x64_en-US.msi.sig` | its signature |
 
 > Tauri v2 signs the NSIS `-setup.exe` directly. There is no `.nsis.zip` wrapper —
 > don't go looking for one.
@@ -91,7 +91,7 @@ file must be attached to the release. Tauri does not create it outside CI, so th
 a script:
 
 ```bash
-bash scripts/make-latest-json.sh 0.4.0 /tmp/recon_release_notes.md
+bash scripts/make-latest-json.sh 0.4.0 /tmp/outpeek_release_notes.md
 ```
 
 It reads the `.sig` next to the setup exe and writes the manifest
@@ -104,12 +104,12 @@ to `$TMPDIR/latest.json`. The signature must be the file **contents**, never a p
 V=0.4.0
 B=src-tauri/target/release/bundle
 gh release create "v${V}" \
-  "$B/nsis/Recon_${V}_x64-setup.exe" \
-  "$B/nsis/Recon_${V}_x64-setup.exe.sig" \
-  "$B/msi/Recon_${V}_x64_en-US.msi" \
-  "$B/msi/Recon_${V}_x64_en-US.msi.sig" \
+  "$B/nsis/Outpeek_${V}_x64-setup.exe" \
+  "$B/nsis/Outpeek_${V}_x64-setup.exe.sig" \
+  "$B/msi/Outpeek_${V}_x64_en-US.msi" \
+  "$B/msi/Outpeek_${V}_x64_en-US.msi.sig" \
   "$TMPDIR/latest.json" \
-  --title "Recon v${V}" --notes-file notes.md --latest
+  --title "Outpeek v${V}" --notes-file notes.md --latest
 ```
 
 Three assets go up: the setup exe, its `.sig`, and `latest.json` (bundle targets
@@ -154,7 +154,7 @@ gh workflow run release.yml --ref v0.5.0-alpha
 
 `.github/workflows/release.yml` builds the NSIS bundle with updater artifacts,
 signs it with `TAURI_SIGNING_PRIVATE_KEY`, generates `latest.json`, and publishes
-a GitHub Release with `Recon_<v>_x64-setup.exe`, its `.sig`, and `latest.json`.
+a GitHub Release with `Outpeek_<v>_x64-setup.exe`, its `.sig`, and `latest.json`.
 The run refuses to start unless the tag is `v*` and matches the `package.json`
 version — `bun run bump` keeps those in sync.
 
@@ -188,10 +188,10 @@ refuse the update.
 
 ## Fixed WebView2 runtime
 
-Recon ships Microsoft's WebView2 fixed-version runtime; it does not depend on the
+Outpeek ships Microsoft's WebView2 fixed-version runtime; it does not depend on the
 machine's. `bundle.windows.webviewInstallMode` is `fixedRuntime` at
 `webview2-runtime`, and at startup Tauri sets
-`WEBVIEW2_BROWSER_EXECUTABLE_FOLDER` to `<recon.exe folder>\webview2-runtime`.
+`WEBVIEW2_BROWSER_EXECUTABLE_FOLDER` to `<outpeek.exe folder>\webview2-runtime`.
 There is **no fallback**: a missing or incomplete folder opens zero windows — not
 an error dialog.
 
@@ -206,9 +206,9 @@ an error dialog.
   `$INSTDIR\webview2-runtime`. Keep both halves: the config alone ships no
   runtime; the resources entry alone does not make Tauri look there.
 
-The layout is always `Recon/recon.exe` plus `Recon/webview2-runtime/` (no
-nesting), for the installer and for `recon-portable-windows-x64.zip` alike.
-**Never hand out a bare `recon.exe`** — a "replace the exe" download is broken by
+The layout is always `Outpeek/outpeek.exe` plus `Outpeek/webview2-runtime/` (no
+nesting), for the installer and for `outpeek-portable-windows-x64.zip` alike.
+**Never hand out a bare `outpeek.exe`** — a "replace the exe" download is broken by
 design now.
 
 To bump the runtime: change `VERSION` in `scripts/fetch-webview2.mjs`, run
@@ -221,14 +221,14 @@ An installed copy must match the release's WebView2 mode. The alpha6 → alpha7
 jump changed the layout (the `webview2-runtime/` folder appeared), so a
 system-mode install cannot serve a fixed-runtime build and vice versa. The
 symptom is a process that starts but never shows a window. Fix by uninstalling
-the old copy and installing the new release — never by replacing `recon.exe` by
+the old copy and installing the new release — never by replacing `outpeek.exe` by
 hand or mixing artifacts from two modes. Windows 10 additionally needs
 AppContainer read/execute grants on the folder; see `docs/webview2-embedded.md`.
 
 The installer remembers its directory as the default value of
-`HKCU\Software\Youssef Adel\Recon`. Uninstalling now clears that value (and the
+`HKCU\Software\Youssef Adel\Outpeek`. Uninstalling now clears that value (and the
 parent keys when they are empty), and an install ignores a remembered directory
-that does not contain `recon.exe` (the directory is created before the hook
+that does not contain `outpeek.exe` (the directory is created before the hook
 runs, so an emptiness check is not reliable), so a stale probe install can no
 longer redirect a later one.
 
@@ -254,9 +254,9 @@ in the app is the early-access releases-API probe, not the payload.
 
 ## Code signing
 
-`recon.exe` downloads are Authenticode-signed in CI with a **self-signed**
+`outpeek.exe` downloads are Authenticode-signed in CI with a **self-signed**
 certificate (`CN=Youssef Adel,O=Recon,C=EG`, RSA 4096, SHA-256, 5 years from
-2026-11-07) and timestamped by DigiCert. The **"Sign recon.exe"** step in
+2026-11-07) and timestamped by DigiCert. The **"Sign outpeek.exe"** step in
 `.github/workflows/build-windows.yml` does it. When the secrets are absent (forks,
 runs without them) the step skips and the exe is unsigned.
 
@@ -278,7 +278,7 @@ Rules:
 
 ## Why the app can't just replace its own .exe
 
-Windows will not let a running process overwrite its own executable, and Recon
+Windows will not let a running process overwrite its own executable, and Outpeek
 keeps a WebView2 runtime and an overlay window alive. Every serious Windows app
 therefore hands off to a signed installer or an updater helper; the "silent
 in-place" experience is the installer running with `/S` and no UI while the app

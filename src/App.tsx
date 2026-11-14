@@ -127,12 +127,12 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (isOverlay) {
-      document.title = 'Recon • Overlay';
+      document.title = 'Outpeek • Overlay';
       document.documentElement.style.backgroundColor = 'transparent';
       document.body.style.backgroundColor = 'transparent';
       document.body.classList.add('bg-transparent');
     } else if (isDevWindow) {
-      document.title = 'Recon • Dev Dashboard';
+      document.title = 'Outpeek • Dev Dashboard';
     } else {
       // The main window's minimum size (default open size) is owned by the
       // Rust setup in src-tauri/src/lib.rs — do not re-set it from the frontend.

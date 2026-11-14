@@ -13,9 +13,9 @@ use crate::win::overlay::show_overlay;
 /// name so `setup` reads as wiring.
 pub(crate) fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     // Create System Tray Menu
-    let show_i = MenuItem::with_id(app, "show", "Show Recon", true, None::<&str>)?;
+    let show_i = MenuItem::with_id(app, "show", "Show Outpeek", true, None::<&str>)?;
     let hud_i = MenuItem::with_id(app, "hud", "Show HUD", true, None::<&str>)?;
-    let quit_i = MenuItem::with_id(app, "quit", "Quit Recon", true, None::<&str>)?;
+    let quit_i = MenuItem::with_id(app, "quit", "Quit Outpeek", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show_i, &hud_i, &quit_i])?;
 
     if let Some(icon) = app.default_window_icon() {
@@ -23,7 +23,7 @@ pub(crate) fn build_tray(app: &tauri::App) -> tauri::Result<()> {
             .icon(icon.clone())
             .menu(&menu)
             .show_menu_on_left_click(false)
-            .tooltip("Recon • Valorant Companion")
+            .tooltip("Outpeek • Valorant Companion")
             .on_menu_event(|app, event| match event.id.as_ref() {
                 "quit" => {
                     app.exit(0);

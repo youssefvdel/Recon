@@ -19,8 +19,8 @@ if (!rootEl) {
   if (typeof document !== 'undefined') {
     const message = document.createElement('div');
     message.textContent =
-      'Recon could not start: the app root element (#root) is missing from index.html. ' +
-      'This is a broken install or an incomplete update — reinstall Recon from the latest release.';
+      'Outpeek could not start: the app root element (#root) is missing from index.html. ' +
+      'This is a broken install or an incomplete update — reinstall Outpeek from the latest release.';
     message.style.cssText = [
       'position:fixed',
       'inset:0',

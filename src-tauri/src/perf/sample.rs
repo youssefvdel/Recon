@@ -1,4 +1,4 @@
-//! The sampler: one Win32/PDH pass over Recon and its own WebView2 tree.
+//! The sampler: one Win32/PDH pass over Outpeek and its own WebView2 tree.
 
 use super::model::*;
 
@@ -85,7 +85,7 @@ pub fn is_recon_webview(exe: &str) -> bool {
     exe.eq_ignore_ascii_case("msedgewebview2.exe")
 }
 
-/// PIDs of Recon's own WebView2 processes: descendants of `own_pid` whose
+/// PIDs of Outpeek's own WebView2 processes: descendants of `own_pid` whose
 /// exe is msedgewebview2.exe. The exe test has no `--type=` notion, so the
 /// browser host, GPU process, network/storage services and crashpad handler
 /// are all included alongside the per-window renderers — the sum is the whole
@@ -343,7 +343,7 @@ fn pdh_read(counter: isize, buf: &mut Vec<u8>) -> Option<Vec<(String, i64)>> {
 /// Private working set for EVERY process on the box, keyed by PID:
 /// `\Process(*)\Working Set - Private` — the same PDH counter Task Manager's
 /// "Memory" column is computed from, so a tree sum of these is directly
-/// comparable to the Recon + WebView2 group total there.
+/// comparable to the Outpeek + WebView2 group total there.
 ///
 /// PIDs come from a second wildcard counter, `\Process(*)\ID Process`, paired with
 /// the first by instance index. Instance names are compared as a guard: if the

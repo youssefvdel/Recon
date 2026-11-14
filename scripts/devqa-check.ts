@@ -344,7 +344,7 @@ check('poll loop stamps live phase', trackerSrc.includes('setTrnMatchPhase(phase
 check('idle path stamps idle (no stale coregame pause)', trackerSrc.includes("setTrnMatchPhase('idle')"), true);
 check('pause gate reads the phase', proxySrc.includes('game_foreground: bool, phase: &str'), true);
 check('pause is foreground-only (no rect check)', proxySrc.includes('fn game_has_focus') && !proxySrc.includes('is_window_borderless_fullscreen'), true);
-check('tabbed-out never pauses (sees Recon, zero FPS risk)', proxyAll.includes('"tabbed-out phase: {phase}"'), true);
+check('tabbed-out never pauses (sees Outpeek, zero FPS risk)', proxyAll.includes('"tabbed-out phase: {phase}"'), true);
 check('pregame never pauses', proxySrc.includes('"pregame" | "lobby" | "menu" | "menus" | "idle" => false'), true);
 check('in-match pause keeps EDGE_PAUSED shape', proxySrc.includes('EDGE_PAUSED game fullscreen'), true);
 

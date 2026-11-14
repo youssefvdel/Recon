@@ -38,7 +38,7 @@ pub(super) fn pause_truth_table() {
     assert!(should_pause(true, true, "", false));
     assert!(should_pause(true, true, "bogus", false));
     // Tabbed out (present, not foreground): ALWAYS fetch, even mid-match
-    // or unknown — the user is looking at Recon, zero FPS risk. (Live
+    // or unknown — the user is looking at Outpeek, zero FPS risk. (Live
     // proof: rect-only borderless detection kept a tabbed-out window
     // "fullscreen" forever.)
     for phase in ["coregame", "ingame", "", "bogus", "pregame", "idle"] {

@@ -6,6 +6,12 @@ use tauri::State;
 use crate::display;
 use crate::state::AppState;
 
+/// `HKCU\...\Run` value name for the login launch. Renamed with the product;
+/// the old names are still deleted on every write so an upgraded install
+/// cannot end up with two boot entries.
+const AUTOSTART_VALUE: &str = "Outpeek";
+const LEGACY_AUTOSTART_VALUES: [&str; 2] = ["Recon", "Aspect"];
+
 #[tauri::command]
 pub(crate) fn get_shortcut_binding() -> Result<display::ShortcutBinding, String> {
     Ok(display::load_saved_hotkey())
@@ -29,10 +35,9 @@ pub(crate) fn get_autostart_enabled() -> Result<bool, String> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let run = hkcu.open_subkey_with_flags("Software\\Microsoft\\Windows\\CurrentVersion\\Run", KEY_READ)
         .map_err(|e| format!("Failed to open Run key: {}", e))?;
-    match run.get_value::<String, _>("Recon") {
-        Ok(_) => Ok(true),
-        Err(_) => Ok(false),
-    }
+    // A pre-rename install still boots through its old value name; count it as on.
+    Ok(run.get_value::<String, _>(AUTOSTART_VALUE).is_ok()
+        || LEGACY_AUTOSTART_VALUES.iter().any(|v| run.get_value::<String, _>(v).is_ok()))
 }
 
 #[tauri::command]
@@ -52,13 +57,17 @@ pub(crate) fn set_autostart_enabled(enabled: bool) -> Result<bool, String> {
         } else {
             format!("\"{}\"", exe_path.to_string_lossy())
         };
-        run.set_value("Recon", &exe_str)
+        run.set_value(AUTOSTART_VALUE, &exe_str)
             .map_err(|e| format!("Failed to set registry value: {}", e))?;
-        // Drop the legacy pre-rename entry so the app doesn't boot twice.
-        let _ = run.delete_value("Aspect");
+        // Drop legacy pre-rename entries so the app doesn't boot twice.
+        for legacy in LEGACY_AUTOSTART_VALUES {
+            let _ = run.delete_value(legacy);
+        }
     } else {
-        let _ = run.delete_value("Aspect");
-        let _ = run.delete_value("Recon");
+        for legacy in LEGACY_AUTOSTART_VALUES {
+            let _ = run.delete_value(legacy);
+        }
+        let _ = run.delete_value(AUTOSTART_VALUE);
     }
     Ok(enabled)
 }

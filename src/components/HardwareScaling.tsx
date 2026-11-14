@@ -219,7 +219,7 @@ export const HardwareScaling: React.FC<HardwareScalingProps> = ({ gpuInfo }) => 
                       ) : (
                         <span
                           className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border border-amber-400/40 bg-amber-400/10 text-amber-400"
-                          data-tip="Recon cannot read this value back from the driver — the vendor controls it"
+                          data-tip="Outpeek cannot read this value back from the driver — the vendor controls it"
                         >
                           UNVERIFIED
                         </span>

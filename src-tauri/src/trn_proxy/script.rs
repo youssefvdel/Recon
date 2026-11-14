@@ -29,7 +29,7 @@ pub(super) fn validate_path(path: &str) -> Result<(), String> {
 /// Pause iff Valorant is the FOREGROUND window AND the match is live
 /// (coregame/ingame/unknown) — the only real FPS risk is the user watching
 /// live gameplay. Fetch freely when pregame/lobby/menus is detected, or when
-/// the game is not foreground (tabbed out looking at Recon: zero FPS risk).
+/// the game is not foreground (tabbed out looking at Outpeek: zero FPS risk).
 /// Rect checks are deliberately excluded: a tabbed-out borderless window
 /// keeps its size, so rect-only detection over-blocks forever.
 /// Exclusive-fullscreen always holds focus while visible, so it stays

@@ -42,8 +42,8 @@ use winreg::{RegKey, RegValue};
 // Validation
 // ---------------------------------------------------------------------------
 
-pub const ADMIN_ADD_ERR: &str = "Requires admin: run Recon as administrator to add custom resolutions (EDID override needs elevated registry write).";
-pub const ADMIN_REMOVE_ERR: &str = "Requires admin: run Recon as administrator to remove EDID overrides (needs elevated registry write).";
+pub const ADMIN_ADD_ERR: &str = "Requires admin: run Outpeek as administrator to add custom resolutions (EDID override needs elevated registry write).";
+pub const ADMIN_REMOVE_ERR: &str = "Requires admin: run Outpeek as administrator to remove EDID overrides (needs elevated registry write).";
 
 pub fn validate_custom_resolution(w: u32, h: u32, hz: u32) -> Result<(), String> {
     if w < 640 || w > 7680 {

@@ -19,7 +19,7 @@ const num = (v: unknown): number => {
  *
  * tracker.gg has no API key and sits behind Cloudflare. Bursty traffic earns
  * HTTP 429 (Cloudflare Error 1015, "you are being rate limited") and, if we
- * keep firing, 403 bot-blocks. Recon easily bursts: a refresh pulls the
+ * keep firing, 403 bot-blocks. Outpeek easily bursts: a refresh pulls the
  * profile, act stats, agents, maps and three previous acts; the live-match
  * poll fires a call per lobby player; and TrackerAgents/TrackerMaps fan out
  * with Promise.all over several acts at once. Caches were in-memory only, so

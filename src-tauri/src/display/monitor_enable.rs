@@ -51,7 +51,7 @@ pub fn set_monitor_device_enabled(
     if !is_process_elevated() {
         log::warn!("[display] device {} denied: not elevated", action);
         return Err(
-            "Requires admin: run Recon as administrator to enable/disable monitor devices in Device Manager.".to_string(),
+            "Requires admin: run Outpeek as administrator to enable/disable monitor devices in Device Manager.".to_string(),
         );
     }
 
@@ -261,7 +261,7 @@ pub fn set_monitor_device_enabled(
                             || code.to_lowercase().contains("privilege")
                         {
                             attempt_err = Some(
-                                "Requires admin: run Recon as administrator to enable/disable monitor devices in Device Manager."
+                                "Requires admin: run Outpeek as administrator to enable/disable monitor devices in Device Manager."
                                     .to_string(),
                             );
                         } else {
@@ -297,7 +297,7 @@ pub fn set_monitor_device_enabled(
                                     || code.to_lowercase().contains("privilege")
                                 {
                                     attempt_err = Some(
-                                        "Requires admin: run Recon as administrator to enable/disable monitor devices in Device Manager."
+                                        "Requires admin: run Outpeek as administrator to enable/disable monitor devices in Device Manager."
                                             .to_string(),
                                     );
                                 } else {

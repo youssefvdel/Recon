@@ -1,7 +1,7 @@
-# Recon
+# Outpeek
 
 <div align="center">
-  <img src="src-tauri/icons/icon.png" width="96" height="96" alt="Recon" />
+  <img src="src-tauri/icons/icon.png" width="96" height="96" alt="Outpeek" />
   <h3>VALORANT esports companion &amp; competitive display toolkit</h3>
   <p>Live lobby scouting, in-game HUD widgets and true stretched resolution — read-only, zero injection.</p>
 
@@ -98,12 +98,12 @@ Grab the newest build from the [releases page](https://github.com/youssefvdel/Re
 
 | Asset | Notes |
 | :--- | :--- |
-| `Recon_<version>_x64-setup.exe` | Recommended. Standard Windows installer. |
-| `Recon_<version>_x64_en-US.msi` | For managed/enterprise deployment. |
+| `Outpeek_<version>_x64-setup.exe` | Recommended. Standard Windows installer. |
+| `Outpeek_<version>_x64_en-US.msi` | For managed/enterprise deployment. |
 
 ### Updates
 
-Recon updates itself. It fetches a signed manifest from the latest release, **verifies
+Outpeek updates itself. It fetches a signed manifest from the latest release, **verifies
 the download against its signing key**, installs quietly and relaunches — no browser,
 no installer wizard. An update that fails signature verification is refused.
 
@@ -138,7 +138,7 @@ bun install
 | `bun run lint` | Lint |
 | `bun run bump -- X.Y.Z` | Bump the version in **both** `package.json` and `Cargo.toml` |
 
-Rust builds land in `src-tauri/target/release/recon.exe`; installers in
+Rust builds land in `src-tauri/target/release/outpeek.exe`; installers in
 `src-tauri/target/release/bundle/`.
 
 > Always bump with `bun run bump`. The updater reads the *crate* version
@@ -149,7 +149,7 @@ Rust builds land in `src-tauri/target/release/recon.exe`; installers in
 
 ## Where the data comes from — and what isn't obtainable
 
-Recon deliberately documents its data sources, because some of them are dead ends.
+Outpeek deliberately documents its data sources, because some of them are dead ends.
 [`ROADMAP.md`](ROADMAP.md) records each finding, with evidence, so nobody
 re-investigates them:
 

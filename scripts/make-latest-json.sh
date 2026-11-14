@@ -7,7 +7,7 @@ V="${1:?usage: make-latest-json.sh <version> [notes-file]}"
 NOTES_FILE="${2:-}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 NSIS="$ROOT/src-tauri/target/release/bundle/nsis"
-EXE_NAME="Recon_${V}_x64-setup.exe"
+EXE_NAME="Outpeek_${V}_x64-setup.exe"
 SIG_FILE="$NSIS/${EXE_NAME}.sig"
 
 [ -f "$NSIS/$EXE_NAME" ] || { echo "missing $NSIS/$EXE_NAME" >&2; exit 1; }

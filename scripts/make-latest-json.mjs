@@ -17,7 +17,7 @@ const out = process.argv[4] || join(tmpdir(), 'latest.json');
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const nsis = join(root, 'src-tauri', 'target', 'release', 'bundle', 'nsis');
-const exeName = `Recon_${v}_x64-setup.exe`;
+const exeName = `Outpeek_${v}_x64-setup.exe`;
 const sigFile = join(nsis, `${exeName}.sig`);
 
 if (!existsSync(join(nsis, exeName))) {

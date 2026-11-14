@@ -47,7 +47,7 @@ import {
 } from '../utils/riotChat';
 
 /* ------------------------------------------------------------------ */
-/* Riot Chat — the Riot Client's own social surface, inside Recon.     */
+/* Riot Chat — the Riot Client's own social surface, inside Outpeek.     */
 /*                                                                     */
 /* Left rail: friends (with live presence), incoming/outgoing          */
 /* requests, and the blocklist. Right pane: the 1:1 thread + composer. */

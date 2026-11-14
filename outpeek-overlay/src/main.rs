@@ -3,7 +3,7 @@
 // user's screen at every spawn — the twin lesson). Stdin/stdout pipes are
 // inherited handles and keep working without a console.
 
-//! Recon overlay sidecar: a native Slint HUD window driven by the main app.
+//! Outpeek overlay sidecar: a native Slint HUD window driven by the main app.
 //!
 //! The main app owns every fact; this process only renders. Facts arrive as
 //! NDJSON objects on stdin (partial updates, `seq` for ordering); UI events
@@ -157,7 +157,7 @@ fn emit_event(v: serde_json::Value) {
 
 fn log_line(msg: &str) {
     let mut err = std::io::stderr().lock();
-    let _ = writeln!(err, "[recon-overlay] {msg}");
+    let _ = writeln!(err, "[outpeek-overlay] {msg}");
     let _ = err.flush();
 }
 
@@ -390,7 +390,7 @@ fn current_hwnd(win: &OverlayWindow) -> Option<isize> {
 }
 
 fn usage() -> &'static str {
-    "usage: recon-overlay [--parent-pid N] [--probe] [--show-test SECS] [--soak SECS]"
+    "usage: outpeek-overlay [--parent-pid N] [--probe] [--show-test SECS] [--soak SECS]"
 }
 
 fn main() {

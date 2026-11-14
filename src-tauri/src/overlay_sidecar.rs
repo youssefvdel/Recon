@@ -1,4 +1,4 @@
-//! `recon-overlay` sidecar lifecycle: spawn, feed, respawn, kill.
+//! `outpeek-overlay` sidecar lifecycle: spawn, feed, respawn, kill.
 //!
 //! The sidecar is a separate Slint binary declared in `tauri.conf.json`
 //! (`externalBin`), launched deferred like the TS overlay build (~700 ms),
@@ -25,9 +25,9 @@ static FACT_SEQ: AtomicU64 = AtomicU64::new(0);
 fn candidate_names() -> [&'static str; 2] {
     [
         // Tauri externalBin layout: binaries/<name>-<target-triple>.exe
-        "recon-overlay-x86_64-pc-windows-msvc.exe",
+        "outpeek-overlay-x86_64-pc-windows-msvc.exe",
         // Dev/manual drop next to the exe.
-        "recon-overlay.exe",
+        "outpeek-overlay.exe",
     ]
 }
 

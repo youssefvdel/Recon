@@ -1,10 +1,10 @@
-# AGENTS.md — Recon
+# AGENTS.md — Outpeek
 
 Instructions for AI coding agents (opencode and Kilo both auto-load this file). Human docs: `README.md`, `ROADMAP.md`, `RELEASING.md`.
 
 ## Project overview
 
-Recon is a Windows desktop VALORANT companion + competitive display toolkit. Tauri v2 app: live lobby scouting (rank, RR, parties, incognito resolution), in-game HUD overlays, true stretched resolution (1.45:1), sensitivity matcher, resolution switcher with safe-mode watchdog, VALORANT config editor, GPU scaling report.
+Outpeek is a Windows desktop VALORANT companion + competitive display toolkit. Tauri v2 app: live lobby scouting (rank, RR, parties, incognito resolution), in-game HUD overlays, true stretched resolution (1.45:1), sensitivity matcher, resolution switcher with safe-mode watchdog, VALORANT config editor, GPU scaling report.
 
 Safety rules (non-negotiable): read-only. No memory reading, no injection, no mutating Riot calls. Hovering an agent is fine; locking one is not. Never claim raw/hidden MMR — Riot does not expose it (see `ROADMAP.md`). Never display a GPU/display state that was not read back from the machine — mark unverifiable rows UNVERIFIED.
 
@@ -22,7 +22,7 @@ Note: "agents" in this codebase means VALORANT game characters (`TrackerAgents.t
 
 - `src/` — React frontend: `App.tsx`, `main.tsx`, `types.ts`, `components/` (~35 views: tracker, overlay, stretch, config), `hooks/`, `utils/` (ipc, tracker, trn, riotChat, store, updater), `assets/`.
 - `src-tauri/src/` — Rust backend: `lib.rs` (commands/state), `main.rs`, `display.rs`, `custom_res.rs`, `gpu.rs`, `game_config.rs`, `tracker.rs`, `trn_proxy.rs`, `calculator.rs`, `accounts.rs`, `perf.rs`, `shortcuts.rs`, `window_manager.rs`, `updater.rs`.
-- `src-tauri/` — `Cargo.toml` (crate `recon`, version must match root `package.json`), `tauri.conf.json` (windows: `main`, `overlay`, `dev`), `icons/`, `capabilities/`.
+- `src-tauri/` — `Cargo.toml` (crate `outpeek`, version must match root `package.json`), `tauri.conf.json` (windows: `main`, `overlay`, `dev`), `icons/`, `capabilities/`.
 - `scripts/` — Bun/Node checks: `bump-version.js`, `*-check.ts` (loadout, devqa, perf, trn-*, match-server, party-color, consent, live-poll, cooldown-chrome).
 - `website/` — standalone Vite + React + Tailwind marketing site. Own `package.json`, `bun.lock`.
 - `dist/` — Vite frontend output (Tauri `frontendDist`). Generated, never edit.
@@ -36,7 +36,7 @@ bun install                  # install root deps
 bun run dev                  # app with hot-reload UI (Vite on 127.0.0.1:5173, strictPort)
 bun run dev:ui               # Vite frontend only (browser preview, no Rust)
 bun run build:ui             # type-check (tsc -b) + vite build -> dist/
-bun run build                # UI + Rust, no installer -> src-tauri/target/release/recon.exe
+bun run build                # UI + Rust, no installer -> src-tauri/target/release/outpeek.exe
 bun run build:bundle          # full release -> src-tauri/target/release/bundle/
 bun run lint                 # oxlint
 bun run bump -- X.Y.Z        # bump version in BOTH package.json and Cargo.toml (always use this)

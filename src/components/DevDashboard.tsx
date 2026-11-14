@@ -431,7 +431,7 @@ export function trnExportReport(exported: number, held: number, verb: 'Copied' |
       ? 'Nothing to export — no TRN trace lines held yet. Open the Live Match tab (or drive any TRN request) so the backend emits some, then export again.'
       : `Nothing exported — 0 of ${held} held line(s) selected. Raise the line count above 0.`;
   }
-  const tail = verb === 'Copied' ? 'to clipboard' : 'as recon-trn-trace-*.txt';
+  const tail = verb === 'Copied' ? 'to clipboard' : 'as outpeek-trn-trace-*.txt';
   return `${verb} ${exported} line${exported === 1 ? '' : 's'} ${tail}${exported < held ? ` (of ${held} held)` : ''}`;
 }
 
@@ -1369,7 +1369,7 @@ export const DevDashboard: React.FC = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `recon-trn-trace-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+      a.download = `outpeek-trn-trace-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -1523,11 +1523,11 @@ export const DevDashboard: React.FC = () => {
           </span>
         </div>
         <p className="text-[11px] text-m3-outline mb-2.5">
-          Recon&apos;s full footprint: <span className="text-m3-on-surface font-semibold">private working set</span> summed over the
+          Outpeek&apos;s full footprint: <span className="text-m3-on-surface font-semibold">private working set</span> summed over the
           backend + <span className="text-m3-on-surface font-semibold">every WebView2 process in our own tree</span> (browser host, GPU,
           renderers, network/storage utility services, crashpad) — tree-walked from our PID, so other apps&apos; views are excluded.
           Private working set is resident pages no other process shares — RAM actually in use, not pagefile commit — read from the same
-          Windows counter Task Manager&apos;s Memory column is computed from, so compare it to Task Manager&apos;s Recon + WebView2 group
+          Windows counter Task Manager&apos;s Memory column is computed from, so compare it to Task Manager&apos;s Outpeek + WebView2 group
           total directly. This series used to be private commit, which read several times higher for the very same tree.
           {perfDegraded ? (
             <>
@@ -1547,7 +1547,7 @@ export const DevDashboard: React.FC = () => {
           <span className="text-m3-on-surface font-semibold">{perfCpuProcs || 'backend + WebView2'} processes in our own tree</span> — the
           backend plus every msedgewebview2.exe child, per-process <span className="text-m3-on-surface font-semibold">kernel+user time summed</span>{' '}
           (not averaged) over the poll interval, as a share of all cores. That is the same set and the same normalisation Task Manager uses for a
-          Recon + WebView2 group, so the two are directly comparable. The residual difference is the averaging window: this is a {PERF_POLL_MS / 1000}s
+          Outpeek + WebView2 group, so the two are directly comparable. The residual difference is the averaging window: this is a {PERF_POLL_MS / 1000}s
           delta and Task Manager refreshes on its own much shorter cycle, so a number that is actively moving will differ by whatever the load did
           between the two reads. It used to read the backend handle alone, which is why a busy renderer showed as ~0.1% here and ~10% in Task
           Manager.

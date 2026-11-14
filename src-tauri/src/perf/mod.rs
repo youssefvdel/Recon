@@ -1,7 +1,7 @@
-//! Dev-only Recon footprint timeline (backend + own WebViews resident bytes,
+//! Dev-only Outpeek footprint timeline (backend + own WebViews resident bytes,
 //! and CPU %).
 //!
-//! Full footprint, not backend-only: the backend process plus ONLY Recon's
+//! Full footprint, not backend-only: the backend process plus ONLY Outpeek's
 //! own WebView2 process tree (main/dev/overlay/trn-proxy windows), attributed
 //! by process tree — descendants of our own PID whose exe is
 //! msedgewebview2.exe. That covers the whole set, not just renderers: one
@@ -32,7 +32,7 @@
 //!
 //! Private working set comes from `\Process(*)\Working Set - Private`, the PDH
 //! counter Task Manager's own Memory column is computed from, so a tree sum here
-//! is directly comparable to the Recon + WebView2 group total there. PIDs come
+//! is directly comparable to the Outpeek + WebView2 group total there. PIDs come
 //! from a second wildcard counter (`\Process(*)\ID Process`) matched to the
 //! first by instance index, with the instance names compared as a guard.
 //!

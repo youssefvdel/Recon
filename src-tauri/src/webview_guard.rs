@@ -1,7 +1,7 @@
 // WebView2 runtime guard for debloated Windows machines.
 //
 // Valorant players commonly run debloated Windows images with the WebView2
-// runtime stripped out. Tauri renders Recon through WebView2 (Edge Chromium),
+// runtime stripped out. Tauri renders Outpeek through WebView2 (Edge Chromium),
 // so without it the app cannot create its window and dies with a cryptic
 // error. This check runs first in `run()`: if no runtime is detected we show
 // a plain-English message box, open the official Microsoft installer, and
@@ -85,8 +85,8 @@ fn show_missing_runtime_dialog() {
         // Keep the message short: debloat users need the fix, not the internals.
         let _ = MessageBoxW(
             HWND(std::ptr::null_mut()),
-            w!("Recon cannot start because the WebView2 runtime is missing.\n\nDebloated Windows images often remove it. Press OK to open the official Microsoft installer, run it, then start Recon again."),
-            w!("Recon - WebView2 runtime missing"),
+            w!("Outpeek cannot start because the WebView2 runtime is missing.\n\nDebloated Windows images often remove it. Press OK to open the official Microsoft installer, run it, then start Outpeek again."),
+            w!("Outpeek - WebView2 runtime missing"),
             MB_OK | MB_ICONERROR,
         );
         // Best effort: open the evergreen standalone installer in the browser.
@@ -111,7 +111,7 @@ pub fn ensure_webview2_or_exit(identifier: &str) {
         return;
     }
     // This runs before `Builder::run`, so the log plugin is not attached yet:
-    // `crate::log_line` falls back to appending recon-startup.log directly.
+    // `crate::log_line` falls back to appending outpeek-startup.log directly.
     crate::log_line(
         identifier,
         log::Level::Warn,

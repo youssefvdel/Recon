@@ -23,7 +23,7 @@ const WDDM_SCALING_FULLSCREEN: u32 = 3;
 /* ------------------------------------------------------------------ *
  * LEGACY VENDOR KEYS — NEVER WRITE THESE AGAIN.
  *
- * Older Recon builds wrote `Dal*` (AMD), `ScaleOption` (Intel) and
+ * Older Outpeek builds wrote `Dal*` (AMD), `ScaleOption` (Intel) and
  * `DxgkUsePhysicalMode` (WDDM) straight into the display adapter class key.
  * Measured reality on user machines:
  *   • No effect — the GPU scaling value Windows/Adrenalin actually honours
@@ -52,7 +52,7 @@ const LEGACY_VENDOR_VALUES: &[&str] = &[
     "DisableLetterboxing",
 ];
 
-/// Heal machines that ran an older Recon: delete the vendor/driver keys we
+/// Heal machines that ran an older Outpeek: delete the vendor/driver keys we
 /// used to write. Idempotent and cheap (registry-only, no reboot). Left in
 /// `DalNonStandardModesBCD` on purpose — it is inert on current drivers and
 /// the user may hold legitimate Adrenaline custom modes in it.
@@ -335,17 +335,17 @@ pub fn detect_gpu() -> GpuInfo {
 
     let mut instructions: Vec<String> = match vendor {
         GpuVendor::Nvidia => vec![
-            "Recon sets Windows full-screen (stretched) scaling via the display API.".into(),
+            "Outpeek sets Windows full-screen (stretched) scaling via the display API.".into(),
             "In NVIDIA Control Panel → Adjust desktop size and position: Scaling mode 'Full-screen', 'Perform scaling on: GPU'.".into(),
-            "DirectFlip low-latency scanout is applied by Recon.".into(),
+            "DirectFlip low-latency scanout is applied by Outpeek.".into(),
         ],
         GpuVendor::Amd => vec![
-            "Recon sets Windows full-screen (stretched) scaling via the display API.".into(),
+            "Outpeek sets Windows full-screen (stretched) scaling via the display API.".into(),
             "In AMD Software → Display: turn GPU Scaling on and pick 'Full panel'.".into(),
-            "AMD owns those driver settings — Recon deliberately does not write driver keys (they broke scaling and HDMI audio on AMD systems).".into(),
+            "AMD owns those driver settings — Outpeek deliberately does not write driver keys (they broke scaling and HDMI audio on AMD systems).".into(),
         ],
         GpuVendor::Intel => vec![
-            "Recon sets Windows full-screen (stretched) scaling via the display API.".into(),
+            "Outpeek sets Windows full-screen (stretched) scaling via the display API.".into(),
             "In Intel Graphics Command Center → Display: set Scale to 'Stretch' if you need driver-level scaling.".into(),
         ],
         GpuVendor::Unknown => vec![
@@ -468,7 +468,7 @@ fn eval_setting(
                 (
                     saved.gpu_scaling_engine,
                     false,
-                    "Driver-level GPU scaling is vendor-owned (AMD Software / NVIDIA Control Panel). Recon applies Windows full-screen scaling; it no longer writes driver keys.".into(),
+                    "Driver-level GPU scaling is vendor-owned (AMD Software / NVIDIA Control Panel). Outpeek applies Windows full-screen scaling; it no longer writes driver keys.".into(),
                 )
             }
         }
@@ -516,7 +516,7 @@ fn eval_setting(
                 (
                     saved.integer_scaling_bypass,
                     false,
-                    "Integer scaling is vendor-owned; Recon removes the bars via Windows full-screen scaling instead".into(),
+                    "Integer scaling is vendor-owned; Outpeek removes the bars via Windows full-screen scaling instead".into(),
                 )
             }
         }
@@ -778,7 +778,7 @@ fn set_hklm_dword(subkey_path: &str, value_name: &str, val: u32) -> bool {
 /// Elevation hint appended whenever an HKLM/driver write doesn't stick.
 fn admin_hint(what: &str) -> String {
     format!(
-        "{} didn't stick (no admin rights): relaunch Recon as administrator and toggle again.",
+        "{} didn't stick (no admin rights): relaunch Outpeek as administrator and toggle again.",
         what
     )
 }
@@ -971,7 +971,7 @@ pub fn auto_configure_all_gpu_settings() -> Result<(String, GpuSettingsReport), 
     let report = get_gpu_settings_report();
 
     let msg = format!(
-        "Auto-applied GPU settings: {} active display path(s) set to Full-Screen Stretched (Windows CCD + WDDM scaling), letterboxing bypassed in {} game config(s), DirectFlip low-latency scanout on{}. Vendor driver keys are left to the GPU vendor — Recon no longer writes them{}.",
+        "Auto-applied GPU settings: {} active display path(s) set to Full-Screen Stretched (Windows CCD + WDDM scaling), letterboxing bypassed in {} game config(s), DirectFlip low-latency scanout on{}. Vendor driver keys are left to the GPU vendor — Outpeek no longer writes them{}.",
         ccd_res,
         config_count,
         if purged > 0 {

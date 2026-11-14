@@ -1,6 +1,6 @@
-# Recon — Official Website & Landing Page
+# Outpeek — Official Website & Landing Page
 
-Official responsive landing page for **Recon**, the Esport-Grade Stretched Resolution & Real-Time Scout Utility for Valorant.
+Official responsive landing page for **Outpeek**, the Esport-Grade Stretched Resolution & Real-Time Scout Utility for Valorant.
 
 🌐 **Live URL**: [https://reconlab.app](https://reconlab.app) (or [https://youssefvdel.github.io/](https://youssefvdel.github.io/))  
 ⚡ **App Repository**: [https://github.com/youssefvdel/Recon](https://github.com/youssefvdel/Recon)

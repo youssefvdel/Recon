@@ -93,7 +93,7 @@ pub fn make_borderless(hwnd_val: isize) -> Result<String, String> {
         // style change — the second pass wins.
         //
         // SWP_NOACTIVATE | SWP_NOZORDER are load-bearing: without them this
-        // raises AND activates the game, so every auto-apply buried Recon
+        // raises AND activates the game, so every auto-apply buried Outpeek
         // behind Valorant and forced an alt-tab. The game does not need
         // z-order or activation to be borderless — only style + geometry.
         for _ in 0..2 {

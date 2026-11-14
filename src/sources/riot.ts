@@ -1019,7 +1019,7 @@ export async function resolvePlayerNames(
  * Permanently remember Riot IDs from a trusted source (post-game
  * match-details payload, live presences). This is how strict-hidden players
  * get unmasked: Riot blanks their live name-service entry, but reveals the
- * real gameName/tagLine after the match — once seen, Recon knows them in
+ * real gameName/tagLine after the match — once seen, Outpeek knows them in
  * every future lobby, even while hidden.
  */
 export function rememberPlayerNames(entries: { puuid: string; name: string; tag: string }[]): void {

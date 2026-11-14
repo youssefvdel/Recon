@@ -6,7 +6,7 @@ fn main() {
     unsafe {
         use windows::core::w;
         use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
-        let _ = SetCurrentProcessExplicitAppUserModelID(w!("com.recon.utility"));
+        let _ = SetCurrentProcessExplicitAppUserModelID(w!("com.outpeek.utility"));
     }
 
     std::env::set_var(

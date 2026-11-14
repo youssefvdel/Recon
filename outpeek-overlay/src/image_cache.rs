@@ -20,7 +20,7 @@ pub fn cache_dir() -> PathBuf {
         std::env::var("LOCALAPPDATA")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from(r"C:\Users\Administrator\AppData\Local"))
-            .join("Recon")
+            .join("Outpeek")
             .join("overlay-images")
     }
     #[cfg(not(windows))]
@@ -32,7 +32,7 @@ pub fn cache_dir() -> PathBuf {
                     .map(|h| PathBuf::from(h).join(".cache"))
                     .unwrap_or_else(|_| std::env::temp_dir())
             })
-            .join("recon-overlay-images")
+            .join("outpeek-overlay-images")
     }
 }
 

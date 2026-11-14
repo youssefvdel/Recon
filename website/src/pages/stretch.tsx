@@ -101,7 +101,7 @@ export default function StretchPage({ version, downloadUrl }: StretchPageProps) 
         id="preview"
         eyebrow="Preview first"
         title="See the stretch before you play a round in it."
-        lede="Recon renders the preview with the same geometry the game will use, so what you see on this page is what lands in your lobby."
+        lede="Outpeek renders the preview with the same geometry the game will use, so what you see on this page is what lands in your lobby."
       >
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 lg:gap-8 items-start">
           <div className="lg:col-span-3">
@@ -134,7 +134,7 @@ export default function StretchPage({ version, downloadUrl }: StretchPageProps) 
         id="apply"
         eyebrow="Apply"
         title="One click, and it puts the game back if anything goes wrong."
-        lede="A resolution change that leaves you staring at a black screen is a bad afternoon. Recon applies the change and watches for the result."
+        lede="A resolution change that leaves you staring at a black screen is a bad afternoon. Outpeek applies the change and watches for the result."
       >
         <Steps
           steps={[
@@ -143,7 +143,7 @@ export default function StretchPage({ version, downloadUrl }: StretchPageProps) 
               body: 'Choose a preset or type any resolution. The wizard shows the resulting ratio before you commit to it.',
             },
             {
-              title: 'Recon applies it',
+              title: 'Outpeek applies it',
               body: 'The resolution and the borderless switch are set together, so the game comes back at the size you asked for.',
             },
             {
@@ -157,7 +157,7 @@ export default function StretchPage({ version, downloadUrl }: StretchPageProps) 
           <div className="lg:col-span-3">
             <Shot
               src={SHOT.resolution.src}
-              alt="The Recon resolution screen listing custom resolutions with their aspect ratio and borderless toggle."
+              alt="The Outpeek resolution screen listing custom resolutions with their aspect ratio and borderless toggle."
               width={SHOT.resolution.width}
               height={SHOT.resolution.height}
               caption="CUSTOM RESOLUTIONS"
@@ -211,7 +211,7 @@ export default function StretchPage({ version, downloadUrl }: StretchPageProps) 
         id="gpu"
         eyebrow="Display scaling"
         title="A scaling report that reports what it can actually see."
-        lede="Windows and the GPU driver each own a piece of the scaling chain, and they can quietly disagree. Recon reads the state back and tells you which piece is in charge."
+        lede="Windows and the GPU driver each own a piece of the scaling chain, and they can quietly disagree. Outpeek reads the state back and tells you which piece is in charge."
       >
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 lg:gap-8 items-start">
           <div className="lg:col-span-3">
@@ -228,8 +228,8 @@ export default function StretchPage({ version, downloadUrl }: StretchPageProps) 
           <div className="lg:col-span-2">
             <Callout tone="neutral" title="No driver keys, ever">
               <p>
-                Recon does not write AMD, Intel or NVIDIA driver keys to force a scaling mode. Those settings have
-                caused broken scaling and lost HDMI audio on real machines, so Recon reports the state and leaves the
+                Outpeek does not write AMD, Intel or NVIDIA driver keys to force a scaling mode. Those settings have
+                caused broken scaling and lost HDMI audio on real machines, so Outpeek reports the state and leaves the
                 decision alone.
               </p>
             </Callout>
@@ -241,14 +241,14 @@ export default function StretchPage({ version, downloadUrl }: StretchPageProps) 
       <Section
         id="config"
         eyebrow="Game config"
-        title="Edit the game's own settings from inside Recon."
+        title="Edit the game's own settings from inside Outpeek."
         lede="Crosshair, sensitivity, video options and keybinds, written to the real VALORANT config with a backup taken first."
       >
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 lg:gap-8 items-start">
           <div className="lg:col-span-3">
             <Shot
               src={SHOT.config.src}
-              alt="The Recon VALORANT config editor with crosshair, sensitivity and video settings in one panel."
+              alt="The Outpeek VALORANT config editor with crosshair, sensitivity and video settings in one panel."
               width={SHOT.config.width}
               height={SHOT.config.height}
               caption="VALORANT CONFIG EDITOR"
@@ -259,7 +259,7 @@ export default function StretchPage({ version, downloadUrl }: StretchPageProps) 
               <Feature
                 icon={<FileCog className="w-5 h-5" />}
                 title="Writes the real file"
-                body="The game's own config, so settings survive a restart and a reinstall of Recon."
+                body="The game's own config, so settings survive a restart and a reinstall of Outpeek."
               />
               <Feature
                 icon={<Undo2 className="w-5 h-5" />}
@@ -309,7 +309,7 @@ export default function StretchPage({ version, downloadUrl }: StretchPageProps) 
 /* Head tags — the page owner injects these per URL.                    */
 /* ------------------------------------------------------------------ */
 
-const TITLE = 'True Stretched Resolution 1.45:1 for VALORANT — One-Click Apply | Recon';
+const TITLE = 'True Stretched Resolution 1.45:1 for VALORANT — One-Click Apply | Outpeek';
 const DESCRIPTION =
   'Stretch VALORANT to 1.45:1 for targets 22.6% wider with your sensitivity untouched. One-click apply with a safe-mode watchdog, auto-borderless, a sensitivity matcher, a GPU scaling report and the VALORANT config editor.';
 
@@ -326,12 +326,12 @@ export const seo = {
     url: 'https://reconlab.app/stretch/',
     isPartOf: {
       '@type': 'WebSite',
-      name: 'Recon',
+      name: 'Outpeek',
       url: 'https://reconlab.app/',
     },
     about: {
       '@type': 'SoftwareApplication',
-      name: 'Recon',
+      name: 'Outpeek',
       applicationCategory: 'GameApplication',
       operatingSystem: 'Windows 10, Windows 11',
     },

@@ -359,7 +359,7 @@ check('no raw dump left behind', !dash.includes('whitespace-pre-wrap break-all">
 // exports real trace text, and that "nothing" never reads as success.
 check('export uses the trace ring, not the per-realm logger', dash.includes('buildTrnTraceExport(trnLogRows') && !dash.includes('getRecentLogs('), true);
 check('empty export short-circuits before claiming success', dash.includes('if (lines.length === 0)') && dash.includes('trnExportReport(0,'), true);
-check('export writes a trace-named file', dash.includes('recon-trn-trace-'), true);
+check('export writes a trace-named file', dash.includes('outpeek-trn-trace-'), true);
 
 const expFetch = formatTrnTraceExport(parseTrnTraceLine(1, LINE_FETCH), 1790444233542);
 check('export carries the FULL path, not the short label', expFetch.includes('path=/api/v2/valorant/standard/profile/riot/lil%20ga7ed%23zngr/segments/season?fromIndex=0&toIndex=5') && !expFetch.includes('lil ga7ed#zngr · segments/season'), true);
@@ -385,7 +385,7 @@ check('build of nothing is empty, not a placeholder line', buildTrnTraceExport([
 check('0 of 0 says there is nothing to export', trnExportReport(0, 0, 'Copied').includes('Nothing to export'), true);
 check('0 of N never claims success', trnExportReport(0, 40, 'Copied').includes('Nothing exported'), true);
 check('a real count reports plainly', trnExportReport(12, 40, 'Copied'), 'Copied 12 lines to clipboard (of 40 held)');
-check('download reports plainly', trnExportReport(1, 1, 'Downloaded'), 'Downloaded 1 line as recon-trn-trace-*.txt');
+check('download reports plainly', trnExportReport(1, 1, 'Downloaded'), 'Downloaded 1 line as outpeek-trn-trace-*.txt');
 
 if (failures > 0) {
   console.error(`${failures} failure(s)`);

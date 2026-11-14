@@ -79,7 +79,7 @@ export function lastCrashInfo(): CrashInfo | null {
 export function buildDiagnostics(): string {
   const c = lastCrashInfo();
   const lines = [
-    `Recon diagnostics ${APP_VERSION} (${navigator.platform ?? 'unknown'})`,
+    `Outpeek diagnostics ${APP_VERSION} (${navigator.platform ?? 'unknown'})`,
     `Time: ${new Date(c?.at ?? Date.now()).toISOString()}`,
     `Error: ${(c?.message || 'none recorded').slice(0, 200)}`,
   ];

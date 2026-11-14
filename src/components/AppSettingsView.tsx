@@ -297,7 +297,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
           // Still let the user click and confirm rather than silently disabling.
           setInstallBlocker(null);
           setInstallWarning(
-            'Could not verify the match/overlay state. Updating restarts Recon — continue?'
+            'Could not verify the match/overlay state. Updating restarts Outpeek — continue?'
           );
         });
     };
@@ -434,7 +434,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
     }
     setInstallBlocker(null);
     if (guard.warning) {
-      const ok = window.confirm(`${guard.warning}\n\nRecon will close, install, then reopen.`);
+      const ok = window.confirm(`${guard.warning}\n\nOutpeek will close, install, then reopen.`);
       if (!ok) return;
     }
     setInstallWarning(null);
@@ -662,7 +662,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
               {/* Release Title & Notes */}
               <div className="space-y-1.5">
                 <h3 className="text-xs font-bold text-m3-on-surface">
-                  Recon {updateInfo.version}
+                  Outpeek {updateInfo.version}
                 </h3>
                 <div className="p-3 rounded-xl bg-m3-surface-container-lowest border border-m3-outline-subtle/70 custom-scrollbar max-h-36 overflow-y-auto text-xs text-m3-on-surface-variant font-mono whitespace-pre-wrap leading-relaxed">
                   {updateInfo.notes || 'No release notes provided.'}
@@ -734,7 +734,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
               <div className="flex-1">
                 <span className="text-xs font-bold text-emerald-300">You are on the latest version</span>
                 <p className="text-[11px] text-emerald-400/80">
-                  Recon v{currentVersion} is completely up to date on the{' '}
+                  Outpeek v{currentVersion} is completely up to date on the{' '}
                   <span className="font-semibold underline decoration-emerald-400/40">
                     {updateChannel === 'early-access' ? 'Early Access (Alpha)' : 'Official Stable'}
                   </span>{' '}
@@ -780,14 +780,14 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
                   Start with Windows
                 </div>
                 <div className="text-[11px] text-m3-outline">
-                  Automatically launches Recon on Windows login in the background.
+                  Automatically launches Outpeek on Windows login in the background.
                 </div>
               </div>
               <button
                 type="button"
                 role="switch"
                 aria-checked={autostart}
-                aria-label="Launch Recon when Windows starts"
+                aria-label="Launch Outpeek when Windows starts"
                 onClick={handleToggleAutostart}
                 className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
                   autostart ? 'bg-m3-primary' : 'bg-m3-surface-container-high'
@@ -815,7 +815,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
                 type="button"
                 role="switch"
                 aria-checked={startMinimized}
-                aria-label="Start Recon minimized to the tray"
+                aria-label="Start Outpeek minimized to the tray"
                 onClick={handleToggleStartMinimized}
                 className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
                   startMinimized ? 'bg-m3-primary' : 'bg-m3-surface-container-high'
@@ -843,7 +843,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
                 type="button"
                 role="switch"
                 aria-checked={closeToTray}
-                aria-label="Keep Recon running in the tray when the window closes"
+                aria-label="Keep Outpeek running in the tray when the window closes"
                 onClick={handleToggleCloseToTray}
                 className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
                   closeToTray ? 'bg-m3-primary' : 'bg-m3-surface-container-high'
@@ -1158,7 +1158,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center space-x-2 text-xs font-semibold text-m3-on-surface">
               <Info className="w-4 h-4 text-m3-primary" />
-              <span>Recon Competitive Esports Suite</span>
+              <span>Outpeek Competitive Esports Suite</span>
             </div>
             <span className="text-[10px] font-mono text-m3-outline">
               Version {currentVersion} • Rust / Win32 / Tauri v2

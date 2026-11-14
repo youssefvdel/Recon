@@ -1,4 +1,4 @@
-//! Working-set trim: flush Recon and its WebView2 children back to the OS.
+//! Working-set trim: flush Outpeek and its WebView2 children back to the OS.
 //!
 //! Moved out of lib.rs verbatim, FFI struct and extern block included. Nothing
 //! here is app wiring; it is one Win32 operation with its own declarations.
@@ -33,7 +33,7 @@ extern "system" {
 pub fn trim_working_set() {
     #[cfg(target_os = "windows")]
     unsafe {
-        // 1. Trim host process itself (Recon)
+        // 1. Trim host process itself (Outpeek)
         let handle = GetCurrentProcess();
         SetProcessWorkingSetSize(handle, usize::MAX, usize::MAX);
 

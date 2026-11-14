@@ -308,7 +308,7 @@ export function CtaBand({ version, downloadUrl, title, body, footnote }: CtaBand
                 className="w-full sm:w-auto px-8 py-4 rounded-xl bg-[#b6abf7] hover:bg-[#c8c0fa] text-[#1b1721] font-display font-black text-sm uppercase tracking-wider flex items-center justify-center gap-3 tap-feedback active:scale-[0.97] shadow-[0_0_35px_rgba(182,171,247,0.4)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b6abf7]"
               >
                 <Download className="w-4 h-4 stroke-[2.5]" />
-                <span>Download{version ? ` ${version}` : ' Recon'}</span>
+                <span>Download{version ? ` ${version}` : ' Outpeek'}</span>
               </a>
               <a
                 href={GITHUB_REPO_URL}

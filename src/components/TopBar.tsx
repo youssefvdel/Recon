@@ -456,8 +456,8 @@ export const TopBar: React.FC<TopBarProps> = ({
                 ? 'border-amber-400/80 bg-amber-400/15 text-amber-300'
                 : 'border-m3-outline-subtle text-amber-400/90 hover:text-amber-300 hover:bg-amber-400/10 hover:border-amber-400/40 active:scale-95'
             }`}
-            data-tip="Support Recon on Ko-fi"
-            aria-label="Support Recon on Ko-fi"
+            data-tip="Support Outpeek on Ko-fi"
+            aria-label="Support Outpeek on Ko-fi"
           >
             <Coffee className="w-3.5 h-3.5 transition-transform group-hover:-rotate-12" />
           </button>
@@ -528,7 +528,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                     <span className="text-sm leading-none">🥺☕</span>
                   </h3>
                   <p className="text-micro text-m3-outline leading-snug">
-                    Keeping Recon fast, free, and open-source for everyone!
+                    Keeping Outpeek fast, free, and open-source for everyone!
                   </p>
                 </div>
 

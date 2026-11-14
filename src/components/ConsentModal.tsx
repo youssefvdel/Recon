@@ -32,9 +32,9 @@ export const ConsentModal: React.FC<{ onDone: () => void }> = ({ onDone }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="w-full max-w-md rounded-2xl bg-m3-surface-container border border-m3-outline-subtle p-5 shadow-m3-3">
-        <h3 className="font-display font-black text-base text-m3-on-surface">How Recon uses your data</h3>
+        <h3 className="font-display font-black text-base text-m3-on-surface">How Outpeek uses your data</h3>
         <p className="text-xs text-m3-on-surface-variant mt-1 mb-3">
-          Recon reads your local Riot client. By default nothing about you is uploaded. Both
+          Outpeek reads your local Riot client. By default nothing about you is uploaded. Both
           switches below are options you enable — they stay off unless you turn them on.
         </p>
 

@@ -14,7 +14,7 @@ pub struct PerfSample {
     pub t: u64,
     /// Backend process resident working set in MiB.
     pub rss_mb: f64,
-    /// Recon's own WebView2 process tree resident working set in MiB
+    /// Outpeek's own WebView2 process tree resident working set in MiB
     /// (tree-attributed). The whole set — browser host, GPU, renderers,
     /// services, crashpad — not renderers alone.
     pub webview_mb: f64,

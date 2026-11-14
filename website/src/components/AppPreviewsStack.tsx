@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
-/* Hit-zone body mannequin from Recon Overview.tsx                    */
+/* Hit-zone body mannequin from Outpeek Overview.tsx                    */
 /* ------------------------------------------------------------------ */
 const BodyFigure: React.FC<{ head: number; body: number; legs: number }> = ({ head, body, legs }) => {
   const max = Math.max(head, body, legs, 1);
@@ -51,7 +51,7 @@ export default function AppPreviewsStack() {
     <section id="app-previews" className="relative py-24 sm:py-32 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto z-10">
       <div className="text-center mb-16">
         <h2 className="font-display font-black text-3xl sm:text-5xl text-white tracking-tight text-balance">
-          Explore Recon in Action
+          Explore Outpeek in Action
         </h2>
         <p className="mt-3 text-sm sm:text-base text-zinc-400 max-w-xl mx-auto leading-relaxed">
           Interactive previews built directly from the real application code. Scroll down to cycle through each native module.

@@ -286,7 +286,7 @@ export default function App() {
       ref={containerRef}
       className="relative min-h-screen bg-[#09060d] text-[#e8def8] selection:bg-[#b6abf7]/30 selection:text-white font-sans antialiased overflow-x-clip"
     >
-      {/* Precision ambient lighting matching real Recon Radar colors */}
+      {/* Precision ambient lighting matching real Outpeek Radar colors */}
       <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
         <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-[900px] h-[450px] bg-gradient-to-b from-[#b6abf7]/10 via-[#f4a390]/5 to-transparent blur-[120px] opacity-70" />
         <div className="absolute top-[45%] right-0 w-[500px] h-[500px] bg-[#3a205a]/20 blur-[150px] opacity-60" />
@@ -320,7 +320,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <a href="/" className="flex items-center gap-3 group">
             <div className="relative w-9 h-9 rounded-xl bg-[#140e1b] border border-[#b6abf7]/30 flex items-center justify-center p-1.5 shadow-md group-hover:border-[#b6abf7] transition-colors">
-              <img src="/icon.png" alt="Recon Radar Icon" className="w-full h-full object-contain" />
+              <img src="/icon.png" alt="Outpeek Radar Icon" className="w-full h-full object-contain" />
             </div>
             <div className="flex flex-col">
               <div className="flex items-center gap-2">
@@ -410,7 +410,7 @@ export default function App() {
           {/* max-w-7xl (was max-w-5xl): the letters reserve their width at the
               heaviest weight, so each line always occupies its widest possible
               box. At the old 1024px cap that pushed the violet line past the
-              edge and orphaned "Recon." onto a fourth line; letting the headline
+              edge and orphaned "Outpeek." onto a fourth line; letting the headline
               use the full column keeps the exact same three-line composition. */}
           <VariableProximity
             label="Hardware-Level True Stretched Scaling &"
@@ -434,7 +434,7 @@ export default function App() {
         </h1>
 
         <p className="hero-sub-enter mt-6 text-base sm:text-lg text-zinc-300 max-w-2xl mx-auto leading-relaxed">
-          Recon is a <strong className="text-white font-semibold">Valorant tracker</strong> that watches your matches live, plus true stretched resolution — targets get <strong className="text-white font-mono tabular-nums">+22.6%</strong> wider with zero input lag. It names streamer-mode players, shows the weapon skins people actually use, and floats small see-through widgets over the game.
+          Outpeek is a <strong className="text-white font-semibold">Valorant tracker</strong> that watches your matches live, plus true stretched resolution — targets get <strong className="text-white font-mono tabular-nums">+22.6%</strong> wider with zero input lag. It names streamer-mode players, shows the weapon skins people actually use, and floats small see-through widgets over the game.
         </p>
 
         {/* CTA Section — CSS entrance (see .hero-cta-enter), never gsap.from */}
@@ -444,7 +444,7 @@ export default function App() {
             className="w-full sm:w-auto px-8 py-4 rounded-xl bg-[#b6abf7] hover:bg-[#c8c0fa] text-[#1b1721] font-display font-black text-sm uppercase tracking-wider flex items-center justify-center gap-3 tap-feedback active:scale-[0.97] shadow-[0_0_35px_rgba(182,171,247,0.4)] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b6abf7]"
           >
             <Download className="w-4 h-4 stroke-[2.5]" />
-            <span>Download Recon {release.version}</span>
+            <span>Download Outpeek {release.version}</span>
             <span className="font-mono text-xs px-2 py-0.5 rounded bg-[#1b1721]/15 font-bold tabular-nums">{release.size}</span>
           </button>
 
@@ -511,7 +511,7 @@ export default function App() {
         </div>
 
         <div className="max-w-7xl mx-auto mt-6 pt-4 border-t border-white/5 text-center text-[10px] text-zinc-400">
-          Recon is not endorsed by Riot Games and does not reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. Valorant is a registered trademark of Riot Games, Inc.
+          Outpeek is not endorsed by Riot Games and does not reflect the views or opinions of Riot Games or anyone officially involved in producing or managing Riot Games properties. Valorant is a registered trademark of Riot Games, Inc.
         </div>
       </footer>
     </div>

@@ -149,7 +149,7 @@ pub async fn trn_verify_open(app: AppHandle) -> Result<(), String> {
         .parse()
         .map_err(|e| format!("EDGE_UNAVAILABLE bad verify url: {e}"))?;
     WebviewWindowBuilder::new(&app, VERIFY_LABEL, WebviewUrl::External(url))
-        .title("Recon — tracker.gg verification")
+        .title("Outpeek — tracker.gg verification")
         .inner_size(1100.0, 800.0)
         .center()
         .decorations(true)

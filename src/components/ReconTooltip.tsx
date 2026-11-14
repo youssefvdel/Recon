@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 
-/* App-wide themed tooltip. Any element with `data-tip="..."` gets the Recon
+/* App-wide themed tooltip. Any element with `data-tip="..."` gets the Outpeek
  * hover card instead of the native gray box: same syntax as `title`, on the
  * app's own theme, animated, and flipped below the cursor target when there
  * is no room above. Driven by delegated pointer + focus events, so no

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Probe tracker.gg's keyless profile API exactly like Recon's hidden WebView2
+ * Probe tracker.gg's keyless profile API exactly like Outpeek's hidden WebView2
  * transport would (bare fetch, browser-ish headers, no key), and print what the
  * gate answers. Run it on the machine whose egress you care about: a VPN exit
  * sees a different answer than a residential line.

@@ -67,7 +67,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
       const stack = asText(this.state?.error?.stack);
       const componentStack = asText(this.state?.info?.componentStack);
       return [
-        'Recon crashed',
+        'Outpeek crashed',
         '',
         `message: ${message || '(no message)'}`,
         '',
@@ -81,7 +81,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
         `ua: ${asText(typeof navigator !== 'undefined' ? navigator.userAgent : '')}`,
       ].join('\n');
     } catch {
-      return 'Recon crashed (details unavailable)';
+      return 'Outpeek crashed (details unavailable)';
     }
   }
 
@@ -121,7 +121,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
         >
           <div style={{ maxWidth: '900px', margin: '0 auto' }}>
             <div style={{ fontSize: '15px', fontWeight: 700, marginBottom: '6px' }}>
-              Recon hit an unexpected error
+              Outpeek hit an unexpected error
             </div>
             <div style={{ color: MUTED, marginBottom: '16px' }}>
               The app is still running. Copy the details below and report them — nothing else
@@ -180,7 +180,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
       );
     } catch {
       // Absolute last resort: bare text, no props, no state, no styles.
-      return 'Recon hit an unexpected error. Reload the app. Details are unavailable.';
+      return 'Outpeek hit an unexpected error. Reload the app. Details are unavailable.';
     }
   }
 }

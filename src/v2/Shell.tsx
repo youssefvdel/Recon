@@ -106,7 +106,7 @@ export const Shell: React.FC = () => {
       {/* 56px bar: brand · destinations · live · ⌘K · ⋯ · window controls */}
       <header className="h-14 flex items-center gap-4 px-6 border-b" style={{ borderColor: 'var(--outline)', background: 'var(--surface-1)' }}>
         <span className="font-semibold tracking-tight" style={{ color: 'var(--on-surface)' }}>
-          Recon
+          Outpeek
         </span>
         <nav className="flex items-center gap-1">
           {DESTS.map((d) => (

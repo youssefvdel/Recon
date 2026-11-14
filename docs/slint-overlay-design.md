@@ -1,5 +1,8 @@
 # Slint overlay design spec — Recon HUD sidecar
 
+> Product note (2026-11-14): the app formerly called **Recon** is now **Outpeek**;
+> the sidecar crate is `outpeek-overlay`. This document keeps its historical naming.
+
 Owner: designer (UI/UX only). Rust host, tracker, and TS overlay untouched.
 Date: 2026-11-14. Status: sidecar UI defined; Rust integration is the fixer's job.
 

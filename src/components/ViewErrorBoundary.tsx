@@ -35,7 +35,7 @@ export class ViewErrorBoundary extends React.Component<
               This view failed to load
             </h2>
             <p className="text-xs text-m3-outline leading-relaxed break-words">
-              {this.state.error.message || 'Unknown error'} — the rest of Recon keeps running.
+              {this.state.error.message || 'Unknown error'} — the rest of Outpeek keeps running.
             </p>
             <button
               type="button"

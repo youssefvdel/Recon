@@ -196,7 +196,7 @@ export default function JohnPorkCall({ onDownload, version }: JohnPorkCallProps)
                 <div className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/10">
                   <picture>
                     <source srcSet="/recon-mark.webp" type="image/webp" />
-                    {/* Decorative: the "Recon {version}" label beside it already
+                    {/* Decorative: the "Outpeek {version}" label beside it already
                         names the brand, so the mark is hidden from the tree. */}
                     <img
                       src="/recon-mark.webp"
@@ -207,7 +207,7 @@ export default function JohnPorkCall({ onDownload, version }: JohnPorkCallProps)
                     />
                   </picture>
                   <span className="font-mono text-xs sm:text-sm font-black uppercase tracking-wider text-white">
-                    Recon {version}
+                    Outpeek {version}
                   </span>
                 </div>
                 <span className="font-mono text-xs font-bold text-zinc-400">VS</span>
@@ -239,7 +239,7 @@ export default function JohnPorkCall({ onDownload, version }: JohnPorkCallProps)
                     <th className="pb-2 font-bold text-[#a8f5cc]">
                       <span className="inline-flex items-center gap-1.5">
                         <img src="/recon-mark.webp" alt="" aria-hidden="true" className="w-3.5 h-3.5 object-contain" />
-                        <span>Recon</span>
+                        <span>Outpeek</span>
                       </span>
                     </th>
                     <th className="pb-2 font-bold text-red-400 text-right">

@@ -161,7 +161,7 @@ pub fn set_monitor_primary(device_name: &str) -> Result<Vec<MonitorDevice>, Stri
 }
 
 pub fn launch_cru() -> Result<(), String> {
-    Err("CRU is disabled. Recon uses built-in native Win32/GPU display engine.".to_string())
+    Err("CRU is disabled. Outpeek uses built-in native Win32/GPU display engine.".to_string())
 }
 
 pub fn restart_graphics_driver() -> Result<String, String> {

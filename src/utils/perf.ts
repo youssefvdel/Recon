@@ -5,7 +5,7 @@ export interface PerfSample {
   t: number;
   /** Backend process working set. */
   rss_mb: number;
-  /** Recon's own WebView2 renderers (tree-attributed). */
+  /** Outpeek's own WebView2 renderers (tree-attributed). */
   webview_mb: number;
   /** rss_mb + webview_mb — the prominent series. */
   total_mb: number;

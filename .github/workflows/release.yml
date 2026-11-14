@@ -97,6 +97,20 @@ jobs:
         # bundle.resources at compile time, even in the test profile.
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib
 
+      - name: Build overlay sidecar
+        # bundle.externalBin resolves binaries/<name>-<target-triple>.exe at
+        # build time, so the sidecar has to exist (and be current) before
+        # `tauri build` runs. Without this step every release fails late.
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release \
+            --manifest-path outpeek-overlay/Cargo.toml \
+            --target x86_64-pc-windows-msvc
+          mkdir -p src-tauri/binaries
+          cp outpeek-overlay/target/x86_64-pc-windows-msvc/release/outpeek-overlay.exe \
+             src-tauri/binaries/outpeek-overlay-x86_64-pc-windows-msvc.exe
+
       - name: Build signed bundle
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -119,9 +133,9 @@ jobs:
             exit 0
           }
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
-          $exe = "src-tauri/target/release/bundle/nsis/Recon_${version}_x64-setup.exe"
+          $exe = "src-tauri/target/release/bundle/nsis/Outpeek_${version}_x64-setup.exe"
           if (-not (Test-Path $exe)) { throw "missing $exe" }
-          $pfx = Join-Path $env:RUNNER_TEMP 'recon-sign.pfx'
+          $pfx = Join-Path $env:RUNNER_TEMP 'outpeek-sign.pfx'
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGN_PFX_B64))
           $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
             Sort-Object FullName -Descending | Select-Object -First 1
@@ -148,7 +162,7 @@ jobs:
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
           bunx tauri signer sign \
-            "src-tauri/target/release/bundle/nsis/Recon_${VERSION}_x64-setup.exe"
+            "src-tauri/target/release/bundle/nsis/Outpeek_${VERSION}_x64-setup.exe"
 
       - name: Generate latest.json
         shell: bash
@@ -166,8 +180,8 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           B=src-tauri/target/release/bundle/nsis
           ASSETS=(
-            "$B/Recon_${VERSION}_x64-setup.exe"
-            "$B/Recon_${VERSION}_x64-setup.exe.sig"
+            "$B/Outpeek_${VERSION}_x64-setup.exe"
+            "$B/Outpeek_${VERSION}_x64-setup.exe.sig"
             latest.json
           )
           if gh release view "v${VERSION}" >/dev/null 2>&1; then
@@ -176,7 +190,7 @@ jobs:
           else
             if [[ "$VERSION" == *-* ]]; then PRERELEASE_FLAGS="--prerelease --latest=false"; else PRERELEASE_FLAGS="--latest"; fi
             gh release create "v${VERSION}" "${ASSETS[@]}" \
-              --title "Recon v${VERSION}" \
+              --title "Outpeek v${VERSION}" \
               --notes-file release-notes.md \
               $PRERELEASE_FLAGS
           fi

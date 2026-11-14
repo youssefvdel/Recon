@@ -218,7 +218,7 @@ pub(super) fn proxy_window(app: &AppHandle) -> Result<WebviewWindow, String> {
                 .map_err(|e| format!("EDGE_UNAVAILABLE bad proxy url: {e}"))?,
         ),
     )
-    .title("Recon TRN proxy")
+    .title("Outpeek TRN proxy")
     .inner_size(16.0, 16.0)
     .decorations(false)
     .transparent(true)

@@ -67,7 +67,7 @@ html.lenis body {
   background: #473562;
 }
 
-/* Custom scrollbars from Recon Desktop Client */
+/* Custom scrollbars from Outpeek Desktop Client */
 .custom-scrollbar {
   scrollbar-width: thin !important;
   scrollbar-color: #d0bcff rgba(255, 255, 255, 0.1) !important;

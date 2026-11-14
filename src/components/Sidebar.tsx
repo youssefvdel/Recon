@@ -183,13 +183,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="flex items-center space-x-3 min-w-0">
             <img
               src="/icon.png"
-              alt="Recon"
+              alt="Outpeek"
               className="w-10 h-10 object-contain shrink-0 drop-shadow-[0_4px_12px_rgba(208,188,255,0.25)]"
             />
             <div className="min-w-0">
               <div className="flex items-center space-x-1">
                 <span className="font-display font-black text-xl tracking-tight text-m3-on-surface truncate">
-                  Recon
+                  Outpeek
                 </span>
               </div>
             </div>
@@ -198,8 +198,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             type="button"
             onClick={() => onSelectTab('settings')}
-            data-tip={hasUpdate ? "New update available — click to open Settings" : `Recon v${appVer}`}
-            aria-label={hasUpdate ? `Recon ${appVer}, update available` : `Recon ${appVer}`}
+            data-tip={hasUpdate ? "New update available — click to open Settings" : `Outpeek v${appVer}`}
+            aria-label={hasUpdate ? `Outpeek ${appVer}, update available` : `Outpeek ${appVer}`}
             className={`shrink-0 relative px-2.5 py-0.5 text-micro font-mono font-semibold rounded-full flex items-center gap-1.5 transition-all cursor-pointer ${
               hasUpdate
                 ? 'text-m3-on-primary bg-m3-primary shadow-sm hover:opacity-90'

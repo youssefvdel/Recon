@@ -37,7 +37,7 @@ pub struct UpdateMetadata {
 /// `curl` a GitHub API URL and parse JSON. Unauthenticated and time-boxed; any
 /// failure is a `None`, never a panic or a hang.
 fn github_json(url: &str) -> Option<serde_json::Value> {
-    let user_agent = format!("User-Agent: Recon/{}", CURRENT_VERSION);
+    let user_agent = format!("User-Agent: Outpeek/{}", CURRENT_VERSION);
     let mut cmd = Command::new("curl");
     cmd.args([
         "-s",
@@ -181,9 +181,9 @@ mod tests {
         json!({
             "tag_name": tag,
             "assets": if has_manifest {
-                json!([{ "name": "latest.json" }, { "name": "Recon_0.5.0_x64-setup.exe" }])
+                json!([{ "name": "latest.json" }, { "name": "Outpeek_0.5.0_x64-setup.exe" }])
             } else {
-                json!([{ "name": "Recon_0.5.0_x64-setup.exe" }])
+                json!([{ "name": "Outpeek_0.5.0_x64-setup.exe" }])
             }
         })
     }

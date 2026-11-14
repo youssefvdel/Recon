@@ -423,7 +423,7 @@ fn silent_cmd(program: &str) -> Command {
 /// Launch RiotClientServices.exe as a completely detached, top-level process
 /// via Windows ShellExecuteW. This ensures Riot Client (and any game it launches)
 /// is parented by Windows Explorer / Desktop Shell, NOT recon.exe.
-/// If Recon is closed, updated, or End-Tasked in Task Manager, Valorant and
+/// If Outpeek is closed, updated, or End-Tasked in Task Manager, Valorant and
 /// Riot Client stay 100% alive without being terminated by Windows Job Objects.
 pub fn launch_client_detached(exe_path: &Path) -> Result<(), String> {
     #[cfg(windows)]

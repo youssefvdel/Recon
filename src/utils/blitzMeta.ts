@@ -139,7 +139,7 @@ function aggregate(rows: RawRow[]): BlitzAgentStat[] {
   }));
 }
 
-/** Attaches display name/role from Recon's own agent catalogue (the API only
+/** Attaches display name/role from Outpeek's own agent catalogue (the API only
  *  returns uuids). */
 async function nameAgents(stats: BlitzAgentStat[]): Promise<BlitzAgentStat[]> {
   let info: Record<string, { name: string; role: string }> = {};

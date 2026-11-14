@@ -4,7 +4,7 @@ import path from 'path';
 import { readFileSync, copyFileSync, mkdirSync } from 'node:fs';
 
 /* The app version lives in the parent package.json (the desktop app's single
-   source of truth). Read it here so the embedded <ReconApp /> reports the real
+   source of truth). Read it here so the embedded <OutpeekApp /> reports the real
    version instead of falling back to 0.0.0 in the browser. */
 const pkg = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf-8')

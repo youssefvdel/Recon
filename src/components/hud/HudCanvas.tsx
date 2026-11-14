@@ -654,7 +654,7 @@ export const OverlayView: React.FC = () => {
     } catch (e) {
       raiseNotice({
         kind: 'command',
-        text: `Could not unlock the HUD (${String(e)}) — Esc again, or quit Recon from the tray`,
+        text: `Could not unlock the HUD (${String(e)}) — Esc again, or quit Outpeek from the tray`,
       });
     }
   }, [raiseNotice, clearNotice]);
