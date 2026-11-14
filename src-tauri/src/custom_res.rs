@@ -1138,7 +1138,7 @@ pub fn remove_custom_override(monitor_id: &str) -> Result<String, String> {
     crate::gpu::enforce_all_gpu_scaling();
     if deleted {
         Ok(format!(
-            "Removed EDID override on {} (backup kept in %APPDATA%\\Recon). {}.",
+            "Removed EDID override on {} (backup kept in %APPDATA%\\Outpeek). {}.",
             pnp, restart_msg
         ))
     } else {

@@ -1,14 +1,17 @@
-//! Single source of truth for Recon's user-data directory.
+//! Single source of truth for Outpeek's user-data directory.
 //!
-//! Data lives in `%APPDATA%\Recon` (Roaming), chosen deliberately over
-//! `%LOCALAPPDATA%\Recon`: the latter is the per-user *install* directory
-//! (`recon.exe`, `uninstall.exe`, `trnfetch.exe`, `signing\recon.key`), and an
-//! uninstall/reinstall there would destroy settings and EDID backups.
+//! Data lives in `%APPDATA%\Outpeek` (Roaming), chosen deliberately over
+//! `%LOCALAPPDATA%\Outpeek`: the latter is the per-user *install* directory
+//! (`outpeek.exe`, `uninstall.exe`, `trnfetch.exe`, `signing\outpeek.key`), and
+//! an uninstall/reinstall there would destroy settings and EDID backups.
 //!
-//! Older builds stored everything under `%LOCALAPPDATA%\TrueStretchStudio`;
-//! `migrate_legacy_data()` copies that directory forward per file, never
-//! overwriting and never moving, so an older build still finds its data after
-//! a rollback.
+//! Two copy-only, never-delete migrations feed that directory, both run from
+//! `run()` before the first settings read:
+//!
+//! 1. `migrate_previous_app_data()` — `%APPDATA%\Recon` (pre-rename product
+//!    directory) into `%APPDATA%\Outpeek`, once, guarded by a marker file.
+//! 2. `migrate_legacy_data()` — `%LOCALAPPDATA%\TrueStretchStudio` per file,
+//!    never overwriting, for installs old enough to predate the Roaming move.
 //!
 //! ponytail: `%APPDATA%` roams on domain-joined machines, and
 //! `monitor_res_cache.json` and `settings.json` are machine-specific — on a
@@ -16,11 +19,14 @@
 //! monitors. Acceptable for a personal gaming PC; a future split into
 //! Roaming-vs-Local data is a conscious choice, not an accident.
 
+use crate::fs_migrate;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Directory name under `%APPDATA%`.
-pub const APP_DIR_NAME: &str = "Recon";
+pub const APP_DIR_NAME: &str = "Outpeek";
+/// Pre-rename (2026-11-14) directory name under `%APPDATA%`; migration source.
+pub const PREVIOUS_APP_DIR_NAME: &str = "Recon";
 /// Legacy directory name under `%LOCALAPPDATA%`.
 pub const LEGACY_DIR_NAME: &str = "TrueStretchStudio";
 
@@ -34,6 +40,10 @@ fn app_data_dir_in(base: &Path) -> PathBuf {
     base.join(APP_DIR_NAME)
 }
 
+fn previous_app_data_dir_in(base: &Path) -> PathBuf {
+    base.join(PREVIOUS_APP_DIR_NAME)
+}
+
 fn create_dir(dir: &Path) -> bool {
     match fs::create_dir_all(dir) {
         Ok(()) => true,
@@ -44,11 +54,16 @@ fn create_dir(dir: &Path) -> bool {
     }
 }
 
-/// `%APPDATA%\Recon`, created on demand. `None` when `APPDATA` is missing or
+/// `%APPDATA%\Outpeek`, created on demand. `None` when `APPDATA` is missing or
 /// the directory cannot be created — never panics.
 pub fn app_data_dir() -> Option<PathBuf> {
     let dir = app_data_dir_in(&env_dir("APPDATA")?);
     create_dir(&dir).then_some(dir)
+}
+
+/// `%APPDATA%\Recon`, the pre-rename data directory. Never created here.
+pub fn previous_app_data_dir() -> Option<PathBuf> {
+    Some(previous_app_data_dir_in(&env_dir("APPDATA")?))
 }
 
 /// `%LOCALAPPDATA%\TrueStretchStudio`. Never created — migration source only.
@@ -61,16 +76,18 @@ pub fn data_file(name: &str) -> Option<PathBuf> {
     Some(app_data_dir()?.join(name))
 }
 
-/// Read `name` from the app data dir, falling back to the legacy dir when the
-/// new copy does not exist yet (migration may have been skipped or not run).
+/// Read `name` from the app data dir, falling back to the pre-rename dir and
+/// then the legacy dir when the new copy does not exist yet (migration may have
+/// been skipped, failed, or not run). Copy-forward-on-read keeps a rollback
+/// install working while the new directory fills up.
 pub fn read_data_file(name: &str) -> Option<String> {
     let new_dir = env_dir("APPDATA").map(|base| app_data_dir_in(&base));
+    let prev_dir = previous_app_data_dir();
     let old_dir = legacy_data_dir();
-    match (new_dir, old_dir) {
-        (Some(new), Some(old)) => read_data_file_in(&new, &old, name),
-        (Some(new), None) => fs::read_to_string(new.join(name)).ok(),
-        _ => None,
-    }
+    read_first_present(
+        &[new_dir.as_deref(), prev_dir.as_deref(), old_dir.as_deref()],
+        name,
+    )
 }
 
 /// Write `name` to the app data dir only. Returns the written path on success.
@@ -78,15 +95,50 @@ pub fn write_data_file(name: &str, contents: &str) -> Option<PathBuf> {
     write_data_file_in(&app_data_dir()?, name, contents)
 }
 
-/// Remove `name` from the app data dir and the legacy dir. Used for one-shot
-/// flag files whose migrated legacy copy would otherwise be replayed by the
-/// read fallback on the next launch.
+/// Remove `name` from the app data dir, the pre-rename dir and the legacy dir.
+/// Used for one-shot flag files whose migrated copy would otherwise be replayed
+/// by the read fallback on the next launch.
 pub fn remove_data_file(name: &str) {
     if let Some(base) = env_dir("APPDATA") {
         remove_data_file_in(&app_data_dir_in(&base), name);
+        remove_data_file_in(&previous_app_data_dir_in(&base), name);
     }
     if let Some(dir) = legacy_data_dir() {
         remove_data_file_in(&dir, name);
+    }
+}
+
+// --- %APPDATA%\Recon -> %APPDATA%\Outpeek (product rename, one time) --------
+
+/// `%APPDATA%\Recon` -> `%APPDATA%\Outpeek`. Best effort by construction: every
+/// failure is logged and startup continues, never a panic and never a blocked
+/// boot. The source directory is left intact; `read_data_file` falls back to it,
+/// so a failed or skipped migration still finds the old data.
+pub fn migrate_previous_app_data() {
+    let (Some(src), Some(dst)) = (previous_app_data_dir(), app_data_dir()) else {
+        log::warn!("[paths] rename migration skipped: APPDATA not set");
+        return;
+    };
+    match fs_migrate::migrate_dir(&src, &dst) {
+        Ok(report) => {
+            for failure in &report.failures {
+                log::warn!("[paths] rename migration could not copy '{failure}'");
+            }
+            if report.skipped.is_none() {
+                log::info!(
+                    "[paths] migrated {} file(s) from '{}' to '{}' ({} failed)",
+                    report.copied,
+                    src.display(),
+                    dst.display(),
+                    report.failures.len()
+                );
+            }
+        }
+        Err(e) => log::warn!(
+            "[paths] rename migration '{}' -> '{}' failed: {e}",
+            src.display(),
+            dst.display()
+        ),
     }
 }
 
@@ -153,10 +205,16 @@ fn copy_missing(old: &Path, new: &Path) -> usize {
     copied
 }
 
+#[cfg(test)]
 fn read_data_file_in(new_dir: &Path, legacy_dir: &Path, name: &str) -> Option<String> {
-    fs::read_to_string(new_dir.join(name))
-        .or_else(|_| fs::read_to_string(legacy_dir.join(name)))
-        .ok()
+    read_first_present(&[Some(new_dir), Some(legacy_dir)], name)
+}
+
+/// First directory in `dirs` that holds a readable `name`.
+fn read_first_present(dirs: &[Option<&Path>], name: &str) -> Option<String> {
+    dirs.iter()
+        .flatten()
+        .find_map(|dir| fs::read_to_string(dir.join(name)).ok())
 }
 
 fn remove_data_file_in(dir: &Path, name: &str) {
@@ -190,9 +248,9 @@ mod tests {
     fn tmp_pair(tag: &str) -> (PathBuf, PathBuf) {
         let n = SEQ.fetch_add(1, Ordering::Relaxed);
         let root =
-            std::env::temp_dir().join(format!("recon-paths-{tag}-{}-{n}", std::process::id()));
+            std::env::temp_dir().join(format!("outpeek-paths-{tag}-{}-{n}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
-        let new = root.join("Roaming").join("Recon");
+        let new = root.join("Roaming").join("Outpeek");
         let old = root.join("Local").join("TrueStretchStudio");
         fs::create_dir_all(&new).expect("new dir");
         fs::create_dir_all(&old).expect("legacy dir");
@@ -200,14 +258,17 @@ mod tests {
     }
 
     #[test]
-    fn app_data_dir_resolves_under_base_and_ends_in_recon() {
+    fn app_data_dir_resolves_under_base_and_ends_in_outpeek() {
         // The real `app_data_dir()` reads APPDATA, which tests must not touch;
         // `app_data_dir_in` is the exact same join rule with an injected base.
         let base = Path::new(r"C:\Users\test\AppData\Roaming");
         let dir = app_data_dir_in(base);
-        assert_eq!(dir, base.join("Recon"));
-        assert_eq!(dir.file_name().unwrap(), "Recon");
-        assert_eq!(APP_DIR_NAME, "Recon");
+        assert_eq!(dir, base.join("Outpeek"));
+        assert_eq!(dir.file_name().unwrap(), "Outpeek");
+        assert_eq!(APP_DIR_NAME, "Outpeek");
+        // The rename migration source is the old product directory.
+        assert_eq!(previous_app_data_dir_in(base), base.join("Recon"));
+        assert_eq!(PREVIOUS_APP_DIR_NAME, "Recon");
     }
 
     #[test]
@@ -215,7 +276,7 @@ mod tests {
         let base = Path::new(r"C:\Users\test\AppData\Roaming");
         assert_eq!(
             data_file_in(base, "x.txt"),
-            base.join("Recon").join("x.txt")
+            base.join("Outpeek").join("x.txt")
         );
     }
 

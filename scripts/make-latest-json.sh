@@ -30,7 +30,7 @@ manifest = {
     "platforms": {
         "windows-x86_64": {
             "signature": sig,
-            "url": f"https://github.com/youssefvdel/Recon/releases/download/v{version}/{exe_name}",
+            "url": f"https://github.com/youssefvdel/Outpeek/releases/download/v{version}/{exe_name}",
         }
     },
 }

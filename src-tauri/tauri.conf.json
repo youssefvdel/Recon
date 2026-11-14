@@ -87,7 +87,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/youssefvdel/Recon/releases/latest/download/latest.json"
+        "https://github.com/youssefvdel/Outpeek/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc3RkQ1MTYwRTJFQjE1RTYKUldUbUZldmlZRkg5ZC9BaktNanlMZ1NObWhpZkQ1cVpyM3Rzc0wxZnlDRVJEVWtmeFhweTlhK2sK",
       "windows": {

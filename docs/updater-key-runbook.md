@@ -20,7 +20,7 @@ Current key
    The older `Recon updater key (OLD 6123DF …)` item is superseded; keep it for
    history, it cannot sign anything current.
 2. **GitHub secrets** — `TAURI_SIGNING_PRIVATE_KEY` and
-   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` on `youssefvdel/Recon`. This is what CI
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` on `youssefvdel/Outpeek`. This is what CI
    uses. Secrets are write-only: they cannot be read back.
 3. **This server** — `~/backups/recon/updater-key/` (mode 700: `recon.key`,
    `recon.key.pub`, `key.pass`) plus a copy in

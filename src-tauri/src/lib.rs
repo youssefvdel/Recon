@@ -2,6 +2,7 @@ mod calculator;
 mod accounts;
 mod custom_res;
 mod display;
+mod fs_migrate;
 mod game_config;
 mod gpu;
 mod paths;
@@ -340,8 +341,14 @@ pub fn run() {
     webview_guard::ensure_webview2_or_exit(&log_id);
     boot_marker(&log_id, "webview2 preflight passed");
 
+    // Copy any pre-rename data out of %APPDATA%\Recon before the first read
+    // below (product rename: settings, caches, EDID backups). Once-only, guarded
+    // by a marker file; copy-only, so the old directory stays for rollbacks.
+    paths::migrate_previous_app_data();
+
     // Copy any pre-rename data out of %LOCALAPPDATA%\TrueStretchStudio before
     // the first read below; copy-only, per file, idempotent, failures logged.
+    // Runs after the rename migration so the newest data wins the fill-in.
     paths::migrate_legacy_data();
 
     let initial_shortcut = display::load_saved_hotkey();

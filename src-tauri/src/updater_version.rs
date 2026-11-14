@@ -171,7 +171,7 @@ pub(crate) fn pick_endpoint_tag<'a>(
 // Channel maths and URL shapes
 // ---------------------------------------------------------------------------
 
-pub const DEFAULT_REPO: &str = "youssefvdel/Recon";
+pub const DEFAULT_REPO: &str = "youssefvdel/Outpeek";
 
 /// Which channel name selects the early-access endpoint. Case-insensitive;
 /// every other channel is stable.

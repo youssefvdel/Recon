@@ -705,7 +705,7 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
               {/* Action Buttons */}
               <div className="flex items-center justify-end gap-2.5 pt-1">
                 <button
-                  onClick={() => openExternalUrl('https://github.com/youssefvdel/Recon/releases')}
+                  onClick={() => openExternalUrl('https://github.com/youssefvdel/Outpeek/releases')}
                   className="px-3.5 py-1.5 rounded-xl bg-m3-surface-container-high hover:bg-m3-surface-container-highest text-m3-on-surface text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
@@ -1173,14 +1173,14 @@ export const AppSettingsView: React.FC<AppSettingsViewProps> = ({
               <span>Support on Ko-fi</span>
             </button>
             <button
-              onClick={() => openExternalUrl('https://github.com/youssefvdel/Recon')}
+              onClick={() => openExternalUrl('https://github.com/youssefvdel/Outpeek')}
               className="h-8 px-3 rounded-xl bg-m3-surface-container-high hover:bg-m3-surface-container-highest text-m3-on-surface text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <GitBranch className="w-3.5 h-3.5" />
               <span>GitHub Repository</span>
             </button>
             <button
-              onClick={() => openExternalUrl('https://github.com/youssefvdel/Recon/releases')}
+              onClick={() => openExternalUrl('https://github.com/youssefvdel/Outpeek/releases')}
               className="h-8 px-3 rounded-xl bg-m3-surface-container-high hover:bg-m3-surface-container-highest text-m3-on-surface text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <ExternalLink className="w-3.5 h-3.5" />

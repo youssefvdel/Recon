@@ -6,7 +6,7 @@ import { Download, ExternalLink } from 'lucide-react';
 /* These mirror App.tsx so every page reads as one site.                */
 /* ------------------------------------------------------------------ */
 
-export const GITHUB_REPO_URL = 'https://github.com/youssefvdel/Recon';
+export const GITHUB_REPO_URL = 'https://github.com/youssefvdel/Outpeek';
 export const KOFI_URL = 'https://ko-fi.com/youssefvdel';
 export const SITE_URL = 'https://reconlab.app';
 

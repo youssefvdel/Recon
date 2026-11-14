@@ -6,8 +6,8 @@
   <p>Live lobby scouting, in-game HUD widgets and true stretched resolution — read-only, zero injection.</p>
 
   [![Website](https://img.shields.io/badge/website-reconlab.app-a8f5cc?style=flat-square)](https://reconlab.app)
-  [![GitHub Release](https://img.shields.io/github/v/release/youssefvdel/Recon?style=flat-square&color=d0bcff)](https://github.com/youssefvdel/Recon/releases)
-  [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-blue?style=flat-square)](https://github.com/youssefvdel/Recon)
+  [![GitHub Release](https://img.shields.io/github/v/release/youssefvdel/Outpeek?style=flat-square&color=d0bcff)](https://github.com/youssefvdel/Outpeek/releases)
+  [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-blue?style=flat-square)](https://github.com/youssefvdel/Outpeek)
   [![Tauri](https://img.shields.io/badge/tauri-v2-orange?style=flat-square)](https://tauri.app)
   [![TypeScript](https://img.shields.io/badge/typescript-3178c6?style=flat-square)](https://www.typescriptlang.org)
   [![License](https://img.shields.io/badge/license-Source--Available-blue?style=flat-square)](LICENSE)
@@ -94,7 +94,7 @@ $$\text{stretched\_sens} = \frac{\text{native\_sens}}{k}$$
 
 ## Install
 
-Grab the newest build from the [releases page](https://github.com/youssefvdel/Recon/releases):
+Grab the newest build from the [releases page](https://github.com/youssefvdel/Outpeek/releases):
 
 | Asset | Notes |
 | :--- | :--- |
@@ -122,7 +122,7 @@ no installer wizard. An update that fails signature verification is refused.
 ### Setup
 
 ```bash
-git clone https://github.com/youssefvdel/Recon.git
+git clone https://github.com/youssefvdel/Outpeek.git
 cd Recon
 bun install
 ```

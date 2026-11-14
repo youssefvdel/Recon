@@ -1,6 +1,6 @@
 # ==============================================================================
 #  RECON — VALORANT TRACKER, STRETCHED RESOLUTION & IN-GAME SCOUT
-#  Official Site: https://reconlab.app | GitHub: https://github.com/youssefvdel/Recon
+#  Official Site: https://reconlab.app | GitHub: https://github.com/youssefvdel/Outpeek
 # ==============================================================================
 #
 #  Outpeek is a lightweight Valorant tracker + competitive utility for Windows.

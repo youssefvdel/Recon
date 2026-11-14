@@ -86,7 +86,7 @@ take effect on this setup. Confirm the `.sig` files exist before going further.
 ### 3. Generate `latest.json`
 
 The updater endpoint is
-`https://github.com/youssefvdel/Recon/releases/latest/download/latest.json`, so this
+`https://github.com/youssefvdel/Outpeek/releases/latest/download/latest.json`, so this
 file must be attached to the release. Tauri does not create it outside CI, so there is
 a script:
 
@@ -130,7 +130,7 @@ gh release view "v0.4.0" --json tagName,isDraft,isPrerelease,assets \
 
 # 2. the exact endpoint the app polls resolves
 curl -sL -o /tmp/v.json -w "%{http_code}\n" \
-  https://github.com/youssefvdel/Recon/releases/latest/download/latest.json
+  https://github.com/youssefvdel/Outpeek/releases/latest/download/latest.json
 
 # 3. the manifest points at a real download
 python -c "import json;m=json.load(open('/tmp/v.json'));print(m['version']);print(m['platforms']['windows-x86_64']['url'])"

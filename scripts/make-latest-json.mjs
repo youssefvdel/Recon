@@ -43,7 +43,7 @@ const manifest = {
   platforms: {
     'windows-x86_64': {
       signature,
-      url: `https://github.com/youssefvdel/Recon/releases/download/v${v}/${exeName}`,
+      url: `https://github.com/youssefvdel/Outpeek/releases/download/v${v}/${exeName}`,
     },
   },
 };

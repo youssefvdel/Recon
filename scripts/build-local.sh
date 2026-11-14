@@ -46,7 +46,7 @@ PASSFILE="$HOME/backups/recon/signing/pfx.pass"
 if [ -f "$PFX" ] && [ -f "$PASSFILE" ] && command -v osslsigncode >/dev/null; then
   echo "== sign =="
   osslsigncode sign -pkcs12 "$PFX" -pass "$(cat "$PASSFILE")" \
-    -n "Outpeek" -i "https://github.com/youssefvdel/Recon" \
+    -n "Outpeek" -i "https://github.com/youssefvdel/Outpeek" \
     -h sha256 -ts http://timestamp.digicert.com \
     -in "$STAGE/outpeek.exe" -out "$STAGE/outpeek.signed.exe"
   mv "$STAGE/outpeek.signed.exe" "$STAGE/outpeek.exe"

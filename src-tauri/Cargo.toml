@@ -4,7 +4,7 @@ version = "0.4.4"
 description = "Outpeek - Competitive Stretched Resolution & Utility"
 authors = ["Youssef Adel <contact@reconlab.app>"]
 license = "Proprietary"
-repository = "https://github.com/youssefvdel/Recon"
+repository = "https://github.com/youssefvdel/Outpeek"
 homepage = "https://reconlab.app"
 edition = "2021"
 rust-version = "1.85.0"
@@ -61,4 +61,8 @@ reqwest = { version = "0.13.4", default-features = false, features = [
 ] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 tokio = { version = "=1.53.1", features = ["rt", "macros", "sync", "time", "net"] }
+
+[dev-dependencies]
+# paths.rs migration tests: real directories without touching the user profile.
+tempfile = "3"
 

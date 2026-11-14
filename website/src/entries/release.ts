@@ -16,7 +16,7 @@ export interface ReleaseInfo {
 
 export const DEFAULT_RELEASE: ReleaseInfo = {
   version: 'v0.3.2',
-  downloadUrl: 'https://github.com/youssefvdel/Recon/releases/download/v0.3.2/Recon_0.3.2_x64-setup.exe',
+  downloadUrl: 'https://github.com/youssefvdel/Outpeek/releases/download/v0.3.2/Recon_0.3.2_x64-setup.exe',
   size: '18 MB',
 };
 
@@ -28,7 +28,7 @@ export function useRelease(): ReleaseInfo {
 
     async function fetchLatestRelease() {
       try {
-        const apiRes = await fetch('https://api.github.com/repos/youssefvdel/Recon/releases/latest');
+        const apiRes = await fetch('https://api.github.com/repos/youssefvdel/Outpeek/releases/latest');
         if (apiRes.ok) {
           const apiData = await apiRes.json();
           const exeAsset = apiData.assets?.find((a: { name?: string; browser_download_url?: string; size?: number }) =>

@@ -24,10 +24,10 @@ interface ReleaseInfo {
 
 const DEFAULT_RELEASE: ReleaseInfo = {
   version: 'v0.3.2',
-  downloadUrl: 'https://github.com/youssefvdel/Recon/releases/download/v0.3.2/Recon_0.3.2_x64-setup.exe',
+  downloadUrl: 'https://github.com/youssefvdel/Outpeek/releases/download/v0.3.2/Recon_0.3.2_x64-setup.exe',
   size: '18 MB',
 };
-const GITHUB_REPO_URL = 'https://github.com/youssefvdel/Recon';
+const GITHUB_REPO_URL = 'https://github.com/youssefvdel/Outpeek';
 
 const GithubIcon = ({ className = 'w-4 h-4' }: { className?: string }) => (
   <svg className={className} fill="currentColor" viewBox="0 0 24 24">
@@ -103,7 +103,7 @@ export default function App() {
       // browser blocked that request 100% of the time. The API does send
       // permissive CORS headers.
       try {
-        const apiRes = await fetch('https://api.github.com/repos/youssefvdel/Recon/releases/latest');
+        const apiRes = await fetch('https://api.github.com/repos/youssefvdel/Outpeek/releases/latest');
         if (apiRes.ok) {
           const apiData = await apiRes.json();
           const exeAsset = apiData.assets?.find((a: { name?: string; browser_download_url?: string; size?: number }) =>

@@ -21,7 +21,7 @@ export interface OpsNotice {
 }
 
 const NOTICES_URL =
-  'https://raw.githubusercontent.com/youssefvdel/Recon/main/ops/notices.json';
+  'https://raw.githubusercontent.com/youssefvdel/Outpeek/main/ops/notices.json';
 const PULSE_URL = 'http://154.176.122.255:9736/pulse';
 
 /** Compare dotted versions with optional -prerelease (prerelease < release). */

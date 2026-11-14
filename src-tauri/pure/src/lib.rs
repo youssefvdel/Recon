@@ -28,6 +28,16 @@ pub mod trn_http_rules;
 #[path = "../../src/updater_version.rs"]
 pub mod updater_version;
 
+// Copy-only directory handoff: pure `std`, so the rename-migration tests run on
+// a Linux host without Tauri or Windows.
+#[path = "../../src/fs_migrate.rs"]
+pub mod fs_migrate;
+
+// The app-data path rules depend only on `std`, `log` and `fs_migrate`, so the
+// real `paths` module (and its migration/fallback tests) compile here too.
+#[path = "../../src/paths.rs"]
+pub mod app_paths;
+
 #[cfg(test)]
 mod tests {
     use crate::cache_paths::{
@@ -231,7 +241,7 @@ mod tests {
         });
         assert_eq!(
             endpoint,
-            "https://github.com/youssefvdel/Recon/releases/latest/download/latest.json"
+            "https://github.com/youssefvdel/Outpeek/releases/latest/download/latest.json"
         );
     }
 
@@ -252,7 +262,7 @@ mod tests {
         });
         assert_eq!(
             endpoint,
-            "https://github.com/youssefvdel/Recon/releases/download/v0.5.0-alpha10/latest.json"
+            "https://github.com/youssefvdel/Outpeek/releases/download/v0.5.0-alpha10/latest.json"
         );
     }
 
@@ -261,7 +271,7 @@ mod tests {
         let endpoint = resolve_endpoint_with("beta", |_| None);
         assert_eq!(
             endpoint,
-            "https://github.com/youssefvdel/Recon/releases/download/alpha/latest.json"
+            "https://github.com/youssefvdel/Outpeek/releases/download/alpha/latest.json"
         );
         // Malformed tags only: same fallback, no panic.
         let endpoint = resolve_endpoint_with("early-access", |url| {
