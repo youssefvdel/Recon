@@ -26,6 +26,9 @@ slint = { version = "1.18", default-features = false, features = [
     "compat-1-2",
     "raw-window-handle-06",
     "unstable-fontique-011",
+    # Embedded MCP server (Streamable HTTP) for UI introspection/driving.
+    # Inert unless SLINT_MCP_PORT / --mcp-port is set at runtime.
+    "mcp",
 ] }
 raw-window-handle = "0.6"
 serde = { version = "1", features = ["derive"] }

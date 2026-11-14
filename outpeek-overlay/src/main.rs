@@ -409,6 +409,19 @@ fn main() {
                 i += 1;
                 parent_pid = args.get(i).and_then(|s| s.parse().ok());
             }
+            "--mcp-port" => {
+                // Slint reads SLINT_MCP_PORT at backend init. Set it here only
+                // when the caller did not already provide one, so an operator
+                // can still override with the environment.
+                i += 1;
+                if let Some(port) = args.get(i) {
+                    if std::env::var_os("SLINT_MCP_PORT").is_none() {
+                        // SAFETY: single-threaded at startup, before any
+                        // backend or event loop exists.
+                        unsafe { std::env::set_var("SLINT_MCP_PORT", port) };
+                    }
+                }
+            }
             "--probe" => mode = "probe",
             "--health" => mode = "health",
             "--show-test" => {
