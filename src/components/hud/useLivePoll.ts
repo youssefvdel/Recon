@@ -3,6 +3,8 @@ import type { LiveMatchState } from '../../types';
 import { fetchLiveMatchState, gameData, matchEndHarvest, harvestMatchNames, isMatchStateEqual, mergeLiveMatchStateNonRegressing } from '../../utils/tracker';
 import { isTauri } from '../../utils/ipc';
 import { listen } from '@tauri-apps/api/event';
+import { applyLiveFacts } from '../../live/facts';
+import { skipLiveFactsFallbackFetch, useLiveFacts } from '../../live/useLiveFacts';
 
 export interface UseLivePollArgs {
   setMatchState: Dispatch<SetStateAction<LiveMatchState | null>>;
@@ -13,7 +15,12 @@ export interface UseLivePollArgs {
 
 /* Live-match polling body: static game data fill, 2.5s Riot-local poll with
  * hidden-tab skip and idle backoff, plus cross-window live sync. Moved
- * verbatim from HudCanvas (canvas split 2/3); cadence untouched. */
+ * verbatim from HudCanvas (canvas split 2/3); cadence untouched.
+ *
+ * Phase 2 (`docs/live-rust-pipeline.md`): the Rust live service's
+ * `recon:live-facts` events are the primary source. The interval above stays as
+ * the fallback — it skips its fetch while facts are fresh (< 10s), so the same
+ * loopback source is polled once, not twice. */
 
 export function useLivePoll({ setMatchState, setTierIcons, setAgentMap, setSeasonNames }: UseLivePollArgs): void {
   // Poll live match data ONLY when visible; idle backs off to ~1/3 rate
@@ -25,6 +32,22 @@ export function useLivePoll({ setMatchState, setTierIcons, setAgentMap, setSeaso
   /** When the last poll started — lets a visibility return skip a fetch that
    *  the 2.5s interval has already covered. */
   const lastFetchAt = useRef(0);
+  // Facts are the primary source now; the interval is the fallback.
+  useLiveFacts((facts) => {
+    const merged = applyLiveFacts(prevStateRef.current, facts);
+    if (!merged) return;
+    // A high-confidence idle fact means the presence left the match: Riot only
+    // releases hidden names now, so harvest here instead of waiting for the
+    // next fetch to notice.
+    const harvest = matchEndHarvest(prevStateRef.current, merged);
+    if (harvest) harvestMatchNames(harvest).catch(() => {});
+    if (!isMatchStateEqual(prevStateRef.current, merged)) {
+      prevStateRef.current = merged;
+      phaseRef.current = merged.phase;
+      setMatchState(merged);
+    }
+  });
+
   useEffect(() => {
     gameData()
       .then((d) => {
@@ -38,6 +61,10 @@ export function useLivePoll({ setMatchState, setTierIcons, setAgentMap, setSeaso
       if (typeof document !== 'undefined' && document.hidden) return;
       // A slow Riot round-trip must not let setInterval stack overlapping polls.
       if (ticking.current) return;
+      // The Rust live service polled this same loopback source < 10s ago.
+      // Skip the duplicate fetch; the interval resumes as soon as the event
+      // stream goes quiet.
+      if (skipLiveFactsFallbackFetch()) return;
       if (phaseRef.current === 'idle') {
         // Idle backoff: fetch every 12th tick ≈ 30s (was every 5th ≈ 12.5s).
         // Wake stays instant: the main window polls every 3s and broadcasts

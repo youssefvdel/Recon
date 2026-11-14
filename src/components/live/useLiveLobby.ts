@@ -12,6 +12,8 @@ import {
 } from '../../utils/tracker';
 import { isTauri } from '../../utils/ipc';
 import { useSeasonNames } from '../../hooks/useTrackerData';
+import { applyLiveFacts } from '../../live/facts';
+import { skipLiveFactsFallbackFetch, useLiveFacts } from '../../live/useLiveFacts';
 
 /** The live lobby's data layer, lifted out of the old page shell so the surface
  *  is pure presentation. Behaviour is unchanged: same 3s poll, same
@@ -29,8 +31,25 @@ export function useLiveLobby(): LiveLobby {
    * null start made the old view flash its empty state on every visit. */
   const [state, setState] = useState<LiveMatchState | null>(() => peekLiveMatchState());
   const [tierIcons, setTierIcons] = useState<Record<number, string>>({});
-  const prevStateRef = useRef<LiveMatchState | null>(null);
+  /* Seeded from the seeded state, not null: a fact event that lands before the
+   * first fetch would otherwise merge over an empty prev and blank the lobby
+   * the first paint just showed. */
+  const prevStateRef = useRef<LiveMatchState | null>(state);
   const seasonNames = useSeasonNames();
+
+  // Facts are the primary source (Phase 2); the 3s interval below is fallback.
+  useLiveFacts((facts) => {
+    const merged = applyLiveFacts(prevStateRef.current, facts);
+    if (!merged) return;
+    // High-confidence idle = the presence left the match; harvest hidden names
+    // now rather than waiting for the next fetch to see the transition.
+    const harvest = matchEndHarvest(prevStateRef.current, merged);
+    if (harvest) harvestMatchNames(harvest).catch(() => {});
+    if (!isMatchStateEqual(prevStateRef.current, merged)) {
+      prevStateRef.current = merged;
+      setState(merged);
+    }
+  });
 
   const loadState = useCallback(async () => {
     try {
@@ -55,6 +74,8 @@ export function useLiveLobby(): LiveLobby {
 
   useEffect(() => {
     const poll = () => {
+      // The Rust live service covered this source < 10s ago; do not ask twice.
+      if (skipLiveFactsFallbackFetch()) return;
       fetchLiveMatchState()
         .then((s) => {
           // Match just ended: hidden names are released by Riot only now.

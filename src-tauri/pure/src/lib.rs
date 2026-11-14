@@ -1076,15 +1076,117 @@ mod custom_res_tests {
             "7680x4320 is out of range for the descriptor"
         );
         assert!(build_detailed_timing(4096, 2160, 60).is_err());
-        // The AutomaticPC table's 24/25/30 Hz 1280×720 rows carry a 1760-pixel
-        // horizontal front porch, past the 10-bit H-front field, so those rows
-        // can never be encoded: the add flow errors instead of falling back to
-        // CVT-RB2. Documented here so the rejection stays deliberate.
+        // The AutomaticPC table's 24/25/30 Hz 1280×720 rows carry a 1760/2420
+        // pixel horizontal front porch, past the 10-bit H-front field. Those
+        // rows are skipped and 720p falls back to CVT-RB2, so the add succeeds
+        // (see `low_refresh_720p_falls_back_to_cvt_rb2`); 48 Hz is a real table
+        // hit and keeps its CRU timing.
         for hz in [24, 25, 30] {
-            let err = build_detailed_timing(1280, 720, hz).unwrap_err();
-            assert!(err.contains("10-bit"), "1280x720@{hz}: {err}");
+            assert!(
+                build_detailed_timing(1280, 720, hz).is_ok(),
+                "1280x720@{hz} must be addable"
+            );
         }
         assert!(build_detailed_timing(1280, 720, 48).is_ok(), "the 48 Hz row fits");
+    }
+
+    /// Asserts a packed descriptor describes `w × h` at about `hz` with sane,
+    /// in-field geometry: nothing overflows its EDID Type-0 field and the
+    /// totals really are larger than the active area.
+    fn assert_consistent_timing(d: &Dtd, w: u32, h: u32, hz: u32) {
+        assert_eq!((d.ha, d.va), (w, h), "{w}x{h}@{hz} active size");
+        assert!(d.hb > 0 && d.h_total > w, "{w}x{h}@{hz}: h_total");
+        assert!(d.vb > 0 && d.v_total > h, "{w}x{h}@{hz}: v_total");
+        assert!(
+            d.pclk_10khz >= 1 && d.pclk_10khz <= 65_535,
+            "{w}x{h}@{hz}: pclk"
+        );
+        // Field widths: 10-bit H front/sync, 6-bit V front/sync (the decoders
+        // mask to those widths, so re-encoding must reproduce the same bytes).
+        assert!(
+            d.h_front <= 1023 && d.h_sync <= 1023,
+            "{w}x{h}@{hz}: h fields"
+        );
+        assert!(d.v_front <= 63 && d.v_sync <= 63, "{w}x{h}@{hz}: v fields");
+        assert!(d.v_front + d.v_sync < d.vb, "{w}x{h}@{hz}: back porch");
+        assert!(d.hb <= 4095 && d.vb <= 4095, "{w}x{h}@{hz}: 12-bit blank");
+        assert_eq!(
+            (d.pclk_10khz * 10_000 + d.h_total * d.v_total / 2) / (d.h_total * d.v_total),
+            hz,
+            "{w}x{h}@{hz}: reconstructed refresh"
+        );
+    }
+
+    #[test]
+    fn low_refresh_720p_falls_back_to_cvt_rb2() {
+        // The three unencodable table rows (h_front 2420/2420/1760 > 1023) now
+        // synthesize CVT-RB2 instead of erroring out of the add flow.
+        for hz in [24, 25, 30] {
+            let d = timing(1280, 720, hz);
+            assert_consistent_timing(&d, 1280, 720, hz);
+            // RBv2 blanking: 8 front / 32 sync / 40 back = 80 px.
+            assert_eq!((d.h_front, d.h_sync, d.hb), (8, 32, 80), "1280x720@{hz}");
+            // 720 lines always leave the computed front past the 6-bit field at
+            // these rates (it collapses below the 460 µs blank); the encoder
+            // clamps to the VESA offset and keeps the blank total.
+            assert_eq!((d.v_front, d.v_sync), (1, 8), "1280x720@{hz}");
+        }
+        // Distinct descriptors: each rate is packed on its own pixel clock.
+        let clocks: Vec<u32> = [24, 25, 30]
+            .iter()
+            .map(|hz| timing(1280, 720, *hz).pclk_10khz)
+            .collect();
+        assert!(clocks[0] < clocks[1] && clocks[1] < clocks[2], "{clocks:?}");
+    }
+
+    #[test]
+    fn encodable_table_rows_are_byte_identical_to_the_golden_descriptors() {
+        // Table hits must not be re-derived: these are the exact CRU-port bytes
+        // captured before the CVT-RB2 fallback existed.
+        let golden: &[((u32, u32, u32), [u8; 18])] = &[
+            (
+                (1920, 1080, 60),
+                [
+                    0x02, 0x3A, 0x80, 0x18, 0x71, 0x38, 0x2D, 0x40, 0x58, 0x2C, 0x45, 0x00, 0xE0,
+                    0x0E, 0x11, 0x00, 0x00, 0x1E,
+                ],
+            ),
+            (
+                (1920, 1080, 50),
+                [
+                    0x02, 0x3A, 0x80, 0xD0, 0x72, 0x38, 0x2D, 0x40, 0x10, 0x2C, 0x45, 0x80, 0xE0,
+                    0x0E, 0x11, 0x00, 0x00, 0x1E,
+                ],
+            ),
+            (
+                (1366, 768, 60),
+                [
+                    0x7F, 0x21, 0x56, 0xAA, 0x51, 0x00, 0x1E, 0x30, 0x46, 0x8F, 0x33, 0x00, 0x55,
+                    0xC0, 0x10, 0x00, 0x00, 0x1E,
+                ],
+            ),
+            (
+                (1600, 900, 60),
+                [
+                    0x30, 0x2A, 0x40, 0xC8, 0x60, 0x84, 0x64, 0x30, 0x18, 0x50, 0x13, 0x00, 0x90,
+                    0xE1, 0x10, 0x00, 0x00, 0x1E,
+                ],
+            ),
+            (
+                (1280, 720, 48),
+                [
+                    0x28, 0x23, 0x00, 0xC4, 0x54, 0xD0, 0x1E, 0x20, 0xC0, 0x28, 0x55, 0xC0, 0x40,
+                    0xB4, 0x10, 0x00, 0x00, 0x1E,
+                ],
+            ),
+        ];
+        for ((w, h, hz), bytes) in golden {
+            assert_eq!(
+                &build_detailed_timing(*w, *h, *hz).unwrap(),
+                bytes,
+                "{w}x{h}@{hz} drifted from the CRU table timing"
+            );
+        }
     }
 
     #[test]

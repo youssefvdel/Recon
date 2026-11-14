@@ -390,6 +390,27 @@ const AUTOMATIC_PC: &[AutoPcEntry] = &[
     },
 ];
 
+/// True when a table row fits the EDID Type-0 descriptor fields the packer
+/// enforces afterwards: 12-bit active/blank (the back porches ride in the
+/// blank totals), 10-bit H front/sync and 6-bit V front/sync.
+///
+/// The CRU table keeps raw CRU-native rows whose H front porch is far past
+/// 1023 (the 24/25/30 Hz 1280×720 rows carry 2420/2420/1760 px), which no
+/// monitor descriptor can express. Such a row must fall through to the
+/// CVT-RB2 synthesis instead of failing the add.
+fn table_row_encodable(e: &AutoPcEntry) -> bool {
+    let h_blank = e.h_front + e.h_sync + e.h_back;
+    let v_blank = e.v_front + e.v_sync + e.v_back;
+    e.h_active <= 4095
+        && e.v_active <= 4095
+        && h_blank <= 4095
+        && v_blank <= 4095
+        && e.h_front <= 1023
+        && e.h_sync <= 1023
+        && e.v_front <= 63
+        && e.v_sync <= 63
+}
+
 const MIN_TIME_CVT_RB2: i64 = 460_000_000;
 /// `GetVRateDivisor` for Type 0 (PClockPrecision 100): 1e9 * Fields / 100.
 const VRATE_DIVISOR_TYPE0: i64 = 10_000_000;
@@ -421,7 +442,9 @@ pub(crate) fn cvt_rb2_front(v_active: u32, vrate_mhz: i64) -> u32 {
 /// Strategy mirrors CRU `CalculateAutomaticPC` â†’ `CalculateCVTRB2Standard`:
 /// exact AutomaticPC table hit first (nearest for known CEA modes), else
 /// CVT-RB2 with a second pass on the actual refresh (like CRU's double-pass
-/// `CalculateCVTRB2Standard`).
+/// `CalculateCVTRB2Standard`). A table row whose fields cannot be expressed in
+/// an EDID Type-0 descriptor is skipped and falls through to CVT-RB2 too, so
+/// 1280×720 at 24/25/30 Hz is addable instead of rejected.
 pub fn build_detailed_timing(w: u32, h: u32, hz: u32) -> Result<[u8; 18], String> {
     validate_custom_resolution(w, h, hz)?;
     let vrate: i64 = hz as i64 * 1000;
@@ -447,6 +470,7 @@ pub fn build_detailed_timing(w: u32, h: u32, hz: u32) -> Result<[u8; 18], String
             && e.interlaced == 0
             && vrate >= e.min_vrate
             && vrate <= e.max_vrate
+            && table_row_encodable(e)
     }) {
         h_front = hit.h_front;
         h_sync = hit.h_sync;
